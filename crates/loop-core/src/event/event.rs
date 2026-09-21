@@ -1,7 +1,26 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::attention::{Attention, AttentionResolution};
+use crate::policy::ArtifactKind;
 use crate::task::{Task, TaskId, VerificationEvidence};
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct Artifact {
+    pub id: String,
+    pub kind: ArtifactKind,
+    pub target: String,
+}
+
+impl Artifact {
+    pub fn new(id: impl Into<String>, kind: ArtifactKind, target: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            kind,
+            target: target.into(),
+        }
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Event {
@@ -59,4 +78,14 @@ pub enum EventKind {
     RunCompleted,
     RunCancelled,
     RunResumed,
+    ArtifactCreated(Artifact),
+    ArtifactRemovalRequested {
+        artifact_id: String,
+        kind: ArtifactKind,
+    },
+    ArtifactRemoved {
+        artifact_id: String,
+        kind: ArtifactKind,
+    },
 }
+

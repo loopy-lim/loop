@@ -36,6 +36,11 @@ export type CompletionCheckInput = {
 
 export type ComputeClass = 'deterministic' | 'typed_decision' | 'tiny' | 'fast' | 'balanced' | 'strong' | 'frontier';
 
+export type SkippedArtifactOutput = {
+  artifact: string;
+  reason: string;
+};
+
 export type RunState = 'active' | 'attention' | 'completed' | 'failed' | 'cancelled';
 
 export type TaskSnapshotOutput = {
@@ -91,6 +96,18 @@ export type ClaimRunnableTasksInput = {
 
 export type TaskIdsOutput = {
   taskIds: string[];
+};
+
+export type CleanupRunInput = {
+  databasePath: string;
+  runId: string;
+  keepRecent: number;
+  dryRun: boolean;
+};
+
+export type CleanupRunOutput = {
+  removedArtifacts: string[];
+  skippedArtifacts: SkippedArtifactOutput[];
 };
 
 export type CreateRunInput = {

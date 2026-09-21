@@ -265,6 +265,78 @@
       "execution": "sync"
     },
     {
+      "name": "cleanupRun",
+      "commandId": 17,
+      "inputType": "CleanupRunInput",
+      "outputType": "CleanupRunOutput",
+      "inputSchema": {
+        "title": "CleanupRunInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "dryRun",
+          "keepRecent",
+          "runId"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "keepRecent": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0.0
+          },
+          "dryRun": {
+            "type": "boolean"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "CleanupRunOutput",
+        "type": "object",
+        "required": [
+          "removedArtifacts",
+          "skippedArtifacts"
+        ],
+        "properties": {
+          "removedArtifacts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "skippedArtifacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/SkippedArtifactOutput"
+            }
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "SkippedArtifactOutput": {
+          "type": "object",
+          "required": [
+            "artifact",
+            "reason"
+          ],
+          "properties": {
+            "artifact": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
       "name": "createRun",
       "commandId": 1,
       "inputType": "CreateRunInput",

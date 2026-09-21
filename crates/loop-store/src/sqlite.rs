@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use loop_core::event::{Event, EventKind, ProjectionError, RunProjection};
+use loop_core::event::{Artifact, Event, EventKind, ProjectionError, RunProjection};
+use loop_core::policy::{CleanupRefusal, PurgePlan, RetentionPolicy};
 use loop_core::run::RunState;
 use loop_core::task::TaskState;
 use rusqlite::{params, Connection, Transaction};
@@ -16,6 +17,7 @@ pub struct SqliteStore {
 impl SqliteStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StoreError> {
         let connection = Connection::open(path)?;
+        connection.execute_batch("PRAGMA foreign_keys = ON;")?;
         migrate(&connection)?;
         Ok(Self { connection })
     }
@@ -144,6 +146,93 @@ impl SqliteStore {
         })
     }
 
+    pub fn artifacts(&self, run_id: &str) -> Result<Vec<Artifact>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, kind, content_ref FROM artifacts WHERE run_id = ?1 ORDER BY created_at ASC, id ASC",
+        )?;
+        let rows = statement.query_map([run_id], |row| {
+            let id: String = row.get(0)?;
+            let kind_str: String = row.get(1)?;
+            let target: String = row.get(2)?;
+            Ok((id, kind_str, target))
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            let (id, kind_str, target) = row?;
+            let kind = kind_str.parse().map_err(StoreError::InvalidArtifactKind)?;
+            result.push(Artifact::new(id, kind, target));
+        }
+        Ok(result)
+    }
+
+    pub fn record_artifact(
+        &mut self,
+        run_id: &str,
+        artifact: Artifact,
+    ) -> Result<i64, StoreError> {
+        self.append(&Event::new(run_id, EventKind::ArtifactCreated(artifact)))
+    }
+
+    pub fn runs(&self) -> Result<Vec<(String, RunState)>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, state FROM runs ORDER BY created_at DESC, rowid DESC",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let state_str: String = row.get(1)?;
+            Ok((id, state_str))
+        })?;
+        let mut result = Vec::new();
+        for row in rows {
+            let (id, state_str) = row?;
+            let state = state_str.parse().map_err(StoreError::InvalidRunState)?;
+            result.push((id, state));
+        }
+        Ok(result)
+    }
+
+    pub fn purge_plan(&self, policy: RetentionPolicy) -> Result<PurgePlan, StoreError> {
+        let runs = self.runs()?;
+        let plan = policy.evaluate_runs(runs.iter().map(|(id, state)| (id.as_str(), *state)));
+        Ok(plan)
+    }
+
+    pub fn purge_run(&mut self, run_id: &str) -> Result<bool, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT state FROM runs WHERE id = ?1")?;
+        let mut rows = statement.query([run_id])?;
+        let Some(row) = rows.next()? else {
+            // Already purged or does not exist: idempotent
+            return Ok(false);
+        };
+        let state_str: String = row.get(0)?;
+        let state: RunState = state_str.parse().map_err(StoreError::InvalidRunState)?;
+
+        if !state.is_terminal() {
+            let refusal = loop_core::policy::evaluate_run_record_removal(run_id, state);
+            if let Err(refusal) = refusal {
+                return Err(StoreError::CleanupRefused(refusal));
+            }
+        }
+
+        self.connection
+            .execute("DELETE FROM runs WHERE id = ?1", [run_id])?;
+        Ok(true)
+    }
+
+    pub fn delete_run(&mut self, run_id: &str) -> Result<bool, StoreError> {
+        self.purge_run(run_id)
+    }
+
+    pub fn purge(&mut self, policy: RetentionPolicy) -> Result<PurgePlan, StoreError> {
+        let plan = self.purge_plan(policy)?;
+        for action in &plan.actions {
+            self.purge_run(&action.target)?;
+        }
+        Ok(plan)
+    }
+
     pub fn table_names(&self) -> Result<BTreeSet<String>, StoreError> {
         let mut statement = self.connection.prepare(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
@@ -260,8 +349,22 @@ fn apply_indexes(transaction: &Transaction<'_>, event: &Event) -> Result<(), Sto
         EventKind::RunCompleted => update_run_state(transaction, &event.run_id, "completed")?,
         EventKind::RunCancelled => update_run_state(transaction, &event.run_id, "cancelled")?,
         EventKind::RunResumed => update_run_state(transaction, &event.run_id, "active")?,
+        EventKind::ArtifactCreated(artifact) => {
+            transaction.execute(
+                "INSERT INTO artifacts (id, run_id, kind, content_ref, metadata_json) VALUES (?1, ?2, ?3, ?4, '{}')",
+                params![artifact.id, event.run_id, artifact.kind.to_string(), artifact.target],
+            )?;
+        }
+        EventKind::ArtifactRemovalRequested { .. } => {}
+        EventKind::ArtifactRemoved { artifact_id, .. } => {
+            transaction.execute(
+                "DELETE FROM artifacts WHERE id = ?1 AND run_id = ?2",
+                params![artifact_id, event.run_id],
+            )?;
+        }
     }
     Ok(())
+
 }
 
 fn sync_projection_indexes(
@@ -364,4 +467,10 @@ pub enum StoreError {
     RunNotFound(String),
     #[error("one append batch cannot contain events from multiple runs")]
     MixedRuns,
+    #[error("invalid artifact kind: {0}")]
+    InvalidArtifactKind(String),
+    #[error("invalid run state: {0}")]
+    InvalidRunState(String),
+    #[error(transparent)]
+    CleanupRefused(#[from] CleanupRefusal),
 }

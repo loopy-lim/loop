@@ -1,8 +1,9 @@
 use loop_bridge::{
-    ClaimRunnableTasksInput, CompletionCheckInput, CreateRunInput, RequestAttentionInput,
-    ResolveAttentionInput, RunInput, SubmitPlanInput, TaskSpecInput, WorkerInput,
-    WorkerResultInput, claim_runnable_tasks, create_run, get_snapshot, loop_package,
+    cancel_run, claim_runnable_tasks, cleanup_run, create_run, get_snapshot, loop_package,
     record_worker_result, record_worker_started, request_attention, resolve_attention, submit_plan,
+    ClaimRunnableTasksInput, CleanupRunInput, CompletionCheckInput, CreateRunInput,
+    RequestAttentionInput, ResolveAttentionInput, RunInput, SubmitPlanInput, TaskSpecInput,
+    WorkerInput, WorkerResultInput,
 };
 use loop_core::attention::AttentionKind;
 use loop_core::policy::ComputeClass;
@@ -86,6 +87,7 @@ fn rustra_package_exposes_the_orchestration_contract() {
         "resumeRun",
         "getSnapshot",
         "subscribeEvents",
+        "cleanupRun",
     ] {
         assert!(commands.contains(required), "missing command {required}");
     }
@@ -216,4 +218,69 @@ fn exhausted_worker_failure_creates_retryable_human_attention() {
     .unwrap();
     assert_eq!(resumed.state, RunState::Active);
     assert_eq!(resumed.tasks[0].state, TaskState::Ready);
+}
+
+#[test]
+fn cleanup_run_dry_run_and_execution_and_idempotency() {
+    let dir = tempfile::tempdir().unwrap();
+    let database_path = dir.path().join("loop.db").display().to_string();
+
+    create_run(CreateRunInput {
+        database_path: database_path.clone(),
+        run_id: "run-term".into(),
+    })
+    .unwrap();
+
+    cancel_run(RunInput {
+        database_path: database_path.clone(),
+        run_id: "run-term".into(),
+    })
+    .unwrap();
+
+    // Dry run does not delete
+    let dry_output = cleanup_run(CleanupRunInput {
+        database_path: database_path.clone(),
+        run_id: "run-term".into(),
+        keep_recent: 0,
+        dry_run: true,
+    })
+    .unwrap();
+    assert_eq!(dry_output.removed_artifacts, vec!["run-term"]);
+    assert!(dry_output.skipped_artifacts.is_empty());
+
+    // Still exists
+    assert!(get_snapshot(RunInput {
+        database_path: database_path.clone(),
+        run_id: "run-term".into(),
+    })
+    .is_ok());
+
+    // Actual execution deletes
+    let exec_output = cleanup_run(CleanupRunInput {
+        database_path: database_path.clone(),
+        run_id: "run-term".into(),
+        keep_recent: 0,
+        dry_run: false,
+    })
+    .unwrap();
+    assert_eq!(exec_output.removed_artifacts, vec!["run-term"]);
+    assert!(exec_output.skipped_artifacts.is_empty());
+
+    // Now it's gone
+    assert!(get_snapshot(RunInput {
+        database_path: database_path.clone(),
+        run_id: "run-term".into(),
+    })
+    .is_err());
+
+    // Double-cleanup on already-deleted run is idempotent
+    let idempotent_output = cleanup_run(CleanupRunInput {
+        database_path: database_path.clone(),
+        run_id: "run-term".into(),
+        keep_recent: 0,
+        dry_run: false,
+    })
+    .unwrap();
+    assert!(idempotent_output.removed_artifacts.is_empty());
+    assert!(idempotent_output.skipped_artifacts.is_empty());
 }

@@ -6,7 +6,7 @@
 // DO NOT EDIT — changes will be overwritten and fail codegen --check.
 // ────────────────────────────────────────────────────────────
 
-import type { AddTaskInput, Array_of_EventOutput, ClaimRunnableTasksInput, CreateRunInput, DecisionInput, OperationOutput, RequestAttentionInput, ResolveAttentionInput, RunInput, SnapshotOutput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskIdsOutput, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
+import type { AddTaskInput, Array_of_EventOutput, ClaimRunnableTasksInput, CleanupRunInput, CleanupRunOutput, CreateRunInput, DecisionInput, OperationOutput, RequestAttentionInput, ResolveAttentionInput, RunInput, SnapshotOutput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskIdsOutput, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
 import { createGeneratedFields2, invokeGenerated } from '@rustra/types';
 import type { InvokeOptions } from '@rustra/types';
 
@@ -21,6 +21,11 @@ export function claimRunnableTasks(input: ClaimRunnableTasksInput, options?: Inv
   return invokeGenerated<TaskIdsOutput>(6, 'claimRunnableTasks', input, options);
 }
 claimRunnableTasks.commandId = 'claimRunnableTasks';
+
+export function cleanupRun(input: CleanupRunInput, options?: InvokeOptions): Promise<CleanupRunOutput> {
+  return invokeGenerated<CleanupRunOutput>(17, 'cleanupRun', input, options);
+}
+cleanupRun.commandId = 'cleanupRun';
 
 export const createRun = createGeneratedFields2<CreateRunInput, SnapshotOutput>(1, 'createRun', "databasePath", "runId", 'createRun');
 

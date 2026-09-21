@@ -1,7 +1,7 @@
 use loop_core::attention::{Attention, AttentionKind, AttentionResolution};
 use loop_core::event::{Event, EventKind};
 use loop_core::graph::TaskGraph;
-use loop_core::policy::ComputeClass;
+use loop_core::policy::{ComputeClass, RetentionPolicy};
 use loop_core::run::RunState;
 use loop_core::scheduler::{Capacity, Scheduler};
 use loop_core::task::{
@@ -189,6 +189,26 @@ pub struct SnapshotOutput {
     pub tasks: Vec<TaskSnapshotOutput>,
     pub active_workers: Vec<ActiveWorkerOutput>,
     pub open_attention_ids: Vec<String>,
+}
+
+#[bridge_type]
+pub struct CleanupRunInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub keep_recent: u32,
+    pub dry_run: bool,
+}
+
+#[bridge_type]
+pub struct SkippedArtifactOutput {
+    pub artifact: String,
+    pub reason: String,
+}
+
+#[bridge_type]
+pub struct CleanupRunOutput {
+    pub removed_artifacts: Vec<String>,
+    pub skipped_artifacts: Vec<SkippedArtifactOutput>,
 }
 
 fn bridge_error(code: &'static str, error: impl std::fmt::Display) -> RustraError {
@@ -502,6 +522,88 @@ pub fn subscribe_events(input: SubscribeEventsInput) -> Result<Vec<EventOutput>>
         .collect()
 }
 
+#[command]
+pub fn cleanup_run(input: CleanupRunInput) -> Result<CleanupRunOutput> {
+    let mut store = store(&input.database_path)?;
+    let policy = RetentionPolicy::new(input.keep_recent as usize);
+
+    if !input.run_id.trim().is_empty() {
+        let run_id = &input.run_id;
+        let runs = store
+            .runs()
+            .map_err(|error| bridge_error("runs_failed", error))?;
+        let Some((_, state)) = runs.iter().find(|(id, _)| id == run_id) else {
+            // Run doesn't exist or already removed: double-purge is idempotent
+            return Ok(CleanupRunOutput {
+                removed_artifacts: vec![],
+                skipped_artifacts: vec![],
+            });
+        };
+
+        if !state.is_terminal() {
+            return Ok(CleanupRunOutput {
+                removed_artifacts: vec![],
+                skipped_artifacts: vec![SkippedArtifactOutput {
+                    artifact: run_id.clone(),
+                    reason: format!("run {} is in non-terminal state {:?}", run_id, state),
+                }],
+            });
+        }
+
+        let removable = policy.select_removable_runs(runs.iter().map(|(id, state)| (id.as_str(), *state)));
+        if input.keep_recent > 0 && !removable.contains(&run_id.as_str()) {
+            return Ok(CleanupRunOutput {
+                removed_artifacts: vec![],
+                skipped_artifacts: vec![SkippedArtifactOutput {
+                    artifact: run_id.clone(),
+                    reason: format!(
+                        "run {} is retained by retention policy (keep_recent = {})",
+                        run_id, input.keep_recent
+                    ),
+                }],
+            });
+        }
+
+        if !input.dry_run {
+            store
+                .purge_run(run_id)
+                .map_err(|error| bridge_error("purge_failed", error))?;
+        }
+
+        Ok(CleanupRunOutput {
+            removed_artifacts: vec![run_id.clone()],
+            skipped_artifacts: vec![],
+        })
+    } else {
+        let plan = store
+            .purge_plan(policy)
+            .map_err(|error| bridge_error("purge_plan_failed", error))?;
+        let removed_artifacts: Vec<String> =
+            plan.actions.iter().map(|a| a.target.clone()).collect();
+        let skipped_artifacts: Vec<SkippedArtifactOutput> = plan
+            .refusals
+            .into_iter()
+            .map(|r| SkippedArtifactOutput {
+                artifact: r.target,
+                reason: r.reason,
+            })
+            .collect();
+
+        if !input.dry_run {
+            for action in &plan.actions {
+                store
+                    .purge_run(&action.target)
+                    .map_err(|error| bridge_error("purge_failed", error))?;
+            }
+        }
+
+        Ok(CleanupRunOutput {
+            removed_artifacts,
+            skipped_artifacts,
+        })
+    }
+}
+
 fn append(path: &str, event: Event) -> Result<OperationOutput> {
     let mut store = store(path)?;
     append_and_notify(&mut store, &event, "event_append_failed")?;
@@ -559,7 +661,9 @@ fn ensure_failure_attention(
     if task.state != loop_core::task::TaskState::Attention {
         return Ok(());
     }
-    let attention_id = format!("failure-{}-{}", task_id, task.attempt);
+    // Attention ids are globally unique in the store, so scope them by run
+    // to survive re-runs of the same task graph in a different run.
+    let attention_id = format!("failure-{}-{}-{}", run_id, task_id, task.attempt);
     if projection.attention.contains_key(&attention_id) {
         return Ok(());
     }
@@ -669,7 +773,8 @@ pub fn loop_package() -> &'static Package {
             cancel_run,
             resume_run,
             get_snapshot,
-            subscribe_events
+            subscribe_events,
+            cleanup_run
         )
         .event::<RunChangedEvent>("loop.run_changed")
         .build();

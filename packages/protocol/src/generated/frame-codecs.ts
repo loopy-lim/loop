@@ -162,7 +162,7 @@ function _pcDecodeF32(buf: Uint8Array, offset: number): { value: number; bytesRe
 
 import { createComplexCodec, createSchemaPostcardCodec } from '@rustra/types';
 import type { FrameCodec, RustraError, ComplexSchema } from '@rustra/types';
-import type { ActiveWorkerOutput, AddTaskInput, Array_of_EventOutput, AttentionKind, CheckResultInput, ClaimRunnableTasksInput, CompletionCheckInput, ComputeClass, CreateRunInput, DecisionInput, EventOutput, OperationOutput, RequestAttentionInput, ResolveAttentionInput, RunInput, RunState, SnapshotOutput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskIdsOutput, TaskKind, TaskSnapshotOutput, TaskSpecInput, TaskState, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
+import type { ActiveWorkerOutput, AddTaskInput, Array_of_EventOutput, AttentionKind, CheckResultInput, ClaimRunnableTasksInput, CleanupRunInput, CleanupRunOutput, CompletionCheckInput, ComputeClass, CreateRunInput, DecisionInput, EventOutput, OperationOutput, RequestAttentionInput, ResolveAttentionInput, RunInput, RunState, SkippedArtifactOutput, SnapshotOutput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskIdsOutput, TaskKind, TaskSnapshotOutput, TaskSpecInput, TaskState, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
 
 export const addTaskCodec: FrameCodec<AddTaskInput, OperationOutput> = {
   commandId: 4,
@@ -433,6 +433,106 @@ export const claimRunnableTasksCodec: FrameCodec<ClaimRunnableTasksInput, TaskId
       result.taskIds = _arr;
     }
     return { ok: true, result: result as TaskIdsOutput };
+  },
+};
+
+export const cleanupRunCodec: FrameCodec<CleanupRunInput, CleanupRunOutput> = {
+  commandId: 17,
+  execution: "sync",
+
+  encode(args: CleanupRunInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(CleanupRunInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 17, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    parts.push(_pcEncodeString(args.runId));
+    parts.push(_pcEncodeVarint(args.keepRecent));
+    parts.push(new Uint8Array([args.dryRun ? 1 : 0]));
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  encodeInto(args: CleanupRunInput, reuse?: Uint8Array): Uint8Array {
+    let out = reuse ?? new Uint8Array(64);
+    let w = 0;
+    const ensure = (need: number) => {
+      if (w + need <= out.length) return;
+      const grown = new Uint8Array(Math.max(out.length * 2, w + need));
+      grown.set(out.subarray(0, w));
+      out = grown;
+    };
+    ensure(2);
+    out[w++] = 17; out[w++] = 0;
+    { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { let _v = args.keepRecent; do { ensure(1); out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; }
+    { ensure(1); out[w++] = args.dryRun ? 1 : 0; }
+    return out.subarray(0, w);
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: CleanupRunOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<CleanupRunOutput> = {};
+    {
+      const _len = _pcDecodeVarint(u8, offset);
+      offset += _len.bytesRead;
+      const _arr: string[] = new Array(_len.value);
+      for (let _i = 0; _i < _len.value; _i++) {
+        const _v = _pcDecodeString(u8, offset);
+        _arr[_i] = _v.value;
+        offset += _v.bytesRead;
+      }
+      result.removedArtifacts = _arr;
+    }
+    {
+      const _len = _pcDecodeVarint(u8, offset);
+      offset += _len.bytesRead;
+      const _arr: SkippedArtifactOutput[] = new Array(_len.value);
+      for (let _i = 0; _i < _len.value; _i++) {
+        const _obj: SkippedArtifactOutput = {} as SkippedArtifactOutput;
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.artifact = _v.value;
+          offset += _v.bytesRead;
+        }
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.reason = _v.value;
+          offset += _v.bytesRead;
+        }
+        _arr[_i] = _obj;
+      }
+      result.skippedArtifacts = _arr;
+    }
+    return { ok: true, result: result as CleanupRunOutput };
   },
 };
 
@@ -1520,7 +1620,7 @@ export const submitPlanCodec: FrameCodec<SubmitPlanInput, SubmitPlanOutput> = {
   },
 };
 
-export const subscribeEventsCodec = createSchemaPostcardCodec(16, {"title":"SubscribeEventsInput","type":"object","required":["afterSequence","databasePath","limit","runId"],"properties":{"databasePath":{"type":"string"},"runId":{"type":"string"},"afterSequence":{"type":"integer","format":"int64"},"limit":{"type":"integer","format":"uint16","minimum":0}}} as ComplexSchema, {"title":"Array_of_EventOutput","type":"array","items":{"$ref":"#/definitions/EventOutput"}} as ComplexSchema, {"TaskSpecInput":{"type":"object","required":["completionChecks","dependencies","id","kind","maxAttempts","maximumCompute","minimumCompute","preferredCompute","readScope","requirements","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"requirements":{"type":"array","items":{"type":"string"}},"completionChecks":{"type":"array","items":{"$ref":"#/definitions/CompletionCheckInput"}},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"maxAttempts":{"type":"integer","format":"uint16","minimum":0}}},"TaskKind":{"type":"string","enum":["research","decision","implementation","verification","integration"]},"CompletionCheckInput":{"type":"object","required":["args","command","id","timeoutMs"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":["string","null"]},"timeoutMs":{"type":"integer","format":"uint64","minimum":0}}},"ComputeClass":{"type":"string","enum":["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"]},"RunState":{"type":"string","enum":["active","attention","completed","failed","cancelled"]},"TaskSnapshotOutput":{"type":"object","required":["attempt","id","kind","preferredCompute","state","title"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"state":{"$ref":"#/definitions/TaskState"},"attempt":{"type":"integer","format":"uint16","minimum":0},"preferredCompute":{"$ref":"#/definitions/ComputeClass"}}},"TaskState":{"type":"string","enum":["pending","ready","running","verifying","attention","blocked","done","failed","cancelled"]},"ActiveWorkerOutput":{"type":"object","required":["id","taskId"],"properties":{"id":{"type":"string"},"taskId":{"type":"string"}}},"CheckResultInput":{"type":"object","required":["id","passed"],"properties":{"id":{"type":"string"},"passed":{"type":"boolean"}}},"AttentionKind":{"type":"string","enum":["question","decision","approval","conflict","failure"]},"EventOutput":{"type":"object","required":["payloadJson","sequence"],"properties":{"sequence":{"type":"integer","format":"int64"},"payloadJson":{"type":"string"}}}} as Record<string, ComplexSchema>, true)! as FrameCodec<SubscribeEventsInput, Array_of_EventOutput>;
+export const subscribeEventsCodec = createSchemaPostcardCodec(16, {"title":"SubscribeEventsInput","type":"object","required":["afterSequence","databasePath","limit","runId"],"properties":{"databasePath":{"type":"string"},"runId":{"type":"string"},"afterSequence":{"type":"integer","format":"int64"},"limit":{"type":"integer","format":"uint16","minimum":0}}} as ComplexSchema, {"title":"Array_of_EventOutput","type":"array","items":{"$ref":"#/definitions/EventOutput"}} as ComplexSchema, {"TaskSpecInput":{"type":"object","required":["completionChecks","dependencies","id","kind","maxAttempts","maximumCompute","minimumCompute","preferredCompute","readScope","requirements","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"requirements":{"type":"array","items":{"type":"string"}},"completionChecks":{"type":"array","items":{"$ref":"#/definitions/CompletionCheckInput"}},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"maxAttempts":{"type":"integer","format":"uint16","minimum":0}}},"TaskKind":{"type":"string","enum":["research","decision","implementation","verification","integration"]},"CompletionCheckInput":{"type":"object","required":["args","command","id","timeoutMs"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":["string","null"]},"timeoutMs":{"type":"integer","format":"uint64","minimum":0}}},"ComputeClass":{"type":"string","enum":["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"]},"SkippedArtifactOutput":{"type":"object","required":["artifact","reason"],"properties":{"artifact":{"type":"string"},"reason":{"type":"string"}}},"RunState":{"type":"string","enum":["active","attention","completed","failed","cancelled"]},"TaskSnapshotOutput":{"type":"object","required":["attempt","id","kind","preferredCompute","state","title"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"state":{"$ref":"#/definitions/TaskState"},"attempt":{"type":"integer","format":"uint16","minimum":0},"preferredCompute":{"$ref":"#/definitions/ComputeClass"}}},"TaskState":{"type":"string","enum":["pending","ready","running","verifying","attention","blocked","done","failed","cancelled"]},"ActiveWorkerOutput":{"type":"object","required":["id","taskId"],"properties":{"id":{"type":"string"},"taskId":{"type":"string"}}},"CheckResultInput":{"type":"object","required":["id","passed"],"properties":{"id":{"type":"string"},"passed":{"type":"boolean"}}},"AttentionKind":{"type":"string","enum":["question","decision","approval","conflict","failure"]},"EventOutput":{"type":"object","required":["payloadJson","sequence"],"properties":{"sequence":{"type":"integer","format":"int64"},"payloadJson":{"type":"string"}}}} as Record<string, ComplexSchema>, true)! as FrameCodec<SubscribeEventsInput, Array_of_EventOutput>;
 
 export const updateTaskCodec: FrameCodec<UpdateTaskInput, OperationOutput> = {
   commandId: 5,

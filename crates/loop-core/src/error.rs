@@ -12,4 +12,7 @@ pub enum CoreError {
     CapacityExhausted,
     #[error("human attention is required: {0}")]
     AttentionRequired(String),
+    #[error("cleanup refused: {0}")]
+    CleanupRefused(#[from] crate::policy::CleanupRefusal),
 }
+
