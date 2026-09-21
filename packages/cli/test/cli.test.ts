@@ -70,49 +70,106 @@ test("doctor checks installed commands without invoking a model", async () => {
   expect(probed.every(([, args]) => args.length === 1 && args[0] === "--version")).toBe(true);
 });
 
-test("run launches the Pi Lead through the injected Herdr boundary", async () => {
+test("loop run starts the interactive Loop agent in the current terminal", async () => {
   const capture = output();
-  const launches: unknown[] = [];
+  const invocations: unknown[] = [];
   const exitCode = await runCli(
-    ["run", "Implement", "feature", "X", "--config", join(root, "config"), "--json"],
+    ["run", "Implement", "feature", "X", "--config", join(root, "config")],
     {
       io: capture.io,
-      leadLauncher: async (input) => {
-        launches.push(input);
-        return { workerId: "lead-1", workspaceId: "workspace-1", paneId: "pane-1" };
+      leadRunner: async (input: unknown) => {
+        invocations.push(input);
+        return 0;
       },
+      executablePath: "/opt/loop/loop",
     },
   );
 
   expect(exitCode).toBe(0);
-  expect(launches).toHaveLength(1);
-  expect(launches[0]).toMatchObject({ intent: "Implement feature X" });
-  expect(JSON.parse(capture.stdout())).toMatchObject({
-    state: "lead_started",
-    workerId: "lead-1",
+  expect(invocations).toEqual([{
+    command: "pi",
+    args: [
+      "--no-extensions",
+      "--extension",
+      "/opt/loop/loop-pi-extension.js",
+      "--provider",
+      "zai",
+      "--model",
+      "glm-5.3-flash",
+      "--",
+      "Implement feature X",
+    ],
+    cwd: process.cwd(),
+  }]);
+  expect(capture.stdout()).toBe("");
+});
+
+test("interactive Loop agent loads only its adjacent extension", async () => {
+  const cli = await import("../src/main") as typeof import("../src/main") & {
+    buildInteractiveLeadInvocation?: (input: {
+      command: string;
+      provider: string;
+      model: string;
+      intent: string;
+      cwd: string;
+      executablePath: string;
+      environment: Record<string, string | undefined>;
+    }) => { command: string; args: string[]; cwd: string };
+  };
+
+  expect(cli.buildInteractiveLeadInvocation?.({
+    command: "pi",
+    provider: "zai",
+    model: "glm-5.3-flash",
+    intent: "",
+    cwd: "/project",
+    executablePath: "/usr/local/bin/loop",
+    environment: { LOOP_PI_EXTENSION: "/tmp/override.js" },
+  })).toEqual({
+    command: "pi",
+    args: [
+      "--no-extensions",
+      "--extension",
+      "/tmp/override.js",
+      "--provider",
+      "zai",
+      "--model",
+      "glm-5.3-flash",
+    ],
+    cwd: "/project",
   });
 });
 
-test("bare loop launches an idle Pi Lead without sending an initial prompt", async () => {
+test("bare loop starts the interactive Loop agent without launching or attaching Herdr", async () => {
   const capture = output();
-  const launches: Array<{ intent: string }> = [];
+  const invocations: unknown[] = [];
   const exitCode = await runCli(
-    ["--config", join(root, "config"), "--json"],
+    ["--config", join(root, "config")],
     {
       io: capture.io,
-      leadLauncher: async (input) => {
-        launches.push(input);
-        return { workerId: "lead-1", workspaceId: "workspace-1", paneId: "pane-1" };
+      leadRunner: async (input: unknown) => {
+        invocations.push(input);
+        return 0;
       },
+      executablePath: "/opt/loop/loop",
     },
   );
 
   expect(exitCode).toBe(0);
-  expect(launches).toEqual([expect.objectContaining({ intent: "" })]);
-  expect(JSON.parse(capture.stdout())).toMatchObject({
-    state: "lead_started",
-    workerId: "lead-1",
-  });
+  expect(invocations).toEqual([{
+    command: "pi",
+    args: [
+      "--no-extensions",
+      "--extension",
+      "/opt/loop/loop-pi-extension.js",
+      "--provider",
+      "zai",
+      "--model",
+      "glm-5.3-flash",
+    ],
+    cwd: process.cwd(),
+  }]);
+  expect(capture.stdout()).toBe("");
   expect(capture.stderr()).toBe("");
 });
 

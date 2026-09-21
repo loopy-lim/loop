@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 
 import {
@@ -25,23 +25,15 @@ export interface ProbeResult {
 export interface RunCliOptions {
   io?: CliIo;
   probe?: (command: string, args: string[]) => Promise<ProbeResult>;
-  leadLauncher?: (input: LeadLaunchInput) => Promise<LeadLaunchResult>;
+  leadRunner?: (input: InteractiveLeadInvocation) => Promise<number>;
+  executablePath?: string;
   stdin?: string;
 }
 
-export interface LeadLaunchInput {
-  intent: string;
-  runId: string;
-  projectRoot: string;
+export interface InteractiveLeadInvocation {
   command: string;
-  provider: string;
-  model: string;
-}
-
-export interface LeadLaunchResult {
-  workerId: string;
-  workspaceId: string;
-  paneId: string;
+  args: string[];
+  cwd: string;
 }
 
 const defaultIo: CliIo = {
@@ -59,7 +51,12 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
 
   try {
     if (!parsed.command) {
-      return await startPiLead("", parsed, io, options.leadLauncher ?? launchPiLead);
+      return await startInteractiveLead(
+        "",
+        parsed,
+        options.leadRunner ?? runInteractiveLead,
+        options.executablePath ?? process.execPath,
+      );
     }
     if (parsed.command === "doctor") {
       const config = configuration(parsed);
@@ -89,7 +86,12 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
     if (parsed.command === "run") {
       const intent = parsed.operands.join(" ").trim();
       if (!intent) throw new UsageError("run requires <intent>");
-      return await startPiLead(intent, parsed, io, options.leadLauncher ?? launchPiLead);
+      return await startInteractiveLead(
+        intent,
+        parsed,
+        options.leadRunner ?? runInteractiveLead,
+        options.executablePath ?? process.execPath,
+      );
     }
     if (parsed.command === "verify-install") {
       const receipt = await verifyInstall(process.cwd());
@@ -209,33 +211,22 @@ function configuration(parsed: ParsedArguments): LoopConfig {
   });
 }
 
-async function startPiLead(
+async function startInteractiveLead(
   intent: string,
   parsed: ParsedArguments,
-  io: CliIo,
-  launcher: (input: LeadLaunchInput) => Promise<LeadLaunchResult>,
+  runner: (input: InteractiveLeadInvocation) => Promise<number>,
+  executablePath: string,
 ): Promise<number> {
   const config = configuration(parsed);
-  const runId = `loop-${randomUUID()}`;
-  const launched = await launcher({
-    intent,
-    runId,
-    projectRoot: process.cwd(),
+  return runner(buildInteractiveLeadInvocation({
     command: config.lead.command,
     provider: config.lead.provider,
     model: config.lead.model,
-  });
-  const result = { runId, state: "lead_started", ...launched };
-  if (parsed.json) io.stdout(`${JSON.stringify(result)}\n`);
-  else {
-    io.stdout([
-      `Run ${runId}`,
-      "State: Pi Lead started",
-      `Worker: ${launched.workerId}`,
-      `Pane: ${launched.paneId}`,
-    ].join("\n") + "\n");
-  }
-  return 0;
+    intent,
+    cwd: process.cwd(),
+    executablePath,
+    environment: process.env,
+  }));
 }
 
 async function doctor(
@@ -396,35 +387,42 @@ function formatSnapshot(command: string, snapshot: {
   ].join("\n") + "\n";
 }
 
-async function launchPiLead(input: LeadLaunchInput): Promise<LeadLaunchResult> {
-  if (input.command !== "pi") {
-    throw new Error("Herdr's Pi agent kind requires the canonical pi command");
-  }
-  const { HerdrWorkerRuntime } = await import("@loop/herdr");
-  const extension = process.env.LOOP_PI_EXTENSION || adjacentPiExtension();
-  const args = ["--provider", input.provider, "--model", input.model];
-  if (extension) args.push("--extension", extension);
-  const prompt = input.intent.trim()
-    ? [
-        input.intent,
-        "",
-        `Use ${input.runId} as the runId when calling loop_run.`,
-      ].join("\n")
-    : "";
-  const handle = await new HerdrWorkerRuntime({ command: "herdr" }).start({
-    projectRoot: input.projectRoot,
-    runId: input.runId,
-    taskId: "lead",
-    workerName: `${input.runId}-lead`,
-    worktree: input.projectRoot,
-    execution: { type: "agent", kind: "pi", args },
-    prompt,
+export function buildInteractiveLeadInvocation(input: {
+  command: string;
+  provider: string;
+  model: string;
+  intent: string;
+  cwd: string;
+  executablePath: string;
+  environment: Record<string, string | undefined>;
+}): InteractiveLeadInvocation {
+  const adjacentExtension = join(dirname(input.executablePath), "loop-pi-extension.js");
+  const developmentExtension = resolve(import.meta.dir, "../../../dist/loop-pi-extension.js");
+  const extension = input.environment.LOOP_PI_EXTENSION
+    || (basename(input.executablePath) === "loop" ? adjacentExtension : developmentExtension);
+  const args = [
+    "--no-extensions",
+    "--extension",
+    extension,
+    "--provider",
+    input.provider,
+    "--model",
+    input.model,
+  ];
+  if (input.intent.trim()) args.push("--", input.intent.trim());
+  return { command: input.command, args, cwd: input.cwd };
+}
+
+function runInteractiveLead(input: InteractiveLeadInvocation): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(input.command, input.args, {
+      cwd: input.cwd,
+      shell: false,
+      stdio: "inherit",
+    });
+    child.on("error", reject);
+    child.on("close", (code) => resolve(code ?? 1));
   });
-  return {
-    workerId: handle.workerId,
-    workspaceId: handle.workspaceId,
-    paneId: handle.paneId,
-  };
 }
 
 async function verifyInstall(workingDirectory: string): Promise<{
@@ -500,11 +498,6 @@ function offlineTask(
   };
 }
 
-function adjacentPiExtension(): string | undefined {
-  const path = join(dirname(process.execPath), "loop-pi-extension.js");
-  return existsSync(path) ? path : undefined;
-}
-
 function parseExecutionPayload(value: string): {
   runId: string;
   workingDirectory: string;
@@ -556,7 +549,7 @@ function help(): string {
   return `Loop — dependency-aware engineering scheduler
 
 Usage:
-  loop                                Start an idle Pi Lead inside Herdr
+  loop                                Start the interactive Loop agent in this terminal
   loop doctor [--auth] [--json]
   loop status <run-id> [--json]
   loop graph <run-id>
@@ -565,7 +558,7 @@ Usage:
   loop models [--json]
   loop cancel <run-id>
   loop resume <run-id>
-  loop run <intent>                 Start the Pi Lead inside Herdr
+  loop run <intent>                 Start the interactive Loop agent with an initial request
   loop verify-install [--json]      Run the offline fake-provider acceptance
 
 Options:
