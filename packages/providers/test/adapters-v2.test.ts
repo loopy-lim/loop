@@ -142,10 +142,23 @@ test("Antigravity adapter discovers models and uses stream-json execution", asyn
   expect(capabilities.models).toEqual(["gemini-3.1-pro"]);
   await provider.start(input);
   const launch = runner.calls.find((call) => call.command === "agy" && call.args.includes("--output-format"));
-  expect(launch?.args).toContain("stream-json");
-  expect(launch?.args).not.toContain("--workspace");
+  expect(launch?.args).toEqual([
+    "--output-format",
+    "stream-json",
+    "--sandbox",
+    "--print",
+    "task\nedit files",
+  ]);
   await provider.resume("conversation-1", { ...input, previousWorkerId: "old" });
-  expect(runner.calls.some((call) => call.args.includes("--conversation") && call.args.includes("conversation-1"))).toBe(true);
+  expect(runner.calls.at(-1)?.args).toEqual([
+    "--output-format",
+    "stream-json",
+    "--sandbox",
+    "--conversation",
+    "conversation-1",
+    "--print",
+    "task\nedit files",
+  ]);
 });
 
 test("process provider maps failures and redacts credentials", async () => {
@@ -174,6 +187,27 @@ test("machine-readable nested final events are normalized and empty success is i
   });
   expect(normalizeProcessResult({ exitCode: 0, stdout: "", stderr: "" }).failure?.kind)
     .toBe("incomplete_output");
+});
+
+test("Antigravity stream-json result response is normalized as the final summary", () => {
+  const result = normalizeProcessResult({
+    exitCode: 0,
+    stdout: JSON.stringify({
+      event: "result",
+      result: {
+        conversation_id: "conversation-agy",
+        status: "SUCCESS",
+        response: "LOOP_AGY_STREAM_OK\n",
+      },
+    }),
+    stderr: "",
+  });
+
+  expect(result).toEqual({
+    success: true,
+    summary: "LOOP_AGY_STREAM_OK\n",
+    sessionId: "conversation-agy",
+  });
 });
 
 test("Z.AI API adapter keeps the key in the header", async () => {
@@ -266,8 +300,8 @@ test("interactive provider delegates agent lifecycle to Herdr", async () => {
           },
         });
       }
-      if (args[0] === "pane" && args[1] === "split") {
-        return ok({ result: { pane: { pane_id: "workspace-1:p2" } } });
+      if (args[0] === "tab" && args[1] === "create") {
+        return ok({ result: { root_pane: { pane_id: "workspace-1:p2" } } });
       }
       if (args[0] === "agent" && args[1] === "get") {
         return ok({ result: { agent: { state: "done" } } });

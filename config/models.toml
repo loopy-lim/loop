@@ -22,14 +22,6 @@ cost_weight = 1
 id = "glm-5.3-flash"
 provider = "zai"
 compute_class = "fast"
-capabilities = { coding = 3, reasoning = 3, tools = 2, vision = 0, long_context = 3 }
-latency = 1
-cost_weight = 1
-
-[[models]]
-id = "glm-5.3-flash"
-provider = "zai"
-compute_class = "fast"
 capabilities = { coding = 3, reasoning = 3, tools = 2, vision = 0, long_context = 5 }
 latency = 1
 cost_weight = 1

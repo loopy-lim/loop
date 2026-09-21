@@ -169,6 +169,10 @@ function findFinalSummary(value: unknown): string | undefined {
   if (!value || typeof value !== "object") return undefined;
   const record = value as Record<string, unknown>;
   const type = typeof record.type === "string" ? record.type : "";
+  if (record.event === "result" && record.result && typeof record.result === "object") {
+    const result = record.result as Record<string, unknown>;
+    if (typeof result.response === "string" && result.response) return result.response;
+  }
   if (type === "item.completed" && record.item && typeof record.item === "object") {
     const item = record.item as Record<string, unknown>;
     if (item.type === "agent_message" && typeof item.text === "string") return item.text;

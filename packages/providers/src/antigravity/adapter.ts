@@ -56,19 +56,19 @@ export class AntigravityProvider extends ProcessProvider {
   protected launch(input: StartWorkerInput) {
     const cwd = input.workingDirectory ?? this.#cwd;
     const args = [
-      "--print",
       "--output-format",
       "stream-json",
     ];
     if (this.#sandbox) args.push("--sandbox");
     if (this.#model) args.push("--model", this.#model);
-    args.push([input.title, ...input.requirements].join("\n"));
+    args.push("--print", [input.title, ...input.requirements].join("\n"));
     return { command: this.#command, args, cwd };
   }
 
   async resume(sessionId: string, input: ResumeWorkerInput): Promise<WorkerHandle> {
     const launch = this.launch(input);
-    launch.args.splice(1, 0, "--conversation", sessionId);
+    const printIndex = launch.args.indexOf("--print");
+    launch.args.splice(printIndex, 0, "--conversation", sessionId);
     return this.startProcess(launch);
   }
 }
