@@ -43,8 +43,8 @@ cost_weight = 1
 [[models]]
 id = "gpt-5.6-terra"
 provider = "codex"
-compute_class = "balanced"
-capabilities = { coding = 4, reasoning = 4, tools = 4, vision = 3, long_context = 4 }
+compute_class = "typed_decision"
+capabilities = { coding = 4, reasoning = 5, tools = 4, vision = 3, long_context = 4 }
 latency = 2
 cost_weight = 2
 
