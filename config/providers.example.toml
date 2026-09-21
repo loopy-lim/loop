@@ -6,15 +6,24 @@ command = "pi"
 provider = "zai"
 model = "glm-5.3-flash"
 
+# 모든 워커 클래스를 pi로 실행한다. interactive면 Herdr 탭에서 pi TUI가 보이고,
+# process면 `pi -p` 헤드리스로 돈다. 모델 id는 pi 패턴 문법("zai/glm-5.3-flash")을 따른다.
+[providers.pi]
+command = "pi"
+enabled = true
+auth = "native"
+mode = "interactive"
+
+# pi-only routing (2026-09-21): workers run through pi; codex/agy adapters stay but disabled.
 [providers.codex]
 command = "codex"
-enabled = true
+enabled = false
 auth = "native"
 mode = "interactive"
 
 [providers.antigravity]
 command = "agy"
-enabled = true
+enabled = false
 auth = "native"
 mode = "interactive"
 

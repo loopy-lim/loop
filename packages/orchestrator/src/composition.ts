@@ -3,6 +3,7 @@ import {
   AntigravityProvider,
   CodexProvider,
   HerdrAgentProvider,
+  PiProvider,
   ProviderRegistry,
   ZaiApiProvider,
   ZaiCliProvider,
@@ -48,6 +49,16 @@ export function buildProviderRegistry(options: ProviderCompositionOptions): Prov
               model: model.id,
               computeClasses: [model.computeClass],
             }));
+      } else if (providerId === "pi") {
+        providers.push(providerConfig.mode === "interactive"
+          ? visibleAgent(id, "pi", model, providerConfig, options.projectRoot, herdr)
+          : new PiProvider({
+              id,
+              cwd: options.projectRoot,
+              command: providerConfig.command,
+              model: model.id,
+              computeClasses: [model.computeClass],
+            }));
       } else if (providerId === "zai" && providerConfig.mode === "api") {
         const apiKey = providerConfig.apiKeyEnv ? environment[providerConfig.apiKeyEnv] ?? "" : "";
         providers.push(new ZaiApiProvider({
@@ -78,7 +89,7 @@ export function buildProviderRegistry(options: ProviderCompositionOptions): Prov
 
 function visibleAgent(
   id: string,
-  kind: "codex" | "agy",
+  kind: "pi" | "codex" | "agy",
   model: ModelProfile,
   config: ProviderConfig,
   projectRoot: string,
@@ -86,7 +97,9 @@ function visibleAgent(
 ): HerdrAgentProvider {
   const args = kind === "codex"
     ? ["--sandbox", "workspace-write", "--model", model.id]
-    : ["--sandbox", "--model", model.id];
+    : kind === "agy"
+      ? ["--sandbox", "--model", model.id]
+      : ["--model", model.id];
   return new HerdrAgentProvider({
     id,
     runtime: herdr,

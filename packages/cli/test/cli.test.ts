@@ -201,8 +201,8 @@ test("doctor auth checks native stores without requesting or printing credential
       "--no-refresh",
     ],
   ]);
-  expect(probed).toContainEqual(["codex", ["login", "status"]]);
-  expect(probed).toContainEqual(["agy", ["models"]]);
+  expect(probed).toContainEqual(["pi", ["--version"]]);
+  expect(probed.flat(2)).not.toContain("login");
   expect(probed.flat(2)).not.toContain("--credentials");
   const report = JSON.parse(capture.stdout()) as {
     checks: Array<{ name: string; ok: boolean; auth?: string }>;
@@ -210,12 +210,8 @@ test("doctor auth checks native stores without requesting or printing credential
   expect(report.checks).toContainEqual(
     expect.objectContaining({ name: "pi", ok: true, auth: "ready" }),
   );
-  expect(report.checks).toContainEqual(
-    expect.objectContaining({ name: "codex", ok: true, auth: "ready" }),
-  );
-  expect(report.checks).toContainEqual(
-    expect.objectContaining({ name: "antigravity", ok: true, auth: "ready" }),
-  );
+  expect(report.checks.some((check) => check.name === "codex")).toBe(false);
+  expect(report.checks.some((check) => check.name === "antigravity")).toBe(false);
 });
 
 test("offline installation verification proves the fake-provider milestone", async () => {

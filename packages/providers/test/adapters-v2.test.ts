@@ -5,6 +5,7 @@ import {
   AntigravityProvider,
   CodexProvider,
   FakeProvider,
+  PiProvider,
   HerdrAgentProvider,
   JevClient,
   ProviderRegistry,
@@ -116,6 +117,27 @@ test("Codex adapter probes the official surface and normalizes a completed worke
   expect(runner.calls.flatMap((call) => call.args)).toContain("workspace-write");
   expect(runner.calls.find((call) => call.args.includes("exec"))?.args).toContain("/project/task");
   expect(runner.calls.flatMap((call) => call.args)).not.toContain(expect.stringContaining("API_KEY"));
+});
+
+test("pi provider launches headless pi with the configured model pattern", async () => {
+  const runner = new FakeRunner();
+  const provider = new PiProvider({
+    runner,
+    cwd: "/project",
+    command: "pi",
+    provider: "zai",
+    model: "zai/glm-5.3-flash",
+    computeClasses: ["fast"],
+  });
+  await provider.start(input);
+  const launch = runner.calls.at(-1)!;
+  expect(launch.command).toBe("pi");
+  expect(launch.args).toContain("--provider");
+  expect(launch.args).toContain("zai");
+  expect(launch.args).toContain("--model");
+  expect(launch.args).toContain("zai/glm-5.3-flash");
+  expect(launch.args).toContain("-p");
+  expect(launch.args).not.toContain("--sandbox");
 });
 
 test("Codex resume uses only arguments supported by the installed resume surface", async () => {

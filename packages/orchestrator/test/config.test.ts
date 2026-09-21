@@ -22,9 +22,12 @@ test("loads the repository configuration into typed runtime data", () => {
   expect(config.providers.codex?.command).toBe("codex");
 
   const registry = new ModelRegistry(config.models);
-  expect(registry.get("glm-5.3-flash").computeClass).toBe("fast");
+  expect(config.providers.pi?.command).toBe("pi");
+  expect(config.providers.pi?.enabled).toBe(true);
+  expect(registry.get("zai/glm-5.3-flash").computeClass).toBe("fast");
+  expect(registry.get("glm-5.3-flash").computeClass).toBe("typed_decision");
   expect(registry.forComputeClass("frontier").map((model) => model.id)).toEqual([
-    "gpt-6-astra",
+    "zai/glm-5.2",
   ]);
 });
 
