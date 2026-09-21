@@ -1,0 +1,11 @@
+{
+  "name": "@loop/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@rustra/bun": "file:../../../rustra-bridge/packages/bun",
+    "@rustra/types": "file:../../../rustra-bridge/packages/types"
+  }
+}

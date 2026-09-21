@@ -1,0 +1,1408 @@
+{
+  "packageId": "loop.orchestration",
+  "schemaVersion": 1,
+  "fieldOrder": "declaration",
+  "commands": [
+    {
+      "name": "addTask",
+      "commandId": 4,
+      "inputType": "AddTaskInput",
+      "outputType": "OperationOutput",
+      "inputSchema": {
+        "title": "AddTaskInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "runId",
+          "task"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "task": {
+            "$ref": "#/definitions/TaskSpecInput"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "OperationOutput",
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "TaskSpecInput": {
+          "type": "object",
+          "required": [
+            "completionChecks",
+            "dependencies",
+            "id",
+            "kind",
+            "maxAttempts",
+            "maximumCompute",
+            "minimumCompute",
+            "preferredCompute",
+            "readScope",
+            "requirements",
+            "title",
+            "writeScope"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/definitions/TaskKind"
+            },
+            "dependencies": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "readScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "writeScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "requirements": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "completionChecks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/CompletionCheckInput"
+              }
+            },
+            "preferredCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "minimumCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "maximumCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "maxAttempts": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            }
+          }
+        },
+        "TaskKind": {
+          "type": "string",
+          "enum": [
+            "research",
+            "decision",
+            "implementation",
+            "verification",
+            "integration"
+          ]
+        },
+        "CompletionCheckInput": {
+          "type": "object",
+          "required": [
+            "args",
+            "command",
+            "id",
+            "timeoutMs"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "workingDirectory": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        },
+        "ComputeClass": {
+          "type": "string",
+          "enum": [
+            "deterministic",
+            "typed_decision",
+            "tiny",
+            "fast",
+            "balanced",
+            "strong",
+            "frontier"
+          ]
+        }
+      }
+    },
+    {
+      "name": "cancelRun",
+      "commandId": 13,
+      "inputType": "RunInput",
+      "outputType": "OperationOutput",
+      "inputSchema": {
+        "title": "RunInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "runId"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "OperationOutput",
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "execution": "sync"
+    },
+    {
+      "name": "claimRunnableTasks",
+      "commandId": 6,
+      "inputType": "ClaimRunnableTasksInput",
+      "outputType": "TaskIdsOutput",
+      "inputSchema": {
+        "title": "ClaimRunnableTasksInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "maxFrontierWorkers",
+          "maxWorkers",
+          "runId",
+          "runningTaskIds"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "runningTaskIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "maxWorkers": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0.0
+          },
+          "maxFrontierWorkers": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0.0
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "TaskIdsOutput",
+        "type": "object",
+        "required": [
+          "taskIds"
+        ],
+        "properties": {
+          "taskIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "execution": "sync"
+    },
+    {
+      "name": "createRun",
+      "commandId": 1,
+      "inputType": "CreateRunInput",
+      "outputType": "SnapshotOutput",
+      "inputSchema": {
+        "title": "CreateRunInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "runId"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "SnapshotOutput",
+        "type": "object",
+        "required": [
+          "activeWorkers",
+          "openAttentionIds",
+          "runId",
+          "state",
+          "tasks"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/definitions/RunState"
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/TaskSnapshotOutput"
+            }
+          },
+          "activeWorkers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/ActiveWorkerOutput"
+            }
+          },
+          "openAttentionIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "RunState": {
+          "type": "string",
+          "enum": [
+            "active",
+            "attention",
+            "completed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "TaskSnapshotOutput": {
+          "type": "object",
+          "required": [
+            "attempt",
+            "id",
+            "kind",
+            "preferredCompute",
+            "state",
+            "title"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/definitions/TaskKind"
+            },
+            "state": {
+              "$ref": "#/definitions/TaskState"
+            },
+            "attempt": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "preferredCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            }
+          }
+        },
+        "TaskKind": {
+          "type": "string",
+          "enum": [
+            "research",
+            "decision",
+            "implementation",
+            "verification",
+            "integration"
+          ]
+        },
+        "TaskState": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "ready",
+            "running",
+            "verifying",
+            "attention",
+            "blocked",
+            "done",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "ComputeClass": {
+          "type": "string",
+          "enum": [
+            "deterministic",
+            "typed_decision",
+            "tiny",
+            "fast",
+            "balanced",
+            "strong",
+            "frontier"
+          ]
+        },
+        "ActiveWorkerOutput": {
+          "type": "object",
+          "required": [
+            "id",
+            "taskId"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "getRun",
+      "commandId": 2,
+      "inputType": "RunInput",
+      "outputType": "SnapshotOutput",
+      "inputSchema": {
+        "title": "RunInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "runId"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "SnapshotOutput",
+        "type": "object",
+        "required": [
+          "activeWorkers",
+          "openAttentionIds",
+          "runId",
+          "state",
+          "tasks"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/definitions/RunState"
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/TaskSnapshotOutput"
+            }
+          },
+          "activeWorkers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/ActiveWorkerOutput"
+            }
+          },
+          "openAttentionIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "RunState": {
+          "type": "string",
+          "enum": [
+            "active",
+            "attention",
+            "completed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "TaskSnapshotOutput": {
+          "type": "object",
+          "required": [
+            "attempt",
+            "id",
+            "kind",
+            "preferredCompute",
+            "state",
+            "title"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/definitions/TaskKind"
+            },
+            "state": {
+              "$ref": "#/definitions/TaskState"
+            },
+            "attempt": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "preferredCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            }
+          }
+        },
+        "TaskKind": {
+          "type": "string",
+          "enum": [
+            "research",
+            "decision",
+            "implementation",
+            "verification",
+            "integration"
+          ]
+        },
+        "TaskState": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "ready",
+            "running",
+            "verifying",
+            "attention",
+            "blocked",
+            "done",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "ComputeClass": {
+          "type": "string",
+          "enum": [
+            "deterministic",
+            "typed_decision",
+            "tiny",
+            "fast",
+            "balanced",
+            "strong",
+            "frontier"
+          ]
+        },
+        "ActiveWorkerOutput": {
+          "type": "object",
+          "required": [
+            "id",
+            "taskId"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "getSnapshot",
+      "commandId": 15,
+      "inputType": "RunInput",
+      "outputType": "SnapshotOutput",
+      "inputSchema": {
+        "title": "RunInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "runId"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "SnapshotOutput",
+        "type": "object",
+        "required": [
+          "activeWorkers",
+          "openAttentionIds",
+          "runId",
+          "state",
+          "tasks"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/definitions/RunState"
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/TaskSnapshotOutput"
+            }
+          },
+          "activeWorkers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/ActiveWorkerOutput"
+            }
+          },
+          "openAttentionIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "RunState": {
+          "type": "string",
+          "enum": [
+            "active",
+            "attention",
+            "completed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "TaskSnapshotOutput": {
+          "type": "object",
+          "required": [
+            "attempt",
+            "id",
+            "kind",
+            "preferredCompute",
+            "state",
+            "title"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/definitions/TaskKind"
+            },
+            "state": {
+              "$ref": "#/definitions/TaskState"
+            },
+            "attempt": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "preferredCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            }
+          }
+        },
+        "TaskKind": {
+          "type": "string",
+          "enum": [
+            "research",
+            "decision",
+            "implementation",
+            "verification",
+            "integration"
+          ]
+        },
+        "TaskState": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "ready",
+            "running",
+            "verifying",
+            "attention",
+            "blocked",
+            "done",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "ComputeClass": {
+          "type": "string",
+          "enum": [
+            "deterministic",
+            "typed_decision",
+            "tiny",
+            "fast",
+            "balanced",
+            "strong",
+            "frontier"
+          ]
+        },
+        "ActiveWorkerOutput": {
+          "type": "object",
+          "required": [
+            "id",
+            "taskId"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "recordDecision",
+      "commandId": 10,
+      "inputType": "DecisionInput",
+      "outputType": "OperationOutput",
+      "inputSchema": {
+        "title": "DecisionInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "decisionId",
+          "runId",
+          "value"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "decisionId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "OperationOutput",
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "execution": "sync"
+    },
+    {
+      "name": "recordVerification",
+      "commandId": 9,
+      "inputType": "VerificationInput",
+      "outputType": "OperationOutput",
+      "inputSchema": {
+        "title": "VerificationInput",
+        "type": "object",
+        "required": [
+          "checks",
+          "databasePath",
+          "passed",
+          "reason",
+          "runId",
+          "taskId"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/CheckResultInput"
+            }
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "OperationOutput",
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "CheckResultInput": {
+          "type": "object",
+          "required": [
+            "id",
+            "passed"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "passed": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "recordWorkerResult",
+      "commandId": 8,
+      "inputType": "WorkerResultInput",
+      "outputType": "OperationOutput",
+      "inputSchema": {
+        "title": "WorkerResultInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "runId",
+          "success",
+          "summary",
+          "taskId",
+          "workerId"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "workerId": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "string"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "OperationOutput",
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "execution": "sync"
+    },
+    {
+      "name": "recordWorkerStarted",
+      "commandId": 7,
+      "inputType": "WorkerInput",
+      "outputType": "OperationOutput",
+      "inputSchema": {
+        "title": "WorkerInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "runId",
+          "taskId",
+          "workerId"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "workerId": {
+            "type": "string"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "OperationOutput",
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "execution": "sync"
+    },
+    {
+      "name": "requestAttention",
+      "commandId": 11,
+      "inputType": "RequestAttentionInput",
+      "outputType": "OperationOutput",
+      "inputSchema": {
+        "title": "RequestAttentionInput",
+        "type": "object",
+        "required": [
+          "attentionId",
+          "databasePath",
+          "kind",
+          "runId",
+          "summary"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "attentionId": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/definitions/AttentionKind"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "OperationOutput",
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "AttentionKind": {
+          "type": "string",
+          "enum": [
+            "question",
+            "decision",
+            "approval",
+            "conflict",
+            "failure"
+          ]
+        }
+      }
+    },
+    {
+      "name": "resolveAttention",
+      "commandId": 12,
+      "inputType": "ResolveAttentionInput",
+      "outputType": "OperationOutput",
+      "inputSchema": {
+        "title": "ResolveAttentionInput",
+        "type": "object",
+        "required": [
+          "attentionId",
+          "databasePath",
+          "resolution",
+          "runId"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "attentionId": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "OperationOutput",
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "execution": "sync"
+    },
+    {
+      "name": "resumeRun",
+      "commandId": 14,
+      "inputType": "RunInput",
+      "outputType": "OperationOutput",
+      "inputSchema": {
+        "title": "RunInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "runId"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "OperationOutput",
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "execution": "sync"
+    },
+    {
+      "name": "submitPlan",
+      "commandId": 3,
+      "inputType": "SubmitPlanInput",
+      "outputType": "SubmitPlanOutput",
+      "inputSchema": {
+        "title": "SubmitPlanInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "runId",
+          "tasks"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/TaskSpecInput"
+            }
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "SubmitPlanOutput",
+        "type": "object",
+        "required": [
+          "taskCount"
+        ],
+        "properties": {
+          "taskCount": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0.0
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "TaskSpecInput": {
+          "type": "object",
+          "required": [
+            "completionChecks",
+            "dependencies",
+            "id",
+            "kind",
+            "maxAttempts",
+            "maximumCompute",
+            "minimumCompute",
+            "preferredCompute",
+            "readScope",
+            "requirements",
+            "title",
+            "writeScope"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/definitions/TaskKind"
+            },
+            "dependencies": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "readScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "writeScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "requirements": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "completionChecks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/CompletionCheckInput"
+              }
+            },
+            "preferredCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "minimumCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "maximumCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "maxAttempts": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            }
+          }
+        },
+        "TaskKind": {
+          "type": "string",
+          "enum": [
+            "research",
+            "decision",
+            "implementation",
+            "verification",
+            "integration"
+          ]
+        },
+        "CompletionCheckInput": {
+          "type": "object",
+          "required": [
+            "args",
+            "command",
+            "id",
+            "timeoutMs"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "workingDirectory": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        },
+        "ComputeClass": {
+          "type": "string",
+          "enum": [
+            "deterministic",
+            "typed_decision",
+            "tiny",
+            "fast",
+            "balanced",
+            "strong",
+            "frontier"
+          ]
+        }
+      }
+    },
+    {
+      "name": "subscribeEvents",
+      "commandId": 16,
+      "inputType": "SubscribeEventsInput",
+      "outputType": "Array_of_EventOutput",
+      "inputSchema": {
+        "title": "SubscribeEventsInput",
+        "type": "object",
+        "required": [
+          "afterSequence",
+          "databasePath",
+          "limit",
+          "runId"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "afterSequence": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "limit": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0.0
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "Array_of_EventOutput",
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/EventOutput"
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "EventOutput": {
+          "type": "object",
+          "required": [
+            "payloadJson",
+            "sequence"
+          ],
+          "properties": {
+            "sequence": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "payloadJson": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "updateTask",
+      "commandId": 5,
+      "inputType": "UpdateTaskInput",
+      "outputType": "OperationOutput",
+      "inputSchema": {
+        "title": "UpdateTaskInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "runId",
+          "state",
+          "taskId"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/definitions/TaskState"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "OperationOutput",
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "TaskState": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "ready",
+            "running",
+            "verifying",
+            "attention",
+            "blocked",
+            "done",
+            "failed",
+            "cancelled"
+          ]
+        }
+      }
+    }
+  ],
+  "events": [
+    {
+      "name": "loop.run_changed",
+      "payload": {
+        "title": "RunChangedEvent",
+        "type": "object",
+        "required": [
+          "lastSequence",
+          "runId"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "lastSequence": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "definitions": {}
+    }
+  ]
+}

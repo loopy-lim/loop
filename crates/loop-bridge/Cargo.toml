@@ -1,0 +1,24 @@
+[package]
+name = "loop-bridge"
+version.workspace = true
+edition = "2024"
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[dependencies]
+loop-core = { path = "../loop-core" }
+loop-store = { path = "../loop-store" }
+rustra = { path = "../../../rustra-bridge/crates/rustra" }
+schemars = { version = "0.8", features = ["derive", "preserve_order"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "loop-bridge-generate"
+path = "src/bin/generate.rs"

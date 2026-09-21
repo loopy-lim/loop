@@ -1,0 +1,10 @@
+{
+  "schema": "./packages/protocol/src/generated/schema.json",
+  "output": "./packages/protocol/src/generated",
+  "codegen": {
+    "rustManifest": "./crates/loop-bridge/Cargo.toml",
+    "rustPackage": "loop-bridge",
+    "rustBinary": "loop-bridge-generate"
+  },
+  "bun": {}
+}

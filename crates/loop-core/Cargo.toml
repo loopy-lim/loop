@@ -1,0 +1,23 @@
+[package]
+name = "loop-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+autotests = false
+
+[lib]
+name = "loop_core"
+path = "src/lib.rs"
+
+[dependencies]
+schemars = "0.8"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[[test]]
+name = "scheduler_domain"
+path = "tests/scheduler_domain.rs"
+
+[[test]]
+name = "event_reducer"
+path = "tests/event_reducer.rs"
