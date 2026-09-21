@@ -26,14 +26,14 @@ test("starts a recognized agent in a no-focus Herdr pane and submits its task", 
   expect(runner.calls).toEqual([
     ["workspace", "create", "--cwd", "/project", "--label", "loop-run-1", "--no-focus"],
     [
-      "pane",
-      "split",
-      "--pane",
-      "w1:p1",
-      "--direction",
-      "right",
+      "tab",
+      "create",
+      "--workspace",
+      "w1",
       "--cwd",
       "/project/.worktrees/task-1",
+      "--label",
+      "loop-task-1",
       "--no-focus",
     ],
     [
@@ -90,8 +90,8 @@ test("uses an explicit caller pane instead of creating a workspace", async () =>
     prompt: "",
   });
 
-  expect(runner.calls[0]).toContain("w7:p4");
-  expect(runner.calls.flat()).not.toContain("create");
+  expect(runner.calls[0]).toContain("w7");
+  expect(runner.calls.flat()).not.toContain("workspace");
   expect(runner.calls[1]).toEqual(["pane", "run", "w7:p2", "bun", "test"]);
 });
 
@@ -159,8 +159,8 @@ function scriptedRunner(): HerdrRunner & { calls: string[][] } {
           },
         });
       }
-      if (args[0] === "pane" && args[1] === "split") {
-        return result({ result: { pane: { pane_id: args.includes("w7:p4") ? "w7:p2" : "w1:p2" } } });
+      if (args[0] === "tab" && args[1] === "create") {
+        return result({ result: { root_pane: { pane_id: args.includes("w7") ? "w7:p2" : "w1:p2" } } });
       }
       if (args[0] === "agent" && args[1] === "get") {
         return result({ result: { agent: { state: "done" } } });

@@ -77,19 +77,21 @@ export class HerdrWorkerRuntime {
   async start(input: HerdrWorkerInput): Promise<HerdrWorkerHandle> {
     assertWorktreeInsideProject(input.projectRoot, input.worktree);
     const parent = input.caller ?? (await this.#ensureWorkspace(input));
-    const split = await this.#run([
-      "pane",
-      "split",
-      "--pane",
-      parent.paneId,
-      "--direction",
-      "right",
+    const workerId = workerName(input.workerName ?? input.taskId);
+    // Workers live in their own tab of the same workspace: same space,
+    // one tab per worker, no split-screen clutter, no focus stealing.
+    const tab = await this.#run([
+      "tab",
+      "create",
+      "--workspace",
+      parent.workspaceId,
       "--cwd",
       input.worktree,
+      "--label",
+      workerId,
       "--no-focus",
     ]);
-    const paneId = requiredString(split, ["result", "pane", "pane_id"]);
-    const workerId = workerName(input.workerName ?? input.taskId);
+    const paneId = requiredString(tab, ["result", "root_pane", "pane_id"]);
     const handle: HerdrWorkerHandle = {
       workerId,
       workspaceId: parent.workspaceId,
