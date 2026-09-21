@@ -83,7 +83,6 @@ test("configuration keeps model names and provider endpoints out of business log
 test("the repository contains no recovered legacy product surfaces", () => {
   for (const path of [
     "apps",
-    "plugins",
     "crates/loop-legacy",
     "crates/loop-lock-holder",
     "crates/loop-rustra",
@@ -95,6 +94,15 @@ test("the repository contains no recovered legacy product surfaces", () => {
   ]) {
     expect(existsSync(join(root, path))).toBe(false);
   }
+  expect(existsSync(join(root, "plugins/loop-herdr"))).toBe(false);
+  expect(existsSync(join(root, "plugins/loop-agent/herdr-plugin.toml"))).toBe(true);
+});
+
+test("the interactive Loop Lead never owns Herdr workspace or attachment lifecycle", () => {
+  const cli = readFileSync(join(root, "packages/cli/src/main.ts"), "utf8");
+  expect(cli).not.toContain("HerdrWorkerRuntime");
+  expect(cli).not.toMatch(/agent["']\s*,\s*["']attach/);
+  expect(cli).not.toMatch(/workspace["']\s*,\s*["']create/);
 });
 
 function rustFiles(directory: string): string[] {

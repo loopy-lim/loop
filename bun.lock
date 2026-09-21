@@ -4,6 +4,10 @@
   "workspaces": {
     "": {
       "name": "loop-harness",
+      "dependencies": {
+        "@rustra/bun": "^0.10.0",
+        "@rustra/types": "^0.12.0",
+      },
       "devDependencies": {
         "@types/bun": "^1.4.2",
         "typescript": "^7.0.2",
@@ -72,6 +76,10 @@
     "@loop/protocol": ["@loop/protocol@workspace:packages/protocol"],
 
     "@loop/providers": ["@loop/providers@workspace:packages/providers"],
+
+    "@rustra/bun": ["@rustra/bun@0.10.2", "", { "dependencies": { "@rustra/types": "^0.12.0" } }, "sha512-QdICp5yQ4ZO4W0u5uWKA6Zn50U/TPMv+uJe1hl+FgmOwGyEQdWWcy8Rc+hdAZfmW2b+3q4Tnz2TiXGXaO2KXRw=="],
+
+    "@rustra/types": ["@rustra/types@0.12.0", "", {}, "sha512-5EYgbNrbFMuMyZ8HNO3rQKmApGANGEfq1jC3gqsbiwkf1CRYzaNQTcadUkQCEm2A5S8d/ynMP15uy50EEKIGWg=="],
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 

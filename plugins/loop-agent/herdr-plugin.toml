@@ -1,0 +1,18 @@
+id = "loop.agent"
+name = "Loop Agent"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "Open the Pi-backed Loop engineering agent in the current Herdr workspace."
+platforms = ["linux", "macos", "windows"]
+
+[[actions]]
+id = "open-agent"
+title = "Open Loop Agent"
+contexts = ["workspace"]
+command = ["bun", "run", "src/open.ts"]
+
+[[panes]]
+id = "agent"
+title = "Loop Agent"
+placement = "tab"
+command = ["loop"]
