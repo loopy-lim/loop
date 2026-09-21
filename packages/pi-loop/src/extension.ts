@@ -7,6 +7,12 @@ import type { SnapshotOutput, TaskSpecInput } from "@loop/protocol";
 
 import { validateDecomposition } from "./lead/decompose";
 import { decompositionPrompt } from "./lead/prompts";
+import {
+  HerdrLifecycleReporter,
+  registerHerdrLifecycle,
+  type HerdrLifecycleSink,
+  type PiLifecycleEvent,
+} from "./herdr-lifecycle";
 
 interface PiContext {
   cwd: string;
@@ -40,6 +46,10 @@ export interface PiExtensionApi {
     ): Promise<PiToolResult>;
   }): void;
   on(
+    event: PiLifecycleEvent,
+    handler: () => Promise<void> | void,
+  ): void;
+  on(
     event: "before_agent_start",
     handler: (
       event: { prompt: string; systemPrompt: string },
@@ -66,8 +76,11 @@ export interface LoopLeadBackend {
 export function registerLoopExtension(
   pi: PiExtensionApi,
   backend: LoopLeadBackend = new DefaultLoopLeadBackend(),
+  lifecycle: HerdrLifecycleSink = new HerdrLifecycleReporter(),
 ): void {
   let currentRunId: string | undefined;
+
+  registerHerdrLifecycle(pi, lifecycle);
 
   pi.registerTool({
     name: "loop_run",

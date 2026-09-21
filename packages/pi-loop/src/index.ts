@@ -1,4 +1,5 @@
 export * from "./extension";
+export * from "./herdr-lifecycle";
 export * from "./lead/coordinator";
 export * from "./lead/decompose";
 export * from "./lead/reduce";
