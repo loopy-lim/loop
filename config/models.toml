@@ -8,11 +8,13 @@ capabilities = { coding = 0, reasoning = 0, tools = 0, vision = 0, long_context 
 latency = 0
 cost_weight = 0
 
+# jev disabled 2026-09-21 per routing decision: typed_decision now routes to zai glm-5.3-flash.
+# See docs/decisions/2026-09-21-routing-jev-disable-and-pi-coverage.md
 [[models]]
-id = "jev-typed-decision"
-provider = "jev"
+id = "glm-5.3-flash-typed-decision"
+provider = "zai"
 compute_class = "typed_decision"
-capabilities = { coding = 0, reasoning = 2, tools = 0, vision = 0, long_context = 1 }
+capabilities = { coding = 3, reasoning = 3, tools = 2, vision = 0, long_context = 3 }
 latency = 1
 cost_weight = 1
 
@@ -23,6 +25,30 @@ compute_class = "fast"
 capabilities = { coding = 3, reasoning = 3, tools = 2, vision = 0, long_context = 3 }
 latency = 1
 cost_weight = 1
+
+[[models]]
+id = "glm-5.3-flash"
+provider = "zai"
+compute_class = "fast"
+capabilities = { coding = 3, reasoning = 3, tools = 2, vision = 0, long_context = 5 }
+latency = 1
+cost_weight = 1
+
+[[models]]
+id = "glm-5.2"
+provider = "zai"
+compute_class = "typed_decision"
+capabilities = { coding = 3, reasoning = 5, tools = 2, vision = 0, long_context = 5 }
+latency = 2
+cost_weight = 2
+
+[[models]]
+id = "glm-5.3"
+provider = "zai"
+compute_class = "balanced"
+capabilities = { coding = 4, reasoning = 5, tools = 3, vision = 0, long_context = 5 }
+latency = 2
+cost_weight = 2
 
 [[models]]
 id = "gemini-3.8-flash-low"
@@ -61,14 +87,6 @@ id = "gpt-5.6-sol"
 provider = "codex"
 compute_class = "strong"
 capabilities = { coding = 5, reasoning = 5, tools = 5, vision = 3, long_context = 5 }
-latency = 3
-cost_weight = 3
-
-[[models]]
-id = "gemini-3.1-pro-high"
-provider = "antigravity"
-compute_class = "strong"
-capabilities = { coding = 5, reasoning = 5, tools = 4, vision = 4, long_context = 5 }
 latency = 3
 cost_weight = 3
 
