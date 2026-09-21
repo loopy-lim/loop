@@ -56,16 +56,14 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
     io.stdout(help());
     return 0;
   }
-  if (!parsed.command) {
-    io.stderr("missing command\n\n");
-    io.stderr(help());
-    return 2;
-  }
 
   try {
+    if (!parsed.command) {
+      return await startPiLead("", parsed, io, options.leadLauncher ?? launchPiLead);
+    }
     if (parsed.command === "doctor") {
       const config = configuration(parsed);
-      return await doctor(config, parsed.json, io, options.probe ?? probeCommand);
+      return await doctor(config, parsed.json, parsed.auth, io, options.probe ?? probeCommand);
     }
     if (parsed.command === "models") {
       const config = configuration(parsed);
@@ -91,27 +89,7 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
     if (parsed.command === "run") {
       const intent = parsed.operands.join(" ").trim();
       if (!intent) throw new UsageError("run requires <intent>");
-      const config = configuration(parsed);
-      const runId = `loop-${randomUUID()}`;
-      const launched = await (options.leadLauncher ?? launchPiLead)({
-        intent,
-        runId,
-        projectRoot: process.cwd(),
-        command: config.lead.command,
-        provider: config.lead.provider,
-        model: config.lead.model,
-      });
-      const result = { runId, state: "lead_started", ...launched };
-      if (parsed.json) io.stdout(`${JSON.stringify(result)}\n`);
-      else {
-        io.stdout([
-          `Run ${runId}`,
-          "State: Pi Lead started",
-          `Worker: ${launched.workerId}`,
-          `Pane: ${launched.paneId}`,
-        ].join("\n") + "\n");
-      }
-      return 0;
+      return await startPiLead(intent, parsed, io, options.leadLauncher ?? launchPiLead);
     }
     if (parsed.command === "verify-install") {
       const receipt = await verifyInstall(process.cwd());
@@ -178,6 +156,7 @@ interface ParsedArguments {
   databasePath?: string;
   json: boolean;
   stream: boolean;
+  auth: boolean;
   help: boolean;
 }
 
@@ -187,6 +166,7 @@ function parse(argv: string[]): ParsedArguments {
   let databasePath: string | undefined;
   let json = false;
   let stream = false;
+  let auth = false;
   let helpRequested = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index]!;
@@ -196,6 +176,8 @@ function parse(argv: string[]): ParsedArguments {
       json = true;
     } else if (argument === "--stream") {
       stream = true;
+    } else if (argument === "--auth") {
+      auth = true;
     } else if (argument === "--config" || argument === "--database") {
       const value = argv[index + 1];
       if (!value) throw new UsageError(`${argument} requires a value`);
@@ -215,6 +197,7 @@ function parse(argv: string[]): ParsedArguments {
     databasePath,
     json,
     stream,
+    auth,
     help: helpRequested,
   };
 }
@@ -226,13 +209,43 @@ function configuration(parsed: ParsedArguments): LoopConfig {
   });
 }
 
+async function startPiLead(
+  intent: string,
+  parsed: ParsedArguments,
+  io: CliIo,
+  launcher: (input: LeadLaunchInput) => Promise<LeadLaunchResult>,
+): Promise<number> {
+  const config = configuration(parsed);
+  const runId = `loop-${randomUUID()}`;
+  const launched = await launcher({
+    intent,
+    runId,
+    projectRoot: process.cwd(),
+    command: config.lead.command,
+    provider: config.lead.provider,
+    model: config.lead.model,
+  });
+  const result = { runId, state: "lead_started", ...launched };
+  if (parsed.json) io.stdout(`${JSON.stringify(result)}\n`);
+  else {
+    io.stdout([
+      `Run ${runId}`,
+      "State: Pi Lead started",
+      `Worker: ${launched.workerId}`,
+      `Pane: ${launched.paneId}`,
+    ].join("\n") + "\n");
+  }
+  return 0;
+}
+
 async function doctor(
   config: LoopConfig,
   json: boolean,
+  checkAuth: boolean,
   io: CliIo,
   probe: (command: string, args: string[]) => Promise<ProbeResult>,
 ): Promise<number> {
-  const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
+  const checks: Array<{ name: string; ok: boolean; detail: string; auth?: string }> = [];
   try {
     const protocol = await loadProtocol();
     await protocol.rustra.ready();
@@ -257,14 +270,87 @@ async function doctor(
     });
   }
 
+  if (checkAuth) {
+    await checkNativeAuthentication(config, checks, probe);
+  }
+
   if (json) io.stdout(`${JSON.stringify({ checks })}\n`);
   else {
     io.stdout("Loop doctor\n");
     for (const check of checks.slice(0, 7)) {
-      io.stdout(`${check.ok ? "✓" : "!"} ${check.name}: ${check.detail}\n`);
+      const auth = check.auth ? `; auth ${check.auth}` : "";
+      io.stdout(`${check.ok ? "✓" : "!"} ${check.name}: ${check.detail}${auth}\n`);
     }
   }
   return checks.every((check) => check.ok) ? 0 : 1;
+}
+
+async function checkNativeAuthentication(
+  config: LoopConfig,
+  checks: Array<{ name: string; ok: boolean; detail: string; auth?: string }>,
+  probe: (command: string, args: string[]) => Promise<ProbeResult>,
+): Promise<void> {
+  setAuthentication(
+    checks,
+    "pi",
+    await probe(config.lead.command, [
+      "auth",
+      "check",
+      "--provider",
+      config.lead.provider,
+      "--model",
+      config.lead.model,
+      "--json",
+      "--no-refresh",
+    ]),
+  );
+
+  const nativeChecks: Array<[string, string[]]> = [
+    ["codex", ["login", "status"]],
+    ["antigravity", ["models"]],
+  ];
+  for (const [name, args] of nativeChecks) {
+    const provider = config.providers[name];
+    if (!provider?.enabled || provider.auth !== "native" || !provider.command) continue;
+    setAuthentication(checks, name, await probe(provider.command, args));
+  }
+
+  for (const [name, provider] of Object.entries(config.providers)) {
+    if (!provider.enabled || provider.auth !== "api_key" || !provider.apiKeyEnv) continue;
+    const check = checks.find((candidate) => candidate.name === name);
+    const ready = Boolean(process.env[provider.apiKeyEnv]);
+    if (check) {
+      check.auth = ready ? "ready" : `missing ${provider.apiKeyEnv}`;
+      check.ok &&= ready;
+    } else {
+      checks.push({
+        name,
+        ok: ready,
+        detail: "configured",
+        auth: ready ? "ready" : `missing ${provider.apiKeyEnv}`,
+      });
+    }
+  }
+}
+
+function setAuthentication(
+  checks: Array<{ name: string; ok: boolean; detail: string; auth?: string }>,
+  name: string,
+  result: ProbeResult,
+): void {
+  const check = checks.find((candidate) => candidate.name === name);
+  const ready = result.exitCode === 0;
+  if (check) {
+    check.auth = ready ? "ready" : "unavailable";
+    check.ok &&= ready;
+    return;
+  }
+  checks.push({
+    name,
+    ok: ready,
+    detail: ready ? "available" : bounded(redact(result.output.trim()) || `exit ${result.exitCode}`),
+    auth: ready ? "ready" : "unavailable",
+  });
 }
 
 async function loadProtocol(): Promise<typeof import("@loop/protocol")> {
@@ -318,6 +404,13 @@ async function launchPiLead(input: LeadLaunchInput): Promise<LeadLaunchResult> {
   const extension = process.env.LOOP_PI_EXTENSION || adjacentPiExtension();
   const args = ["--provider", input.provider, "--model", input.model];
   if (extension) args.push("--extension", extension);
+  const prompt = input.intent.trim()
+    ? [
+        input.intent,
+        "",
+        `Use ${input.runId} as the runId when calling loop_run.`,
+      ].join("\n")
+    : "";
   const handle = await new HerdrWorkerRuntime({ command: "herdr" }).start({
     projectRoot: input.projectRoot,
     runId: input.runId,
@@ -325,11 +418,7 @@ async function launchPiLead(input: LeadLaunchInput): Promise<LeadLaunchResult> {
     workerName: `${input.runId}-lead`,
     worktree: input.projectRoot,
     execution: { type: "agent", kind: "pi", args },
-    prompt: [
-      input.intent,
-      "",
-      `Use ${input.runId} as the runId when calling loop_run.`,
-    ].join("\n"),
+    prompt,
   });
   return {
     workerId: handle.workerId,
@@ -467,7 +556,8 @@ function help(): string {
   return `Loop — dependency-aware engineering scheduler
 
 Usage:
-  loop doctor [--json]
+  loop                                Start an idle Pi Lead inside Herdr
+  loop doctor [--auth] [--json]
   loop status <run-id> [--json]
   loop graph <run-id>
   loop workers <run-id>
@@ -482,6 +572,7 @@ Options:
   --config <directory>              Configuration directory
   --database <path>                 SQLite database path
   --json                            Machine-readable output
+  --auth                            Check native auth stores without exposing credentials
 `;
 }
 

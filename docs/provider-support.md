@@ -21,6 +21,8 @@ All coding providers implement one `AgentProvider` interface. Non-zero process e
 
 `config/providers.example.toml` contains commands, endpoints, and an environment-variable name only. Do not place a key value in TOML or SQLite. The Z.AI API adapter reads its key from the named environment variable and sends it only in the authorization header. It remains disabled until that variable is configured.
 
+Run `loop doctor --auth` to check the Pi Lead provider, Codex native login, and AGY native keyring without printing credentials or sending a model prompt. AGY authentication stays inside the installed `agy` CLI, which Herdr launches as `agent kind=agy`; there is no Loop-specific AGY credential store.
+
 ## Evidence boundary
 
 Fake-run, adapter-contract, cancellation, redaction, and capability tests run offline. They prove integration behavior, not that a user's provider account is authenticated or has quota. Authenticated provider smoke tests are deliberately separate and are not required by the default test suite.

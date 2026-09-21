@@ -45,11 +45,13 @@ Install after those checks pass:
 
 ```bash
 ./scripts/install-local.sh
-loop doctor
-loop run "Implement feature X"
+loop doctor --auth
+loop
 ```
 
-`loop run` creates a Herdr workspace and starts the Pi Lead. The installed Pi extension turns the natural-language request into a validated DAG and invokes the standalone Loop executable. `/loop status`, `/loop graph`, `/loop workers`, `/loop attention`, `/loop models`, `/loop cancel`, and `/loop resume` remain available inside Pi.
+Bare `loop` creates a Herdr workspace and opens an idle Pi Lead without sending a model request. `loop run "Implement feature X"` opens the same Lead with an initial intent. The installed Pi extension turns that intent into a validated DAG and invokes the standalone Loop executable. `/loop status`, `/loop graph`, `/loop workers`, `/loop attention`, `/loop models`, `/loop cancel`, and `/loop resume` remain available inside Pi.
+
+`loop doctor --auth` verifies the configured Pi Lead provider, Codex native login, and AGY native keyring through their own read-only CLI status commands. It never asks those CLIs to reveal a credential and never sends a model prompt. AGY workers remain Herdr-managed `agy` CLI processes; Loop does not store or forward an AGY key.
 
 `loop verify-install` runs the seven-task fake-provider scenario without paid model calls. It proves three parallel research tasks, a serialized decision, two non-overlapping implementation tasks, verification, automatic fast-to-strong escalation, and cancellation.
 

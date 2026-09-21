@@ -93,6 +93,74 @@ test("run launches the Pi Lead through the injected Herdr boundary", async () =>
   });
 });
 
+test("bare loop launches an idle Pi Lead without sending an initial prompt", async () => {
+  const capture = output();
+  const launches: Array<{ intent: string }> = [];
+  const exitCode = await runCli(
+    ["--config", join(root, "config"), "--json"],
+    {
+      io: capture.io,
+      leadLauncher: async (input) => {
+        launches.push(input);
+        return { workerId: "lead-1", workspaceId: "workspace-1", paneId: "pane-1" };
+      },
+    },
+  );
+
+  expect(exitCode).toBe(0);
+  expect(launches).toEqual([expect.objectContaining({ intent: "" })]);
+  expect(JSON.parse(capture.stdout())).toMatchObject({
+    state: "lead_started",
+    workerId: "lead-1",
+  });
+  expect(capture.stderr()).toBe("");
+});
+
+test("doctor auth checks native stores without requesting or printing credentials", async () => {
+  const capture = output();
+  const probed: Array<[string, string[]]> = [];
+  const exitCode = await runCli(
+    ["doctor", "--auth", "--config", join(root, "config"), "--json"],
+    {
+      io: capture.io,
+      probe: async (command, args) => {
+        probed.push([command, args]);
+        return { exitCode: 0, output: `${command} ready` };
+      },
+    },
+  );
+
+  expect(exitCode).toBe(0);
+  expect(probed).toContainEqual([
+    "pi",
+    [
+      "auth",
+      "check",
+      "--provider",
+      "zai",
+      "--model",
+      "glm-5.3-flash",
+      "--json",
+      "--no-refresh",
+    ],
+  ]);
+  expect(probed).toContainEqual(["codex", ["login", "status"]]);
+  expect(probed).toContainEqual(["agy", ["models"]]);
+  expect(probed.flat(2)).not.toContain("--credentials");
+  const report = JSON.parse(capture.stdout()) as {
+    checks: Array<{ name: string; ok: boolean; auth?: string }>;
+  };
+  expect(report.checks).toContainEqual(
+    expect.objectContaining({ name: "pi", ok: true, auth: "ready" }),
+  );
+  expect(report.checks).toContainEqual(
+    expect.objectContaining({ name: "codex", ok: true, auth: "ready" }),
+  );
+  expect(report.checks).toContainEqual(
+    expect.objectContaining({ name: "antigravity", ok: true, auth: "ready" }),
+  );
+});
+
 test("offline installation verification proves the fake-provider milestone", async () => {
   const capture = output();
   const exitCode = await runCli(["verify-install", "--json"], { io: capture.io });
