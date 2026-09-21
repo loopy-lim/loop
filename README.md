@@ -5,14 +5,14 @@ Loop is a standalone dependency-aware CLI for software-engineering agents. It tu
 Herdr owns terminals and panes. Pi owns the interactive Lead experience. Loop owns orchestration; it does not replace either tool or any model provider.
 
 ```text
-loop run "intent" → Herdr → Pi Lead + Loop extension
-                              │ private loop CLI request
-                              ▼
-                    TypeScript orchestrator
-                       │             │
-             generated Rustra     Herdr workers
-                       ▼
-             Rust bridge → SQLite → provider-neutral core
+Herdr → loop → Pi Lead + Loop extension
+                         │ private loop CLI request
+                         ▼
+               TypeScript orchestrator
+                  │             │
+        generated Rustra     Herdr workers
+                  ▼
+        Rust bridge → SQLite → provider-neutral core
 ```
 
 ## Repository map
@@ -25,8 +25,8 @@ loop run "intent" → Herdr → Pi Lead + Loop extension
 | `packages/protocol` | Generated Rustra TypeScript contract and Bun host |
 | `packages/orchestrator` | Thin worker lifecycle coordinator |
 | `packages/providers` | Codex, Antigravity, Z.AI, Jev, and fake adapters |
-| `packages/herdr` | Visible workspace/pane integration |
 | `packages/pi-loop` | Pi Lead tool/command extension and compact output |
+| `packages/herdr` | Visible workspace/pane integration |
 | `packages/cli` | Standalone `loop` entry point and composition root |
 | `config` | Model, policy, and credential-reference examples |
 
@@ -46,10 +46,11 @@ Install after those checks pass:
 ```bash
 ./scripts/install-local.sh
 loop doctor --auth
+herdr
 loop
 ```
 
-Bare `loop` creates a Herdr workspace and opens an idle Pi Lead without sending a model request. `loop run "Implement feature X"` opens the same Lead with an initial intent. The installed Pi extension turns that intent into a validated DAG and invokes the standalone Loop executable. `/loop status`, `/loop graph`, `/loop workers`, `/loop attention`, `/loop models`, `/loop cancel`, and `/loop resume` remain available inside Pi.
+Start Herdr first, then run `loop` in a Herdr pane or use the `Open Loop Agent` plugin action. Bare `loop` opens the interactive Pi-backed Loop Lead in that same terminal; it never creates or attaches a Herdr workspace for itself. `loop run "Implement feature X"` opens the same Lead with an initial intent. The bundled Loop extension turns that intent into a validated DAG, invokes the private scheduler command, and reports the `loop` lifecycle to Herdr. `/loop status`, `/loop graph`, `/loop workers`, `/loop attention`, `/loop models`, `/loop cancel`, and `/loop resume` remain available inside the Lead.
 
 `loop doctor --auth` verifies the configured Pi Lead provider, Codex native login, and AGY native keyring through their own read-only CLI status commands. It never asks those CLIs to reveal a credential and never sends a model prompt. AGY workers remain Herdr-managed `agy` CLI processes; Loop does not store or forward an AGY key.
 
