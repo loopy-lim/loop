@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 
 import { assertWorktreeInsideProject } from "./worktree";
 import type {
@@ -239,7 +240,10 @@ export class HerdrWorkerRuntime {
 function workerName(taskId: string): string {
   const safe = taskId.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
   if (!safe) throw new Error("task id cannot produce a Herdr worker name");
-  return `loop-${safe}`.slice(0, 63);
+  const name = `loop-${safe}`;
+  if (name.length <= 32) return name;
+  const suffix = createHash("sha256").update(name).digest("hex").slice(0, 8);
+  return `${name.slice(0, 23)}-${suffix}`;
 }
 
 function validateHandle(handle: HerdrWorkerHandle): void {

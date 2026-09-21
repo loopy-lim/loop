@@ -95,6 +95,33 @@ test("uses an explicit caller pane instead of creating a workspace", async () =>
   expect(runner.calls[1]).toEqual(["pane", "run", "w7:p2", "bun", "test"]);
 });
 
+test("long requested agent names stay unique within Herdr's 32-character limit", async () => {
+  const runtime = new HerdrWorkerRuntime({ runner: scriptedRunner() });
+  const common = "loop-12345678-1234-1234-1234-123456789012-lead";
+  const first = await runtime.start({
+    projectRoot: "/project",
+    runId: "run-long",
+    taskId: "lead-a",
+    workerName: `${common}-a`,
+    worktree: "/project",
+    execution: { type: "agent", kind: "pi", args: [] },
+    prompt: "",
+  });
+  const second = await runtime.start({
+    projectRoot: "/project",
+    runId: "run-long",
+    taskId: "lead-b",
+    workerName: `${common}-b`,
+    worktree: "/project",
+    execution: { type: "agent", kind: "pi", args: [] },
+    prompt: "",
+  });
+
+  expect(first.workerId).toMatch(/^[a-z][a-z0-9_-]{0,31}$/);
+  expect(second.workerId).toMatch(/^[a-z][a-z0-9_-]{0,31}$/);
+  expect(first.workerId).not.toBe(second.workerId);
+});
+
 test("surfaces redacted structured Herdr errors", async () => {
   const runtime = new HerdrWorkerRuntime({
     runner: {
