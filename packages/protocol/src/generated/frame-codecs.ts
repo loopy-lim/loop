@@ -221,8 +221,8 @@ export const addTaskCodec: FrameCodec<AddTaskInput, OperationOutput> = {
         {
           const _arr = args.task.completionChecks[_i].args;
           parts.push(_pcEncodeVarint(_arr.length));
-          for (let _i = 0; _i < _arr.length; _i++) {
-            parts.push(_pcEncodeString(_arr[_i]));
+          for (let _ii = 0; _ii < _arr.length; _ii++) {
+            parts.push(_pcEncodeString(_arr[_ii]));
           }
         }
         {
@@ -1407,46 +1407,46 @@ export const submitPlanCodec: FrameCodec<SubmitPlanInput, SubmitPlanOutput> = {
         {
           const _arr = args.tasks[_i].dependencies;
           parts.push(_pcEncodeVarint(_arr.length));
-          for (let _i = 0; _i < _arr.length; _i++) {
-            parts.push(_pcEncodeString(_arr[_i]));
+          for (let _ii = 0; _ii < _arr.length; _ii++) {
+            parts.push(_pcEncodeString(_arr[_ii]));
           }
         }
         {
           const _arr = args.tasks[_i].readScope;
           parts.push(_pcEncodeVarint(_arr.length));
-          for (let _i = 0; _i < _arr.length; _i++) {
-            parts.push(_pcEncodeString(_arr[_i]));
+          for (let _ii = 0; _ii < _arr.length; _ii++) {
+            parts.push(_pcEncodeString(_arr[_ii]));
           }
         }
         {
           const _arr = args.tasks[_i].writeScope;
           parts.push(_pcEncodeVarint(_arr.length));
-          for (let _i = 0; _i < _arr.length; _i++) {
-            parts.push(_pcEncodeString(_arr[_i]));
+          for (let _ii = 0; _ii < _arr.length; _ii++) {
+            parts.push(_pcEncodeString(_arr[_ii]));
           }
         }
         {
           const _arr = args.tasks[_i].requirements;
           parts.push(_pcEncodeVarint(_arr.length));
-          for (let _i = 0; _i < _arr.length; _i++) {
-            parts.push(_pcEncodeString(_arr[_i]));
+          for (let _ii = 0; _ii < _arr.length; _ii++) {
+            parts.push(_pcEncodeString(_arr[_ii]));
           }
         }
         {
           const _arr = args.tasks[_i].completionChecks;
           parts.push(_pcEncodeVarint(_arr.length));
-          for (let _i = 0; _i < _arr.length; _i++) {
-            parts.push(_pcEncodeString(args.tasks[_i].completionChecks[_i].id));
-            parts.push(_pcEncodeString(args.tasks[_i].completionChecks[_i].command));
+          for (let _ii = 0; _ii < _arr.length; _ii++) {
+            parts.push(_pcEncodeString(args.tasks[_i].completionChecks[_ii].id));
+            parts.push(_pcEncodeString(args.tasks[_i].completionChecks[_ii].command));
             {
-              const _arr = args.tasks[_i].completionChecks[_i].args;
+              const _arr = args.tasks[_i].completionChecks[_ii].args;
               parts.push(_pcEncodeVarint(_arr.length));
-              for (let _i = 0; _i < _arr.length; _i++) {
-                parts.push(_pcEncodeString(_arr[_i]));
+              for (let _iii = 0; _iii < _arr.length; _iii++) {
+                parts.push(_pcEncodeString(_arr[_iii]));
               }
             }
             {
-              const _opt = args.tasks[_i].completionChecks[_i].workingDirectory;
+              const _opt = args.tasks[_i].completionChecks[_ii].workingDirectory;
               if (_opt === null || _opt === undefined) {
                 parts.push(new Uint8Array([0]));
               } else {
@@ -1454,7 +1454,7 @@ export const submitPlanCodec: FrameCodec<SubmitPlanInput, SubmitPlanOutput> = {
                 parts.push(_pcEncodeString(_opt));
               }
             }
-            parts.push(_pcEncodeVarint64(args.tasks[_i].completionChecks[_i].timeoutMs));
+            parts.push(_pcEncodeVarint64(args.tasks[_i].completionChecks[_ii].timeoutMs));
           }
         }
         {
