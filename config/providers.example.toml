@@ -1,0 +1,39 @@
+# Copy to a user-local configuration file and keep credentials in the named
+# environment variables or in each provider's native authentication store.
+
+[lead]
+command = "pi"
+provider = "zai"
+model = "glm-5.3-flash"
+
+[providers.codex]
+command = "codex"
+enabled = true
+auth = "native"
+mode = "interactive"
+
+[providers.antigravity]
+command = "agy"
+enabled = true
+auth = "native"
+mode = "interactive"
+
+[providers.zai]
+endpoint = "https://api.z.ai/api/paas/v4"
+api_key_env = "ZAI_API_KEY"
+enabled = false
+auth = "api_key"
+mode = "api"
+
+[providers.zai_cli]
+command = "zai"
+enabled = false
+auth = "native"
+mode = "interactive"
+
+[providers.jev]
+endpoint = "http://127.0.0.1:8089"
+enabled = false
+fallback = "deterministic"
+auth = "none"
+mode = "api"

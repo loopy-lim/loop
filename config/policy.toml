@@ -1,0 +1,21 @@
+[scheduler]
+max_parallel = 3
+max_frontier_workers = 1
+decision_parallelism = 1
+integration_parallelism = 1
+unknown_write_scope_is_exclusive = true
+
+[routing]
+default_compute_class = "fast"
+high_risk_floor = "strong"
+critical_risk_floor = "frontier"
+escalation = ["deterministic", "typed_decision", "tiny", "fast", "balanced", "strong", "frontier"]
+
+[recovery]
+missing_worker_state = "lost"
+require_live_confirmation = true
+
+[attention]
+maximum_findings = 5
+status_line_limit = 8
+attention_line_limit = 6

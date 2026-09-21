@@ -1,0 +1,81 @@
+# Business logic selects compute classes. Concrete provider/model identifiers live here.
+
+[[models]]
+id = "deterministic-local"
+provider = "local"
+compute_class = "deterministic"
+capabilities = { coding = 0, reasoning = 0, tools = 0, vision = 0, long_context = 0 }
+latency = 0
+cost_weight = 0
+
+[[models]]
+id = "jev-typed-decision"
+provider = "jev"
+compute_class = "typed_decision"
+capabilities = { coding = 0, reasoning = 2, tools = 0, vision = 0, long_context = 1 }
+latency = 1
+cost_weight = 1
+
+[[models]]
+id = "glm-5.3-flash"
+provider = "zai"
+compute_class = "fast"
+capabilities = { coding = 3, reasoning = 3, tools = 2, vision = 0, long_context = 3 }
+latency = 1
+cost_weight = 1
+
+[[models]]
+id = "gemini-3.8-flash-low"
+provider = "antigravity"
+compute_class = "tiny"
+capabilities = { coding = 2, reasoning = 2, tools = 3, vision = 2, long_context = 3 }
+latency = 1
+cost_weight = 1
+
+[[models]]
+id = "gpt-5.6-luna"
+provider = "codex"
+compute_class = "fast"
+capabilities = { coding = 3, reasoning = 3, tools = 4, vision = 2, long_context = 3 }
+latency = 1
+cost_weight = 1
+
+[[models]]
+id = "gpt-5.6-terra"
+provider = "codex"
+compute_class = "balanced"
+capabilities = { coding = 4, reasoning = 4, tools = 4, vision = 3, long_context = 4 }
+latency = 2
+cost_weight = 2
+
+[[models]]
+id = "gemini-3.8-flash-high"
+provider = "antigravity"
+compute_class = "balanced"
+capabilities = { coding = 4, reasoning = 4, tools = 4, vision = 4, long_context = 4 }
+latency = 2
+cost_weight = 2
+
+[[models]]
+id = "gpt-5.6-sol"
+provider = "codex"
+compute_class = "strong"
+capabilities = { coding = 5, reasoning = 5, tools = 5, vision = 3, long_context = 5 }
+latency = 3
+cost_weight = 3
+
+[[models]]
+id = "gemini-3.1-pro-high"
+provider = "antigravity"
+compute_class = "strong"
+capabilities = { coding = 5, reasoning = 5, tools = 4, vision = 4, long_context = 5 }
+latency = 3
+cost_weight = 3
+
+[[models]]
+id = "gpt-6-astra"
+provider = "codex"
+compute_class = "frontier"
+capabilities = { coding = 5, reasoning = 5, tools = 5, vision = 5, long_context = 5 }
+latency = 4
+cost_weight = 5
