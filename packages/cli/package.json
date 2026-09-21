@@ -1,0 +1,15 @@
+{
+  "name": "@loop/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "loop": "./src/main.ts"
+  },
+  "dependencies": {
+    "@loop/herdr": "workspace:*",
+    "@loop/orchestrator": "workspace:*",
+    "@loop/protocol": "workspace:*",
+    "@loop/providers": "workspace:*"
+  }
+}
