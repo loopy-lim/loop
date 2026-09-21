@@ -58,3 +58,28 @@ compute_class = "frontier"
 capabilities = { coding = 5, reasoning = 5, tools = 2, vision = 0, long_context = 5 }
 latency = 3
 cost_weight = 3
+# Antigravity 영속 드라이버 후보(agy 사용량): pi 다음 순서의 대안으로 편성된다.
+
+[[models]]
+id = "gemini-3.8-flash-high"
+provider = "antigravity"
+compute_class = "balanced"
+capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 2, long_context = 4 }
+latency = 2
+cost_weight = 2
+
+[[models]]
+id = "gemini-3.1-pro-high"
+provider = "antigravity"
+compute_class = "strong"
+capabilities = { coding = 5, reasoning = 5, tools = 4, vision = 4, long_context = 5 }
+latency = 3
+cost_weight = 3
+
+[[models]]
+id = "gemini-3.1-pro-low"
+provider = "antigravity"
+compute_class = "frontier"
+capabilities = { coding = 5, reasoning = 5, tools = 4, vision = 4, long_context = 5 }
+latency = 3
+cost_weight = 4

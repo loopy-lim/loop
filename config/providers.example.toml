@@ -21,11 +21,13 @@ enabled = false
 auth = "native"
 mode = "interactive"
 
+# 영속 stream-json 드라이버(2026-09-21): 프로세스 하나로 대화를 이어가며
+# agy 사용량을 소모한다. 키는 agy 네이티브 인증에만 존재한다.
 [providers.antigravity]
 command = "agy"
-enabled = false
+enabled = true
 auth = "native"
-mode = "interactive"
+mode = "persistent"
 
 [providers.zai]
 endpoint = "https://api.z.ai/api/paas/v4"

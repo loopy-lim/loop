@@ -18,6 +18,13 @@ test("loads the repository configuration into typed runtime data", () => {
   expect(config.scheduler.maxWorkers).toBe(3);
   expect(config.scheduler.maxFrontierWorkers).toBe(1);
   expect(config.routing.defaultComputeClass).toBe("fast");
+  expect(config.output).toEqual({
+    statusLineLimit: 8,
+    attentionLineLimit: 6,
+    findingsLineLimit: 5,
+    listLineLimit: 8,
+    lineTextLimit: 160,
+  });
   expect(config.lead).toEqual({ command: "pi", provider: "zai", model: "glm-5.3-flash" });
   expect(config.providers.codex?.command).toBe("codex");
 
@@ -28,6 +35,7 @@ test("loads the repository configuration into typed runtime data", () => {
   expect(registry.get("glm-5.3-flash").computeClass).toBe("typed_decision");
   expect(registry.forComputeClass("frontier").map((model) => model.id)).toEqual([
     "zai/glm-5.2",
+    "gemini-3.1-pro-low",
   ]);
 });
 
@@ -86,6 +94,45 @@ test("reports missing required configuration files with a stable error code", ()
   }
 });
 
+test("preserves custom output limits", () => {
+  const directory = configurationDirectory(policy(2, 1, {
+    statusLineLimit: 9,
+    attentionLineLimit: 7,
+    findingsLineLimit: 4,
+    listLineLimit: 6,
+    lineTextLimit: 120,
+  }));
+
+  expect(loadLoopConfig({ configDirectory: directory }).output).toEqual({
+    statusLineLimit: 9,
+    attentionLineLimit: 7,
+    findingsLineLimit: 4,
+    listLineLimit: 6,
+    lineTextLimit: 120,
+  });
+});
+
+test.each([
+  ["status_line_limit", "0"],
+  ["attention_line_limit", "-1"],
+  ["findings_line_limit", "0"],
+  ["list_line_limit", "-2"],
+  ["line_text_limit", "0"],
+  ["line_text_limit", undefined],
+])("rejects invalid output policy %s=%s", (field, value) => {
+  const output = [
+    "status_line_limit = 8",
+    "attention_line_limit = 6",
+    "findings_line_limit = 5",
+    "list_line_limit = 8",
+    "line_text_limit = 160",
+  ].filter((line) => !line.startsWith(`${field} =`));
+  if (value !== undefined) output.push(`${field} = ${value}`);
+  const directory = configurationDirectory(`${policy(2, 1).split("[output]")[0]}[output]\n${output.join("\n")}\n`);
+
+  expect(() => loadLoopConfig({ configDirectory: directory })).toThrow(/positive integer/);
+});
+
 function models(options: { duplicate?: boolean; computeClass?: string }): string {
   const entry = `
 [[models]]
@@ -99,7 +146,17 @@ cost_weight = 1
   return options.duplicate ? `${entry}${entry}` : entry;
 }
 
-function policy(maxWorkers: number, maxFrontierWorkers: number): string {
+function policy(
+  maxWorkers: number,
+  maxFrontierWorkers: number,
+  output = {
+    statusLineLimit: 8,
+    attentionLineLimit: 6,
+    findingsLineLimit: 5,
+    listLineLimit: 8,
+    lineTextLimit: 160,
+  },
+): string {
   return `
 [scheduler]
 max_parallel = ${maxWorkers}
@@ -111,11 +168,21 @@ high_risk_floor = "strong"
 critical_risk_floor = "frontier"
 escalation = ["deterministic", "typed_decision", "tiny", "fast", "balanced", "strong", "frontier"]
 
-[attention]
-maximum_findings = 5
-status_line_limit = 8
-attention_line_limit = 6
+[output]
+status_line_limit = ${output.statusLineLimit}
+attention_line_limit = ${output.attentionLineLimit}
+findings_line_limit = ${output.findingsLineLimit}
+list_line_limit = ${output.listLineLimit}
+line_text_limit = ${output.lineTextLimit}
 `;
+}
+
+function configurationDirectory(policyText: string): string {
+  const directory = mkdtempSync(join(tmpdir(), "loop-config-output-"));
+  writeFileSync(join(directory, "models.toml"), models({}));
+  writeFileSync(join(directory, "policy.toml"), policyText);
+  writeFileSync(join(directory, "providers.toml"), providers("valid"));
+  return directory;
 }
 
 function providers(scenario: string): string {

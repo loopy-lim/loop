@@ -2,6 +2,7 @@ import { HerdrWorkerRuntime } from "@loop/herdr";
 import {
   AntigravityProvider,
   CodexProvider,
+  AgyPersistentProvider,
   HerdrAgentProvider,
   PiProvider,
   ProviderRegistry,
@@ -42,13 +43,21 @@ export function buildProviderRegistry(options: ProviderCompositionOptions): Prov
       } else if (providerId === "antigravity") {
         providers.push(providerConfig.mode === "interactive"
           ? visibleAgent(id, "agy", model, providerConfig, options.projectRoot, herdr)
-          : new AntigravityProvider({
-              id,
-              cwd: options.projectRoot,
-              command: providerConfig.command,
-              model: model.id,
-              computeClasses: [model.computeClass],
-            }));
+          : providerConfig.mode === "persistent"
+            ? new AgyPersistentProvider({
+                id,
+                cwd: options.projectRoot,
+                command: providerConfig.command,
+                model: model.id,
+                computeClasses: [model.computeClass],
+              })
+            : new AntigravityProvider({
+                id,
+                cwd: options.projectRoot,
+                command: providerConfig.command,
+                model: model.id,
+                computeClasses: [model.computeClass],
+              }));
       } else if (providerId === "pi") {
         providers.push(providerConfig.mode === "interactive"
           ? visibleAgent(id, "pi", model, providerConfig, options.projectRoot, herdr)

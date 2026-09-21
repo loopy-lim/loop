@@ -25,7 +25,7 @@ export interface ProviderConfig {
   endpoint?: string;
   auth?: "api_key" | "native" | "none";
   apiKeyEnv?: string;
-  mode?: "api" | "cli" | "interactive";
+  mode?: "api" | "cli" | "interactive" | "persistent";
   fallback?: string;
 }
 
@@ -42,10 +42,12 @@ export interface LoopConfig {
     criticalRiskFloor: ComputeClass;
     escalation: ComputeClass[];
   };
-  attention: {
-    maximumFindings: number;
+  output: {
     statusLineLimit: number;
     attentionLineLimit: number;
+    findingsLineLimit: number;
+    listLineLimit: number;
+    lineTextLimit: number;
   };
   lead: {
     command: string;
@@ -112,7 +114,7 @@ export function loadLoopConfig(options: LoadLoopConfigOptions = {}): LoopConfig 
   const models = parseModels(modelsDocument);
   const scheduler = record(policyDocument.scheduler, "policy.scheduler");
   const routing = record(policyDocument.routing, "policy.routing");
-  const attention = record(policyDocument.attention, "policy.attention");
+  const output = record(policyDocument.output, "policy.output");
   const maxWorkers = positiveInteger(scheduler.max_parallel, "scheduler.max_parallel");
   const maxFrontierWorkers = positiveInteger(
     scheduler.max_frontier_workers,
@@ -143,13 +145,18 @@ export function loadLoopConfig(options: LoadLoopConfigOptions = {}): LoopConfig 
         computeClass(value, `routing.escalation[${index}]`),
       ),
     },
-    attention: {
-      maximumFindings: positiveInteger(attention.maximum_findings, "attention.maximum_findings"),
-      statusLineLimit: positiveInteger(attention.status_line_limit, "attention.status_line_limit"),
+    output: {
+      statusLineLimit: positiveInteger(output.status_line_limit, "output.status_line_limit"),
       attentionLineLimit: positiveInteger(
-        attention.attention_line_limit,
-        "attention.attention_line_limit",
+        output.attention_line_limit,
+        "output.attention_line_limit",
       ),
+      findingsLineLimit: positiveInteger(
+        output.findings_line_limit,
+        "output.findings_line_limit",
+      ),
+      listLineLimit: positiveInteger(output.list_line_limit, "output.list_line_limit"),
+      lineTextLimit: positiveInteger(output.line_text_limit, "output.line_text_limit"),
     },
     lead: {
       command: text(lead.command, "lead.command"),

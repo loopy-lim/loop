@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import * as protocol from "@loop/protocol";
-import { runCli, type CliIo } from "../src/main";
+import {
+  formatDoctorChecks,
+  formatModelList,
+  formatSnapshot,
+  runCli,
+  type CliIo,
+} from "../src/main";
 
 const root = resolve(import.meta.dir, "../../..");
 
@@ -100,6 +106,7 @@ test("loop run starts the interactive Loop agent in the current terminal", async
       "Implement feature X",
     ],
     cwd: process.cwd(),
+    configDirectory: join(root, "config"),
   }]);
   expect(capture.stdout()).toBe("");
 });
@@ -137,6 +144,7 @@ test("interactive Loop agent loads only its adjacent extension", async () => {
       "glm-5.3-flash",
     ],
     cwd: "/project",
+    configDirectory: undefined,
   });
 });
 
@@ -168,6 +176,7 @@ test("bare loop starts the interactive Loop agent without launching or attaching
       "glm-5.3-flash",
     ],
     cwd: process.cwd(),
+    configDirectory: join(root, "config"),
   }]);
   expect(capture.stdout()).toBe("");
   expect(capture.stderr()).toBe("");
@@ -211,7 +220,9 @@ test("doctor auth checks native stores without requesting or printing credential
     expect.objectContaining({ name: "pi", ok: true, auth: "ready" }),
   );
   expect(report.checks.some((check) => check.name === "codex")).toBe(false);
-  expect(report.checks.some((check) => check.name === "antigravity")).toBe(false);
+  expect(report.checks).toContainEqual(
+    expect.objectContaining({ name: "antigravity", ok: true }),
+  );
 });
 
 test("offline installation verification proves the fake-provider milestone", async () => {
@@ -225,6 +236,74 @@ test("offline installation verification proves the fake-provider milestone", asy
     maxConcurrent: 3,
     escalations: 1,
   });
+});
+
+test("human CLI renderers share line limits and exact overflow summaries", () => {
+  const limits = {
+    statusLineLimit: 8,
+    attentionLineLimit: 4,
+    findingsLineLimit: 5,
+    listLineLimit: 4,
+    lineTextLimit: 160,
+  };
+  const snapshot = {
+    runId: "render-run",
+    state: "active",
+    tasks: Array.from({ length: 7 }, (_, index) => ({ id: `task-${index + 1}`, state: "ready" })),
+    activeWorkers: Array.from({ length: 7 }, (_, index) => ({
+      id: `worker-${index + 1}`,
+      taskId: `task-${index + 1}`,
+    })),
+    openAttentionIds: Array.from({ length: 7 }, (_, index) => `attention-${index + 1}`),
+  };
+
+  expect(formatSnapshot("graph", snapshot, limits).trim().split("\n")).toEqual([
+    "task-1 · ready",
+    "task-2 · ready",
+    "task-3 · ready",
+    "… 4 more tasks",
+  ]);
+  expect(formatSnapshot("workers", snapshot, limits).trim().split("\n").at(-1))
+    .toBe("… 4 more workers");
+  expect(formatSnapshot("attention", snapshot, limits).trim().split("\n")).toEqual([
+    "Attention: 7 open",
+    "attention-1",
+    "attention-2",
+    "… 5 more attention items",
+  ]);
+  expect(formatModelList(
+    Array.from({ length: 7 }, (_, index) => ({
+      computeClass: "fast" as const,
+      id: `model-${index + 1}`,
+    })),
+    limits,
+  ).trim().split("\n").at(-1)).toBe("… 4 more models");
+
+  const doctor = formatDoctorChecks([
+    { name: "pass-1", ok: true, detail: "ready" },
+    { name: "fail-1", ok: false, detail: "missing" },
+    { name: "pass-2", ok: true, detail: "ready" },
+    { name: "fail-2", ok: false, detail: "missing" },
+    { name: "pass-3", ok: true, detail: "ready" },
+  ], limits);
+  expect(doctor.trim().split("\n")).toEqual([
+    "Loop doctor",
+    "! fail-1: missing",
+    "! fail-2: missing",
+    "… 3 more checks (2 failed, 3 passed)",
+  ]);
+});
+
+test("human models output is a bounded list while JSON remains complete", async () => {
+  const human = output();
+  const json = output();
+
+  expect(await runCli(["models", "--config", join(root, "config")], { io: human.io })).toBe(0);
+  expect(await runCli(["models", "--config", join(root, "config"), "--json"], { io: json.io }))
+    .toBe(0);
+  expect(human.stdout()).not.toContain("[");
+  expect(human.stdout()).toContain("fast · zai/glm-5.3-flash");
+  expect(JSON.parse(json.stdout())).toHaveLength(10);
 });
 
 function output(): {
