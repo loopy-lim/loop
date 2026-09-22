@@ -3,6 +3,35 @@
 # syntax "zai/glm-5.3-flashx", ":<thinking>"), codex exec carries gpt-5.6
 # luna/terra/sol (smoke-verified), and antigravity gemini remains fallback.
 
+# pi catalog provisioning (2026-09-22 model-environment decision): ids below
+# that are missing from pi's built-in catalogs are synced into pi's
+# models.json (PI_CODING_AGENT_DIR/models.json, default ~/.pi/agent) by the
+# provider adapter layer, removing the "Using custom model id" warning and its
+# wrong-metadata fallback. Bare ids (no "provider/" prefix) resolve against
+# default_provider. Declare metadata ONLY for ids the built-in catalog lacks;
+# a metadata-less id relies on the built-in catalog unchanged. Metadata below
+# mirrors pi's built-in glm-5.3-flash with cost scaled by the 2.5x flashx
+# quota ratio noted on the entries (smoke-verified, tunable here).
+[pi]
+default_provider = "zai"
+
+[pi.models."glm-5.3-flashx"]
+name = "GLM-5.3-FlashX"
+reasoning = true
+context_window = 1000000
+max_tokens = 131072
+input = ["text"]
+cost = { input = 0.375, output = 1.25, cache_read = 0.075, cache_write = 0 }
+
+[pi.models."glm-5.3-flashx".compat]
+supports_store = false
+supports_developer_role = false
+supports_reasoning_effort = true
+max_tokens_field = "max_tokens"
+thinking_format = "zai"
+supports_strict_mode = true
+zai_tool_stream = true
+
 [[models]]
 id = "deterministic-local"
 provider = "local"

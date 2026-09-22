@@ -25,6 +25,8 @@ Jev is no longer a supported provider. A disabled legacy `[providers.jev]` stanz
 
 Run `loop doctor --auth` to check the Pi Lead provider, Codex native login, and AGY native keyring without printing credentials or sending a model prompt. AGY authentication stays inside the installed `agy` CLI, which Herdr launches as `agent kind=agy`; there is no Loop-specific AGY credential store.
 
+Custom model ids (for example `glm-5.3-flashx` on the pi lane) are registered into pi's catalog by syncing `config/models.toml` profiles into a pi `models.json` fragment, so they spawn without the "Using custom model id" warning. Named Lead personas and the portable config roots checked by `loop doctor` (`LOOP_CONFIG_DIR`, `PI_CODING_AGENT_DIR`, `HERDR_*`) are described in [docs/environment-generalization.md](environment-generalization.md).
+
 ## Evidence boundary
 
 Fake-run, adapter-contract, cancellation, redaction, and capability tests run offline. They prove integration behavior, not that a user's provider account is authenticated or has quota. Authenticated provider smoke tests are deliberately separate and are not required by the default test suite.

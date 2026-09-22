@@ -9,4 +9,5 @@ export * from "./antigravity/adapter";
 export * from "./zai/api";
 export * from "./zai/cli";
 export * from "./pi/adapter";
+export * from "./pi/models-json";
 export * from "./antigravity/persistent";
