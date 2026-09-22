@@ -1,0 +1,100 @@
+# Persona Briefing: Game Developer & Embedded / Performance-Critical Developer
+
+- **Date:** 2026-09-22
+- **Purpose:** Research deliverable for Loop's persona-driven development-analysis capability. Describes how game developers and embedded/perf-critical developers actually build software — budget-driven profiling loops, data-driven content pipelines, reproducible builds, determinism engineering, automated playtesting, and hardware-in-the-loop verification — with observable patterns that can be encoded as workflow profiles and matched against Loop's own run traces.
+- **Method:** Synthesis of primary public sources — GDC talk recordings (Ensemble Studios' "1500 Archers", Blizzard's Overwatch architecture talk, Rare's Sea of Thieves testing talk), the CppCon data-oriented-design talk, id Software's open-sourced Doom repository, Epic's Unreal automation documentation, embedded tooling documentation (Zephyr Twister, Renode, ESP-IDF), the Reproducible Builds project, and the classic JPL/IEEE safety-critical literature. All links verified reachable (see Sources).
+- **Relation to prior briefings:** `bigtech-engineer.md` covered coordination-at-scale gates (review, staged rollout, postmortem); `datasci-sre.md` covered evidence-gated promotion (experiments, error budgets, runbooks). This briefing adds the third constraint family both prior personas lack: **hard physical budgets** — the machine and the frame are finite, latency is user-visible, and some verification only counts when it runs on real hardware. The frame-time budget is the same structural device as the SRE error budget (a numeric allowance, spent consciously), but it is enforced per-second by the machine rather than per-quarter by policy.
+
+## Who this persona is
+
+**The game developer** ships an interactive product whose quality is *felt* in real time: a dropped frame is a visible defect, an input-lag spike is a gameplay bug. The dominant constraint is a fixed per-frame time budget (16.6 ms at 60 fps, 33.3 ms at 30 fps) plus memory budgets carved up per team on memory-constrained consoles. The unit of work is the *iteration*: change something, run it, feel/measure it, repeat — hundreds of times per feature. Tooling (profilers, content cookers, hot reload, build farms) exists to shorten that loop, because iteration count per day is the team's actual productivity.
+
+**The embedded developer** ships firmware onto hardware they don't fully control, where the worst case matters more than the average: a missed deadline in a brake controller is not a p99 statistic, it is a recall. Resources (RAM, flash, CPU cycles) are fixed at board design time and budgeted statically. The unit of work is the *build configuration on a target*: code that runs on the host is suggestive, code that runs on the board is evidence. Tooling (test runners with hardware maps, board simulators, reproducible toolchains, restricted coding standards) exists to make target behavior observable and predictable before the device ships.
+
+Both halves share one discipline the other personas lack: **the acceptance criterion is a physical measurement, taken on physical hardware, against a budget fixed in advance.**
+
+## 1. Budget-driven, measurement-first iteration
+
+- The frame budget is the organizing artifact of game engineering. Every team splits a fixed per-frame time slice across gameplay, rendering, physics, audio, and loading; features compete for the slice, and "we're over frame" is a whole-team emergency, not one engineer's problem. The budget is numeric, known before implementation starts, and re-measured continuously — the structural twin of the SRE error budget, but enforced every 16 ms.
+- The matching discipline is **profile before optimize**. Mike Acton's widely-cited CppCon keynote argues that game programmers systematically waste effort solving problems they assumed mattered, when the hardware's actual behavior (cache misses, data layout) dominates — "the purpose of all programs, and all programmers, is to transform data," so measurement of data flow through real hardware is the only defensible starting point ([Acton, Data-Oriented Design and C++]).
+- Optimization is **experiment-shaped**: each candidate change is made, measured with a profiler capture, and compared against the previous capture; changes that don't move the number are reverted. Noel Llopis's classic writeup frames data-oriented design as exactly this loop — reorganize around how the data actually flows, measure, repeat — rather than an aesthetic preference ([Llopis, Data-Oriented Design]).
+- Embedded teams run the same loop against static budgets: X bytes of RAM per subsystem, Y% worst-case CPU utilization, Z microseconds worst-case interrupt latency. The Power of Ten rules — written for JPL safety-critical code — push in the same direction from the standards side: bounded loops, restricted dynamic memory, restricted language constructs, all warnings fatal, so the budget *can* be checked by tools rather than argued about ([Holzmann, The Power of 10]).
+
+## 2. Data-driven content pipelines: code and content evolve separately
+
+- Game teams split the world into an **engine** (code, slow-moving, owned by engineers) and **content** (levels, art, tuning tables, dialogue — fast-moving, owned by designers and artists). Content is *data*: it is loaded, not compiled. id Software's open-sourced Doom repository is the canonical artifact — the engine code and the WAD content files are separate concerns, and levels/spawns/weapon tuning are data modifiable without recompiling anything ([id-Software/DOOM]).
+- Content flows through a **pipeline**, not a directory: source assets (scenes, textures, audio) are "cooked"/imported into platform-specific runtime formats by automated pipeline steps, and the cooked output is what ships. Teams version both the sources and the pipeline; a broken cooker blocks the whole studio the way a broken build does.
+- The payoff is **iteration without recompilation**: designers tune a spawn table and re-run in seconds while engineers keep the engine building. Llopis's data-oriented argument is the engineering half of the same idea — when behavior is data-driven, the expensive compile/link/run cycle shrinks to a load cycle ([Llopis], [Acton]).
+- The cost is **pipeline maintenance**: importers, hot-reload machinery, and asset-version compatibility become first-class engineering products with their own bugs and their own CI. Data-driven design as a documented practice (Fabian's book-length treatment) catalogs how much machinery this separation requires ([Fabian, Data-Oriented Design]).
+
+## 3. Reproducible builds: same inputs, same bits, no exceptions
+
+- Both personas treat **build reproducibility** as a checked invariant, not a hope. Game consoles require certified, reproducible submission builds; embedded supply chains require that the firmware image in the field provably came from the source in the repository. The Reproducible Builds project codifies the property — identical source + toolchain → bit-for-bit identical artifacts — and the tooling to pin and verify it ([Reproducible Builds]).
+- The enabling practice is **toolchain pinning**: exact compiler version, exact flags, exact dependency versions, recorded in the repo. Nothing about "it built on my machine" is acceptable when the artifact is flashed into ten million devices or certified by a platform holder.
+- Reproducibility pairs with **build farms**: a central farm produces the canonical build, so local machines are accelerators, not sources of truth. Game studios run farm builds continuously (every commit); embedded teams gate releases on farm-produced, hash-verified artifacts.
+
+## 4. Determinism as a product feature
+
+- The classic demonstration is Ensemble Studios' Age of Empires networking: a **deterministic lockstep** simulation ships only player *commands* across a 28.8k modem while every peer simulates identical state — thousands of units synchronized over a connection that couldn't carry a single frame of state. The price is total determinism discipline: every peer must step the simulation identically, or the game desyncs into garbage ([Pritchard, 1500 Archers on a 28.8]).
+- Determinism requires controlling **time itself**: simulation steps at a fixed timestep accumulated from variable real-frame times, so results are independent of machine speed. Glenn Fiedler's widely-assigned "Fix Your Timestep!" is the standard reference for the accumulator pattern that keeps the simulation reproducible while rendering stays smooth ([Fiedler]).
+- Modern engines institutionalize determinism where it pays. Blizzard's Overwatch talk describes an ECS (entity-component-system) architecture chosen so that gameplay simulation stays data-oriented, deterministic-friendly, and testable — with netcode treated as a first-class architectural consumer of the simulation, not a bolt-on ([Orwig, Overwatch Gameplay Architecture and Netcode]).
+- The workflow consequence is distinctive: **recorded-input replay is a verification tool**. If the simulation is deterministic, a reported bug can be captured as an input recording and re-run bit-identically — the bug is reproducible on demand, which almost no other branch of software can claim.
+- Embedded shares the instinct: timing jitter is a defect, interrupt latency bounds are contractual, and code is written so worst-case execution time is analyzable (bounded loops, no unbounded recursion — Power of Ten rules 3 and 4 exist precisely for this).
+
+## 5. Automated playtesting: the game plays itself in CI
+
+- Rare's Sea of Thieves talk is the standard reference for **automated gameplay testing at scale**: an "Actor" framework where test actors (bots) log into real servers and *play the game* — sail the ship, fire the cannon, join a crew — inside CI. Every run captures synchronized video of the actual rendered game so failures can be triaged by watching, and the suite runs continuously against every build ([Masella, Automated Testing of Gameplay Features in 'Sea of Thieves']).
+- The layered structure mirrors the other personas' test pyramids but keyed to *play*: fast smoke tests ("does the game boot to the main menu on target hardware?") gate every build; full gameplay-feature tests run on a slower cadence; multi-hour **soak tests** hunt for leaks and drift that short tests structurally cannot see.
+- Epic's Unreal Engine ships this as platform infrastructure: the Automation System defines functional and smoke tests executed by the engine's test harness, and Gauntlet runs unattended game sessions (including self-playing bots and multi-device runs) in CI ([Unreal Automation System], [Unreal Gauntlet]).
+- The insight for trace-matching: in this persona the verification artifact is **evidence media** — captured video, logs, profile captures — reviewed by a human *after* the automated gate, rather than a bare pass/fail assertion.
+
+## 6. Hardware-in-the-loop: some evidence only counts on the board
+
+- Embedded CI reaches the same conclusion from the target side: **host tests are necessary, target tests are authoritative**. The Zephyr Project's Twister test runner executes firmware tests in QEMU for speed, but also drives *real boards* in racks via hardware-map files — the CI reserves specific physical devices, flashes them over debug probes, and collects results from the actual silicon ([Zephyr Twister]).
+- To keep the hardware funnel tractable, teams **simulate the board in software**: Renode emulates complete multi-node boards (MCU, peripherals, radio links) so most firmware verification runs in ordinary CI with no physical device at all, and hardware time is spent only where emulation diverges from reality ([Renode]).
+- The unit-testing layer follows the same dual-target pattern. ESP-IDF's docs describe Unity-based tests that run either on the host or on the chip over serial/JTAG, and James Grenning's *Test Driven Development for Embedded C* established the discipline: test hardware through fakes and abstractions on the fast host loop, and reserve the slow target loop for the code that genuinely touches the metal ([ESP-IDF Unit Testing], [Grenning]).
+- The resulting workflow shape is a **sim-first, hardware-later funnel**: thousands of host/simulator executions per day, dozens of target-hardware executions, each tier's cost justified by the previous tier's filter.
+
+## Observable patterns (for trace/profile matching)
+
+1. **Numeric budget as pre-declared acceptance criterion:** frame time, memory, and CPU budgets are fixed before implementation and re-measured continuously. In a trace: completion checks as numeric predicates ("p95 frame ≤ 16.6 ms") attached to implementation tasks, with a verification node that *measures* rather than asserts.
+2. **Profile-gated optimization loop:** no optimization without a measurement proving the problem, and each optimization is an experiment with a recorded before/after. In a trace: measure → change → re-measure triples with recorded deltas; optimization tasks whose outputs include a capture artifact; reverted changes when the delta is null.
+3. **Engine/content separation with a cooking stage:** behavior logic and data content evolve and version independently; data passes through an automated prepare/cook step before it can run. In a trace: data-prep/asset tasks as first-class nodes upstream of run/verify tasks; content edited and re-verified in fast loops that never touch the compile path.
+4. **Deterministic core with pinned inputs:** the simulation core runs at a fixed timestep with pinned seed/config so any run can be replayed bit-identically from recorded inputs. In a trace: a config-pinned simulation task plus a replay/recorded-input verification task that asserts identical output — reproducibility as a checked completion contract, not a slogan.
+5. **Evidence-media verification and soak testing:** automated play sessions run unattended (nightly or per-build), capture video/logs as the triage artifact, and deliberately include long-duration soak runs. In a trace: long-running verification nodes scheduled off the critical path in parallel, emitting artifact evidence rather than bare pass/fail; a slow verification tier downstream of a fast smoke tier.
+6. **Sim-first, hardware-later funnel:** verification is cheap-and-simulated by default and escalates to real hardware only where simulation diverges. In a trace: the same verification task existing in two environment tiers (emulator/host, then target hardware), with the hardware tier gated behind — or escalated from — the sim tier; hardware tier execution counts are orders of magnitude lower.
+7. **Reproducible-build invariant:** rebuilds from pinned toolchain + pinned inputs are hash-compared against canonical artifacts. In a trace: a reproducibility check node whose completion contract is a bit-identical hash match; failures treated as defects, not flakes.
+8. **Restricted, checkable coding standards:** constrained language subsets (bounded loops, no dynamic allocation after init, no recursion) exist so that static analysis and worst-case analysis *can* verify the code. In a trace: lint/static-analysis completion checks enforced machine-style as hard gates, independent of reviewer judgment — the bigtech "policy in tooling" pattern, tightened to survivability-grade.
+
+## Mapping to Loop workflow profiles
+
+- **Budget-first** (new profile candidate, game-dev-flavored): declare numeric acceptance thresholds *before* implementation, then iterate implementation↔measurement until the budget passes — the frame-budget loop, made mechanical.
+- **Spike-first** ≈ the profiler capture / playtest build: cheap, disposable runs whose value is measurement evidence, merged into the mainline only via the tuning changes they justify.
+- **TDD-first** ≈ the embedded dual-target discipline: the check is written first and run on the fast tier (host/emulator); promotion to the slow tier (target hardware) is a separate, explicit step — matching Loop's cheap-verify-first, escalate-on-failure structure.
+- **Plan-first** ≈ the budget sheet: like the SRE error-budget policy, the budget split is a serialized decision made before parallel implementation starts, so in-flight behavior is measurement-driven arithmetic rather than mid-run judgment.
+
+## Tensions and caveats
+
+- **Two sub-personas, opposite tolerances.** Game dev optimizes iteration speed *inside* a hard per-frame budget; embedded optimizes provable worst-case behavior. Both use numeric budgets, but game budgets are spent aggressively every frame while embedded budgets are sized with safety margin and rarely touched. Cross-field synthesis should keep the shared structure (numeric, pre-declared, machine-checked) and not flatten the different spending philosophies.
+- **The public record is talk-shaped.** Game-dev process knowledge lives mostly in GDC talks and studio folklore; the unglamorous build-farm and content-pipeline work is under-documented relative to its real cost. Embedded standards literature (MISRA C) is largely paywalled, so this briefing leans on the public Power of Ten paper and open-source tooling docs.
+- **Hardware-in-the-loop doesn't fully parallelize.** Physical devices are a scarce, serialized resource; CI pipelines that look embarrassingly parallel on the host become queue-bound at the board rack. Traces of real embedded teams should expect long wait-states in front of hardware tiers.
+- **Determinism is expensive and conditional.** Lockstep-grade determinism is maintained deliberately (and abandoned when the cost exceeds the benefit — most modern multiplayer titles are client-server instead). A determinism-replay pattern only transfers to work where outputs are pure functions of pinned inputs.
+
+## Sources
+
+- Mike Acton, *Data-Oriented Design and C++* (CppCon 2014) — https://www.youtube.com/watch?v=rX0ItVEVjHc
+- Noel Llopis, *Data-Oriented Design* (Games from Within, 2009) — https://gamesfromwithin.com/data-oriented-design
+- Richard Fabian, *Data-Oriented Design* (book) — https://www.dataorienteddesign.com/dodbook/
+- id Software, *DOOM* (original engine source and WAD content separation, open-sourced repository) — https://github.com/id-Software/DOOM
+- Matt Pritchard (Ensemble Studios), *1500 Archers on a 28.8: Network Programming in Age of Empires and Beyond* (GDC 2001; Game Developer/Gamasutra) — https://www.gamedeveloper.com/programming/1500-archers-on-a-28-8-network-programming-in-age-of-empires-and-beyond
+- Glenn Fiedler, *Fix Your Timestep!* (Gaffer On Games) — https://www.gafferongames.com/post/fix_your_timestep/
+- Philip Orwig (Blizzard), *Overwatch Gameplay Architecture and Netcode* (GDC 2017) — https://www.youtube.com/watch?v=8QHHVpBiG-I
+- Robert Masella (Rare), *Automated Testing of Gameplay Features in 'Sea of Thieves'* (GDC 2018) — https://www.youtube.com/watch?v=X673tOi8pU8
+- Epic Games, *Automation System in Unreal Engine* (official documentation) — https://dev.epicgames.com/documentation/en-us/unreal-engine/automation-system-in-unreal-engine
+- Epic Games, *Gauntlet Automation Tool in Unreal Engine* (official documentation) — https://dev.epicgames.com/documentation/en-us/unreal-engine/gauntlet-automation-tool-in-unreal-engine
+- The Zephyr Project, *Twister — Test Runner* (documentation, incl. hardware-map device testing) — https://docs.zephyrproject.org/latest/develop/test/twister.html
+- Antmicro, *Renode documentation* (open-source board/SoC simulation framework) — https://renode.readthedocs.io/en/latest/
+- Espressif, *ESP-IDF: Unit Testing* (documentation) — https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/unit-tests.html
+- James Grenning, *Test Driven Development for Embedded C* (Pragmatic Bookshelf) — https://pragprog.com/titles/jgade/test-driven-development-for-embedded-c/
+- Gerard J. Holzmann (JPL), *The Power of 10: Rules for Developing Safety-Critical Code* (IEEE Computer, June 2006) — http://web.eecs.umich.edu/~imarkov/10rules.pdf
+- Reproducible Builds project — https://reproducible-builds.org/
