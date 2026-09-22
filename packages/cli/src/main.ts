@@ -108,11 +108,22 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
       return 0;
     }
     if (["status", "graph", "workers", "attention", "cancel", "pause", "resume", "steer", "resolve", "reconcile", "task", "watch"].includes(parsed.command)) {
-      const runId = parsed.operands[0];
-      if (!runId) throw new UsageError(`${parsed.command} requires <run-id>`);
+      let runId = parsed.operands[0];
       const config = configuration(parsed);
       const protocol = await loadProtocol();
       await protocol.rustra.ready();
+      if (!runId) {
+        if (parsed.command === "status" || parsed.command === "watch") {
+          const runs = await protocol.listRuns({ databasePath: config.databasePath });
+          if (runs.length === 0) {
+            io.stdout("No runs\n");
+            return 0;
+          }
+          runId = runs[0].runId;
+        } else {
+          throw new UsageError(`${parsed.command} requires <run-id>`);
+        }
+      }
       const input = { databasePath: config.databasePath, runId };
       if (parsed.command === "cancel") await protocol.cancelRun(input);
       if (parsed.command === "pause") await protocol.pauseRun(input);
@@ -146,7 +157,7 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
         await launchOwner(parsed, config, runId, plan.workingDirectory, options);
       }
       if (parsed.command === "watch") {
-        await observeRun({ snapshot: () => protocol.getSnapshot(input), onSnapshot: snapshot => io.stdout(parsed.json ? JSON.stringify(snapshot) + "\n" : formatSnapshot("status", snapshot, config.output)) });
+        await observeRun({ snapshot: () => protocol.getSnapshot(input), onSnapshot: snapshot => io.stdout(parsed.json ? JSON.stringify(snapshot) + "\n" : "\x1b[2J\x1b[H" + formatSnapshot("status", snapshot, config.output)) });
       } else {
         const snapshot = await protocol.getSnapshot(input);
         if (parsed.json) io.stdout(`${JSON.stringify(snapshot)}\n`);
@@ -688,7 +699,7 @@ Usage:
   loop                                Start the interactive Loop agent in this terminal
   loop doctor [--auth] [--json]
   loop runs [--json]                Find persisted runs after reopening
-  loop status <run-id> [--json]
+  loop status [run-id] [--json]
   loop graph <run-id>
   loop workers <run-id>
   loop attention <run-id>
@@ -696,7 +707,7 @@ Usage:
   loop cancel <run-id>
   loop pause <run-id>               Finish active tasks, stop scheduling
   loop resume <run-id>              Continue the saved graph in the background
-  loop watch <run-id> [--json]
+  loop watch [run-id] [--json]
   loop reconcile <run-id> <task-id> stopped  Confirm an orphaned task stopped before retrying
   loop task <run-id> <task-id>       Show context, results and verification evidence
   loop steer <run-id> <task-id|all> <message>

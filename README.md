@@ -61,7 +61,7 @@ Loop reports run lifecycle to Herdr. Start Herdr first (`herdr`), then run `loop
 
 The bundled Loop extension turns that intent into a validated DAG, invokes the private scheduler command, and reports the `loop` lifecycle to Herdr. Inside the Lead, commands like `/loop status`, `/loop graph`, `/loop workers`, `/loop attention`, `/loop models`, `/loop cancel`, and `/loop resume` remain available.
 
-For run control — observing runs, pausing and resuming, steering tasks, and continuing after the terminal closes — see [docs/reliable-runs.md](reliable-runs.md).
+For run control — observing runs, pausing and resuming, steering tasks, and continuing after the terminal closes — see [docs/reliable-runs.md](reliable-runs.md). You can also run `loop status [run-id]` and `loop watch [run-id]` to view the current run state.
 
 `loop doctor --auth` verifies the configured Pi Lead provider, Codex native login, and AGY native keyring through their own read-only CLI status commands. It never asks those CLIs to reveal a credential and never sends a model prompt. AGY workers remain Herdr-managed `agy` CLI processes; Loop does not store or forward an AGY key.
 

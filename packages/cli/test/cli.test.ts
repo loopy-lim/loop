@@ -20,7 +20,7 @@ test("help is available without configuration or native initialization", async (
 
   expect(exitCode).toBe(0);
   expect(capture.stdout()).toContain("Loop — dependency-aware engineering scheduler");
-  expect(capture.stdout()).toContain("loop status <run-id>");
+  expect(capture.stdout()).toContain("loop status [run-id]");
   expect(capture.stderr()).toBe("");
 });
 
