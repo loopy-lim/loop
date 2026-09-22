@@ -6,6 +6,28 @@ command = "pi"
 provider = "zai"
 model = "glm-5.3-flashx"
 
+# Custom model registration (2026-09-22 decision): this id and every worker
+# pattern in models.toml are resolved against pi's built-in provider catalog.
+# Loop's adapters sync the active profiles from models.toml into a pi models.json
+# fragment (upsert by id; built-in entries are kept), so ids missing from the
+# catalog — like glm-5.3-flashx — spawn without the
+# "Warning: Model ... not found ... Using custom model id." fallback and carry
+# correct contextWindow/maxTokens/cost metadata. Never hand-edit
+# ~/.pi/agent/models.json for Loop ids; models.toml stays the only id source.
+
+# Named Lead personas: config-driven instruction layers for the pi Lead.
+# The active persona's Markdown fragment is resolved relative to
+# LOOP_CONFIG_DIR and composed into the Lead's system instructions each turn.
+# Names pair with the persona-benchmark workflow profiles. Remove the
+# [lead.persona] tables to run the built-in instructions unchanged.
+[lead.persona]
+active = "plan-first"
+
+[lead.persona.files]
+plan-first = "personas/plan-first.md"
+spike-first = "personas/spike-first.md"
+tdd-first = "personas/tdd-first.md"
+
 # zai 볼륨 클래스(flash/flashx)는 pi로 실행한다. interactive면 Herdr 탭에서 pi TUI가
 # 보이고, process면 `pi -p` 헤드리스로 돈다. 모델 id는 pi 패턴 문법
 # ("zai/glm-5.3-flashx", ":<thinking>")을 따른다.
@@ -44,3 +66,13 @@ command = "zai"
 enabled = false
 auth = "native"
 mode = "interactive"
+
+# Portable config roots (multi-machine): the whole setup is two directories.
+#   LOOP_CONFIG_DIR      this Loop config directory (models.toml, policy.toml,
+#                        providers.toml, personas/)
+#   PI_CODING_AGENT_DIR  the pi config root, default ~/.pi/agent (holds the
+#                        synced models.json fragment and pi settings)
+#   HERDR_*              workspace/pane context used for run reporting
+# 'loop doctor' verifies that each set variable resolves to an existing,
+# readable directory. Dotfile both directories and every machine reproduces
+# the same Lead and worker behavior. See docs/environment-generalization.md.

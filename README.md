@@ -88,6 +88,6 @@ Loop does not automatically purge run data or workspaces to prevent unintended d
 - Active runs or runs requiring attention will never be deleted. Unmerged or dirty workspaces are also skipped and require manual attention.
 - Running `loop cleanup` will also identify and purge any leaked Herdr workspaces prefixed with `loop-loop-*` left over from failed teardowns.
 
-See `docs/architecture.md`, `docs/model-routing.md`, and `docs/provider-support.md` for the three implementation seams.
+See `docs/architecture.md`, `docs/model-routing.md`, and `docs/provider-support.md` for the three implementation seams. For running one setup across machines — pi `models.json` custom model registration, named Lead personas, and portable config roots verified by `loop doctor` — see [docs/environment-generalization.md](docs/environment-generalization.md).
 
 실행 관찰, 일시정지·재개, 지침 전달, 화면 종료 후 지속 실행은 [실행 제어 안내](reliable-runs.md)를 참고하세요.
