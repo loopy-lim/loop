@@ -16,7 +16,7 @@ interface PiProviderOptions {
 /**
  * Headless pi worker: runs `pi -p` as a one-shot process.
  * Model selection follows pi's pattern syntax ("zai/glm-5.3-flash",
- * "glm-5.3-flash", optionally ":<thinking>"), so every Loop model entry
+ * "zai/glm-5.3-flashx", optionally ":<thinking>"), so every Loop model entry
  * maps to a distinct pi pattern while compute classes stay in Loop config.
  */
 export class PiProvider extends ProcessProvider {

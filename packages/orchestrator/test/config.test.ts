@@ -25,17 +25,24 @@ test("loads the repository configuration into typed runtime data", () => {
     listLineLimit: 8,
     lineTextLimit: 160,
   });
-  expect(config.lead).toEqual({ command: "pi", provider: "zai", model: "glm-5.3-flash" });
+  expect(config.lead).toEqual({ command: "pi", provider: "zai", model: "glm-5.3-flashx" });
   expect(config.providers.codex?.command).toBe("codex");
 
   const registry = new ModelRegistry(config.models);
   expect(config.providers.pi?.command).toBe("pi");
   expect(config.providers.pi?.enabled).toBe(true);
-  expect(registry.get("zai/glm-5.3-flash").computeClass).toBe("fast");
-  expect(registry.get("glm-5.3-flash").computeClass).toBe("typed_decision");
+  expect(registry.get("zai/glm-5.3-flashx").computeClass).toBe("fast");
+  expect(registry.get("glm-5.3-flashx").computeClass).toBe("typed_decision");
+  expect(registry.get("zai/glm-5.3-flashx:high").computeClass).toBe("balanced");
+  expect(registry.get("zai/glm-5.3-flash").computeClass).toBe("balanced");
+  expect(registry.get("gpt-5.6-luna").computeClass).toBe("balanced");
+  expect(registry.get("gpt-5.6-terra").computeClass).toBe("strong");
+  expect(registry.get("gpt-5.6-sol").computeClass).toBe("frontier");
+  // Registry orders by cost_weight + latency, ties broken by id: sol (4+3)
+  // ties gemini-3.1-pro-low (4+3) and sorts after it lexicographically.
   expect(registry.forComputeClass("frontier").map((model) => model.id)).toEqual([
-    "zai/glm-5.2",
     "gemini-3.1-pro-low",
+    "gpt-5.6-sol",
   ]);
 });
 
@@ -186,7 +193,7 @@ function configurationDirectory(policyText: string): string {
 }
 
 function providers(scenario: string): string {
-  const lead = `[lead]\ncommand = "pi"\nprovider = "zai"\nmodel = "glm-5.3-flash"\n`;
+  const lead = `[lead]\ncommand = "pi"\nprovider = "zai"\nmodel = "glm-5.3-flashx"\n`;
   if (scenario === "literal secret") {
     return `${lead}[providers.zai]\nenabled = true\nauth = "api_key"\napi_key_env = "ZAI_API_KEY"\napi_key = "do-not-store-me"\n`;
   }

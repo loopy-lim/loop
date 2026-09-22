@@ -9,7 +9,7 @@ Reader: operators configuring a worker runtime.
 | Z.AI API | OpenAI-compatible HTTP | configurable base/path/model, general vs coding-plan modes, abort, normalized result, redacted errors | API key supplied from environment by the caller |
 | Z.AI CLI | configurable CLI command | availability, cwd, model, JSON output, cancel | provider-native CLI auth |
 | Fake/scripted | in-process | delay, failure scripts, concurrency evidence, cancel | none |
-| Pi (worker) | `pi -p` headless adapter; Herdr `agent kind=pi` for visible tabs | model patterns (`zai/glm-5.3-flash`), tools, cancellation; default route for every worker class | pi auth store (`pi auth check --provider zai`) |
+| Pi (worker) | `pi -p` headless adapter; Herdr `agent kind=pi` for visible tabs | model patterns (`zai/glm-5.3-flash`, `zai/glm-5.3-flashx`), tools, cancellation; default route for the zai volume classes, with balanced/strong/frontier escalating through the codex exec lane (`gpt-5.6` luna/terra/sol) | pi auth store (`pi auth check --provider zai`) |
 | Pi Lead | Herdr `agent kind=pi` plus installed Loop extension | natural-language intent, validated DAG submission, compact commands | Pi provider configuration |
 | Herdr | supported JSON CLI commands | deterministic workspace/pane lifecycle, opaque reattachment IDs, no-focus execution | local Herdr installation |
 

@@ -1,7 +1,7 @@
 # Business logic selects compute classes. Concrete provider/model identifiers live here.
-# pi-only routing (2026-09-21): every worker class runs through the pi CLI.
-# Model ids use pi pattern syntax ("zai/glm-5.3-flash", ":<thinking>") so each
-# class maps to a distinct pattern of a real pi-catalog model.
+# Mixed routing (2026-09-22): pi carries the zai volume classes (pi pattern
+# syntax "zai/glm-5.3-flashx", ":<thinking>"), codex exec carries gpt-5.6
+# luna/terra/sol (smoke-verified), and antigravity gemini remains fallback.
 
 [[models]]
 id = "deterministic-local"
@@ -11,8 +11,9 @@ capabilities = { coding = 0, reasoning = 0, tools = 0, vision = 0, long_context 
 latency = 0
 cost_weight = 0
 
+# glm-5.3-flashx consumes 2.5x the quota of regular flash per call (smoke-verified).
 [[models]]
-id = "glm-5.3-flash"
+id = "glm-5.3-flashx"
 provider = "pi"
 compute_class = "typed_decision"
 capabilities = { coding = 3, reasoning = 3, tools = 2, vision = 0, long_context = 3 }
@@ -20,7 +21,7 @@ latency = 1
 cost_weight = 1
 
 [[models]]
-id = "zai/glm-5.3-flash:off"
+id = "zai/glm-5.3-flashx:off"
 provider = "pi"
 compute_class = "tiny"
 capabilities = { coding = 2, reasoning = 2, tools = 2, vision = 0, long_context = 3 }
@@ -28,37 +29,57 @@ latency = 1
 cost_weight = 1
 
 [[models]]
-id = "zai/glm-5.3-flash"
+id = "zai/glm-5.3-flashx"
 provider = "pi"
 compute_class = "fast"
 capabilities = { coding = 3, reasoning = 3, tools = 2, vision = 0, long_context = 3 }
 latency = 1
 cost_weight = 1
 
+# flashx consumes 2.5x the quota of regular flash per call; this pattern was
+# smoke-verified. Preferred balanced candidate so escalation absorbs surplus
+# quota while zai/glm-5.3-flash and gemini-3.8-flash-high remain fallbacks.
 [[models]]
-id = "zai/glm-5.3"
+id = "zai/glm-5.3-flashx:high"
 provider = "pi"
 compute_class = "balanced"
-capabilities = { coding = 4, reasoning = 4, tools = 2, vision = 0, long_context = 5 }
+capabilities = { coding = 4, reasoning = 3, tools = 2, vision = 0, long_context = 5 }
+latency = 1
+cost_weight = 1
+
+[[models]]
+id = "zai/glm-5.3-flash"
+provider = "pi"
+compute_class = "balanced"
+capabilities = { coding = 3, reasoning = 3, tools = 2, vision = 0, long_context = 3 }
+latency = 1
+cost_weight = 2
+
+# gpt-5.6 luna runs through `codex exec --json` with codex native ChatGPT login.
+[[models]]
+id = "gpt-5.6-luna"
+provider = "codex"
+compute_class = "balanced"
+capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 0, long_context = 4 }
 latency = 2
 cost_weight = 2
 
 [[models]]
-id = "glm-5.3"
-provider = "pi"
+id = "gpt-5.6-terra"
+provider = "codex"
 compute_class = "strong"
-capabilities = { coding = 4, reasoning = 5, tools = 2, vision = 0, long_context = 5 }
+capabilities = { coding = 5, reasoning = 5, tools = 3, vision = 0, long_context = 4 }
 latency = 2
-cost_weight = 2
+cost_weight = 3
 
 [[models]]
-id = "zai/glm-5.2"
-provider = "pi"
+id = "gpt-5.6-sol"
+provider = "codex"
 compute_class = "frontier"
-capabilities = { coding = 5, reasoning = 5, tools = 2, vision = 0, long_context = 5 }
+capabilities = { coding = 5, reasoning = 5, tools = 3, vision = 0, long_context = 5 }
 latency = 3
-cost_weight = 3
-# Antigravity 영속 드라이버 후보(agy 사용량): pi 다음 순서의 대안으로 편성된다.
+cost_weight = 4
+# Antigravity 영속 드라이버 후보(agy 사용량): codex 다음 순서의 대안으로 편성된다.
 
 [[models]]
 id = "gemini-3.8-flash-high"

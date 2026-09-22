@@ -101,7 +101,7 @@ test("loop run starts the interactive Loop agent in the current terminal", async
       "--provider",
       "zai",
       "--model",
-      "glm-5.3-flash",
+      "glm-5.3-flashx",
       "--",
       "Implement feature X",
     ],
@@ -127,7 +127,7 @@ test("interactive Loop agent loads only its adjacent extension", async () => {
   expect(cli.buildInteractiveLeadInvocation?.({
     command: "pi",
     provider: "zai",
-    model: "glm-5.3-flash",
+    model: "glm-5.3-flashx",
     intent: "",
     cwd: "/project",
     executablePath: "/usr/local/bin/loop",
@@ -141,7 +141,7 @@ test("interactive Loop agent loads only its adjacent extension", async () => {
       "--provider",
       "zai",
       "--model",
-      "glm-5.3-flash",
+      "glm-5.3-flashx",
     ],
     cwd: "/project",
     configDirectory: undefined,
@@ -173,7 +173,7 @@ test("bare loop starts the interactive Loop agent without launching or attaching
       "--provider",
       "zai",
       "--model",
-      "glm-5.3-flash",
+      "glm-5.3-flashx",
     ],
     cwd: process.cwd(),
     configDirectory: join(root, "config"),
@@ -205,13 +205,17 @@ test("doctor auth checks native stores without requesting or printing credential
       "--provider",
       "zai",
       "--model",
-      "glm-5.3-flash",
+      "glm-5.3-flashx",
       "--json",
       "--no-refresh",
     ],
   ]);
   expect(probed).toContainEqual(["pi", ["--version"]]);
-  expect(probed.flat(2)).not.toContain("login");
+  // `codex login status` is a read-only status probe; doctor must never
+  // trigger an interactive login or read credential material.
+  expect(probed.filter(([command, args]) => args.includes("login"))).toEqual([
+    ["codex", ["login", "status"]],
+  ]);
   expect(probed.flat(2)).not.toContain("--credentials");
   const report = JSON.parse(capture.stdout()) as {
     checks: Array<{ name: string; ok: boolean; auth?: string }>;
@@ -219,7 +223,9 @@ test("doctor auth checks native stores without requesting or printing credential
   expect(report.checks).toContainEqual(
     expect.objectContaining({ name: "pi", ok: true, auth: "ready" }),
   );
-  expect(report.checks.some((check) => check.name === "codex")).toBe(false);
+  expect(report.checks).toContainEqual(
+    expect.objectContaining({ name: "codex", ok: true, auth: "ready" }),
+  );
   expect(report.checks).toContainEqual(
     expect.objectContaining({ name: "antigravity", ok: true }),
   );
@@ -302,9 +308,13 @@ test("human models output is a bounded list while JSON remains complete", async 
   expect(await runCli(["models", "--config", join(root, "config")], { io: human.io })).toBe(0);
   expect(await runCli(["models", "--config", join(root, "config"), "--json"], { io: json.io }))
     .toBe(0);
-  expect(human.stdout()).not.toContain("[");
-  expect(human.stdout()).toContain("fast · zai/glm-5.3-flash");
-  expect(JSON.parse(json.stdout())).toHaveLength(10);
+  // Human output must never leak JSON payloads; pi pattern syntax lets model
+  // ids legitimately contain brackets or colons, so assert on JSON-ish
+  // sequences rather than a bare bracket.
+  expect(human.stdout()).not.toContain("[{");
+  expect(human.stdout()).not.toContain("}]");
+  expect(human.stdout()).toContain("fast · zai/glm-5.3-flashx");
+  expect(JSON.parse(json.stdout())).toHaveLength(12);
 });
 
 function output(): {

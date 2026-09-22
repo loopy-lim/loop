@@ -151,7 +151,7 @@ test("pi provider launches headless pi with the configured model pattern", async
     cwd: "/project",
     command: "pi",
     provider: "zai",
-    model: "zai/glm-5.3-flash",
+    model: "zai/glm-5.3-flashx",
     computeClasses: ["fast"],
   });
   await provider.start(input);
@@ -160,7 +160,7 @@ test("pi provider launches headless pi with the configured model pattern", async
   expect(launch.args).toContain("--provider");
   expect(launch.args).toContain("zai");
   expect(launch.args).toContain("--model");
-  expect(launch.args).toContain("zai/glm-5.3-flash");
+  expect(launch.args).toContain("zai/glm-5.3-flashx");
   expect(launch.args).toContain("-p");
   expect(launch.args.at(-1)).toContain("CONTEXT_INTENT_ONLY");
   expect(launch.args).not.toContain("--sandbox");
