@@ -6,7 +6,7 @@
 // DO NOT EDIT — changes will be overwritten and fail codegen --check.
 // ────────────────────────────────────────────────────────────
 
-import type { AddTaskInput, Array_of_EventOutput, Array_of_RunListOutput, ClaimRunnableTasksInput, CleanupRunInput, CleanupRunOutput, ConfigureRunInput, CreateRunInput, DecisionInput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, ExecutionLeaseInput, ListRunsInput, OperationOutput, PolicyEvaluationOutput, PrepareRunInput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RunInput, RunPlanOutput, SnapshotOutput, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
+import type { AddTaskInput, Array_of_EventOutput, Array_of_RunListOutput, ClaimRunnableTasksInput, CleanupRunInput, CleanupRunOutput, CompareTracesInput, CompareTracesOutput, ConfigureRunInput, CreateRunInput, DecisionInput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, ExecutionLeaseInput, GetTraceInput, GetTraceOutput, ListRunsInput, OperationOutput, PolicyEvaluationOutput, PrepareRunInput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RunInput, RunPlanOutput, SnapshotOutput, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
 import { createGeneratedFields2, invokeGenerated, invokeGeneratedFields1, invokeGeneratedFields3 } from '@rustra/types';
 import type { InvokeOptions } from '@rustra/types';
 
@@ -18,7 +18,7 @@ addTask.commandId = 'addTask';
 export const cancelRun = createGeneratedFields2<RunInput, OperationOutput>(13, 'cancelRun', "databasePath", "runId", 'cancelRun');
 
 export function claimExecution(input: ExecutionLeaseInput, options?: InvokeOptions): Promise<OperationOutput> {
-  return invokeGenerated<OperationOutput>(31, 'claimExecution', input, options);
+  return invokeGenerated<OperationOutput>(33, 'claimExecution', input, options);
 }
 claimExecution.commandId = 'claimExecution';
 
@@ -32,8 +32,13 @@ export function cleanupRun(input: CleanupRunInput, options?: InvokeOptions): Pro
 }
 cleanupRun.commandId = 'cleanupRun';
 
+export function compareTraces(input: CompareTracesInput, options?: InvokeOptions): Promise<CompareTracesOutput> {
+  return invokeGenerated<CompareTracesOutput>(24, 'compareTraces', input, options);
+}
+compareTraces.commandId = 'compareTraces';
+
 export function configureRun(input: ConfigureRunInput, options?: InvokeOptions): Promise<OperationOutput> {
-  return invokeGenerated<OperationOutput>(24, 'configureRun', input, options);
+  return invokeGenerated<OperationOutput>(26, 'configureRun', input, options);
 }
 configureRun.commandId = 'configureRun';
 
@@ -50,39 +55,41 @@ evaluateWorktreeRemoval.commandId = 'evaluateWorktreeRemoval';
 
 export const getRun = createGeneratedFields2<RunInput, SnapshotOutput>(2, 'getRun', "databasePath", "runId", 'getRun');
 
-export const getRunPlan = createGeneratedFields2<RunInput, RunPlanOutput>(25, 'getRunPlan', "databasePath", "runId", 'getRunPlan');
+export const getRunPlan = createGeneratedFields2<RunInput, RunPlanOutput>(27, 'getRunPlan', "databasePath", "runId", 'getRunPlan');
 
 export const getSnapshot = createGeneratedFields2<RunInput, SnapshotOutput>(18, 'getSnapshot', "databasePath", "runId", 'getSnapshot');
 
 export function getTaskContext(input: TaskContextInput, options?: InvokeOptions): Promise<TaskContextOutput> {
-  return invokeGeneratedFields3<TaskContextOutput>(26, 'getTaskContext', input, input["databasePath"], input["runId"], input["taskId"], options);
+  return invokeGeneratedFields3<TaskContextOutput>(28, 'getTaskContext', input, input["databasePath"], input["runId"], input["taskId"], options);
 }
 getTaskContext.commandId = 'getTaskContext';
 
+export const getTrace = createGeneratedFields2<GetTraceInput, GetTraceOutput>(23, 'getTrace', "databasePath", "runId", 'getTrace');
+
 export function listRuns(input: ListRunsInput, options?: InvokeOptions): Promise<Array_of_RunListOutput> {
-  return invokeGeneratedFields1<Array_of_RunListOutput>(35, 'listRuns', input, input["databasePath"], options);
+  return invokeGeneratedFields1<Array_of_RunListOutput>(37, 'listRuns', input, input["databasePath"], options);
 }
 listRuns.commandId = 'listRuns';
 
 export const pauseRun = createGeneratedFields2<RunInput, OperationOutput>(14, 'pauseRun', "databasePath", "runId", 'pauseRun');
 
 export function prepareRun(input: PrepareRunInput, options?: InvokeOptions): Promise<OperationOutput> {
-  return invokeGenerated<OperationOutput>(23, 'prepareRun', input, options);
+  return invokeGenerated<OperationOutput>(25, 'prepareRun', input, options);
 }
 prepareRun.commandId = 'prepareRun';
 
 export function reconcileTask(input: ReconcileTaskInput, options?: InvokeOptions): Promise<OperationOutput> {
-  return invokeGenerated<OperationOutput>(34, 'reconcileTask', input, options);
+  return invokeGenerated<OperationOutput>(36, 'reconcileTask', input, options);
 }
 reconcileTask.commandId = 'reconcileTask';
 
 export function recordActivity(input: RecordActivityInput, options?: InvokeOptions): Promise<OperationOutput> {
-  return invokeGenerated<OperationOutput>(29, 'recordActivity', input, options);
+  return invokeGenerated<OperationOutput>(31, 'recordActivity', input, options);
 }
 recordActivity.commandId = 'recordActivity';
 
 export function recordCheckReceipts(input: RecordCheckReceiptsInput, options?: InvokeOptions): Promise<OperationOutput> {
-  return invokeGenerated<OperationOutput>(27, 'recordCheckReceipts', input, options);
+  return invokeGenerated<OperationOutput>(29, 'recordCheckReceipts', input, options);
 }
 recordCheckReceipts.commandId = 'recordCheckReceipts';
 
@@ -112,12 +119,12 @@ export function recordWorkerStopped(input: WorkerInput, options?: InvokeOptions)
 recordWorkerStopped.commandId = 'recordWorkerStopped';
 
 export function releaseExecution(input: ReleaseExecutionInput, options?: InvokeOptions): Promise<OperationOutput> {
-  return invokeGeneratedFields3<OperationOutput>(33, 'releaseExecution', input, input["databasePath"], input["runId"], input["owner"], options);
+  return invokeGeneratedFields3<OperationOutput>(35, 'releaseExecution', input, input["databasePath"], input["runId"], input["owner"], options);
 }
 releaseExecution.commandId = 'releaseExecution';
 
 export function renewExecution(input: ExecutionLeaseInput, options?: InvokeOptions): Promise<OperationOutput> {
-  return invokeGenerated<OperationOutput>(32, 'renewExecution', input, options);
+  return invokeGenerated<OperationOutput>(34, 'renewExecution', input, options);
 }
 renewExecution.commandId = 'renewExecution';
 
@@ -134,12 +141,12 @@ resolveAttention.commandId = 'resolveAttention';
 export const resumeRun = createGeneratedFields2<RunInput, OperationOutput>(17, 'resumeRun', "databasePath", "runId", 'resumeRun');
 
 export function steerRun(input: SteerRunInput, options?: InvokeOptions): Promise<OperationOutput> {
-  return invokeGenerated<OperationOutput>(30, 'steerRun', input, options);
+  return invokeGenerated<OperationOutput>(32, 'steerRun', input, options);
 }
 steerRun.commandId = 'steerRun';
 
 export function stopVerification(input: StopVerificationInput, options?: InvokeOptions): Promise<OperationOutput> {
-  return invokeGenerated<OperationOutput>(28, 'stopVerification', input, options);
+  return invokeGenerated<OperationOutput>(30, 'stopVerification', input, options);
 }
 stopVerification.commandId = 'stopVerification';
 

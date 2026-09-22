@@ -9,6 +9,7 @@ test("loop-core exports only provider-neutral orchestration modules", () => {
   const exports = [...lib.matchAll(/pub mod ([a-z_]+);/g)].map((match) => match[1]).sort();
   expect(exports).toEqual([
     "attention",
+    "benchmark",
     "error",
     "event",
     "graph",
@@ -21,6 +22,7 @@ test("loop-core exports only provider-neutral orchestration modules", () => {
   const files = [
     join(root, "crates/loop-core/src/lib.rs"),
     ...rustFiles(join(root, "crates/loop-core/src/attention")),
+    ...rustFiles(join(root, "crates/loop-core/src/benchmark")),
     ...rustFiles(join(root, "crates/loop-core/src/event")),
     ...rustFiles(join(root, "crates/loop-core/src/graph")),
     ...rustFiles(join(root, "crates/loop-core/src/policy")),

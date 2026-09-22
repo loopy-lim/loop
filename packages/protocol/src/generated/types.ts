@@ -41,6 +41,57 @@ export type SkippedArtifactOutput = {
   reason: string;
 };
 
+/**
+ * Per-run row of a benchmark report: aggregated metrics plus derived score.
+ */
+export type TraceReportEntry = {
+  runId: string;
+  summary: TraceSummary;
+  score: TraceScore;
+};
+
+/**
+ * Aggregate, deterministic metrics for one run's ordered event sequence.
+ *
+ * Every counter is derived purely from event kinds; `elapsed_ms` is the only wall-clock field and is never invented here — a caller with a clock (such as a store query joining recorded timings) may fill it in.
+ */
+export type TraceSummary = {
+  total_events?: number;
+  tasks_created?: number;
+  tasks_completed?: number;
+  worker_starts?: number;
+  worker_finishes?: number;
+  worker_failures?: number;
+  verification_passes?: number;
+  verification_failures?: number;
+  attention_created?: number;
+  attention_resolved?: number;
+  elapsed_ms?: number | bigint | null;
+};
+
+/**
+ * Deterministic comparison score for a [`TraceSummary`].
+ *
+ * Each component is per-mille (0..=1000); `total` is therefore 0..=3000.
+ */
+export type TraceScore = {
+  /** Completed tasks out of created tasks. */
+  reliability: number;
+  /** Resolved attention out of created attention; a run that never needed attention scores full marks. */
+  autonomy: number;
+  /** Verification passes out of verification attempts. */
+  first_pass: number;
+};
+
+export type TraceComparison = {
+  rankings: TraceRanking[];
+};
+
+export type TraceRanking = {
+  label: string;
+  score: TraceScore;
+};
+
 export type RunState = 'active' | 'pausing' | 'paused' | 'cancelling' | 'attention' | 'completed' | 'failed' | 'cancelled';
 
 export type TaskSnapshotOutput = {
@@ -156,6 +207,18 @@ export type CleanupRunOutput = {
   skippedArtifacts: SkippedArtifactOutput[];
 };
 
+export type CompareTracesInput = {
+  databasePath: string;
+  runIds: string[];
+};
+
+export type CompareTracesOutput = {
+  /** One row per compared run, in input order (duplicates removed). */
+  entries: TraceReportEntry[];
+  /** Deterministic ranking by score, highest first. */
+  comparison: TraceComparison;
+};
+
 export type ConfigureRunInput = {
   databasePath: string;
   runId: string;
@@ -223,6 +286,17 @@ export type TaskContextOutput = {
   previousFailure?: string | null;
   previousChecks: CheckReceipt[];
   guidance: string[];
+};
+
+export type GetTraceInput = {
+  databasePath: string;
+  runId: string;
+};
+
+export type GetTraceOutput = {
+  runId: string;
+  summary: TraceSummary;
+  score: TraceScore;
 };
 
 export type ListRunsInput = {

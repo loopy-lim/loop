@@ -3,6 +3,7 @@
 pub const API_VERSION: &str = "loop.v1";
 
 pub mod attention;
+pub mod benchmark;
 pub mod error;
 pub mod event;
 pub mod graph;

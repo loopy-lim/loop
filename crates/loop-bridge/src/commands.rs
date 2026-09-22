@@ -1,4 +1,5 @@
 use loop_core::attention::{Attention, AttentionKind, AttentionResolution};
+use loop_core::benchmark::{TraceComparison, TraceScore, TraceSummary};
 use loop_core::event::{Event, EventKind};
 use loop_core::graph::TaskGraph;
 use loop_core::policy::{ComputeClass, RetentionPolicy};
@@ -257,6 +258,41 @@ pub struct PolicyEvaluationOutput {
 pub struct EvaluateSurfaceRemovalInput {
     pub surface_id: String,
     pub is_owned_by_loop: bool,
+}
+
+#[bridge_type]
+pub struct GetTraceInput {
+    pub database_path: String,
+    pub run_id: String,
+}
+
+#[bridge_type]
+pub struct CompareTracesInput {
+    pub database_path: String,
+    pub run_ids: Vec<String>,
+}
+
+/// Per-run row of a benchmark report: aggregated metrics plus derived score.
+#[bridge_type]
+pub struct TraceReportEntry {
+    pub run_id: String,
+    pub summary: TraceSummary,
+    pub score: TraceScore,
+}
+
+#[bridge_type]
+pub struct GetTraceOutput {
+    pub run_id: String,
+    pub summary: TraceSummary,
+    pub score: TraceScore,
+}
+
+#[bridge_type]
+pub struct CompareTracesOutput {
+    /// One row per compared run, in input order (duplicates removed).
+    pub entries: Vec<TraceReportEntry>,
+    /// Deterministic ranking by score, highest first.
+    pub comparison: TraceComparison,
 }
 
 pub(crate) fn bridge_error(code: &'static str, error: impl std::fmt::Display) -> RustraError {
@@ -865,6 +901,71 @@ pub fn evaluate_surface_removal(
     }
 }
 
+fn run_trace_summary(database_path: &str, run_id: &str) -> Result<TraceSummary> {
+    let store = store(database_path)?;
+    let events = store
+        .events(run_id)
+        .map_err(|error| bridge_error("trace_failed", error))?;
+    if events.is_empty() {
+        return Err(bridge_error("run_not_found", run_id));
+    }
+    let mut summary = TraceSummary::from_events(&events);
+    let projection = store
+        .projection(run_id)
+        .map_err(|error| bridge_error("trace_failed", error))?;
+    // Store runs complete tasks through VerificationPassed; TaskCompleted is an
+    // optional runtime receipt, so take completions from the projection.
+    summary.tasks_completed = u32::try_from(
+        projection
+            .tasks
+            .values()
+            .filter(|task| task.state == TaskState::Done)
+            .count(),
+    )
+    .unwrap_or(u32::MAX);
+    Ok(summary)
+}
+
+#[command]
+pub fn get_trace(input: GetTraceInput) -> Result<GetTraceOutput> {
+    let run_id = input.run_id.clone();
+    let summary = run_trace_summary(&input.database_path, &run_id)?;
+    Ok(GetTraceOutput {
+        run_id,
+        score: summary.score(),
+        summary,
+    })
+}
+
+#[command]
+pub fn compare_traces(input: CompareTracesInput) -> Result<CompareTracesOutput> {
+    if input.run_ids.is_empty() {
+        return Err(bridge_error(
+            "invalid_comparison",
+            "at least one run_id is required",
+        ));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    let mut entries = Vec::with_capacity(input.run_ids.len());
+    let mut ranked = Vec::with_capacity(input.run_ids.len());
+    for run_id in input.run_ids {
+        if !seen.insert(run_id.clone()) {
+            continue;
+        }
+        let summary = run_trace_summary(&input.database_path, &run_id)?;
+        ranked.push((run_id.clone(), summary));
+        entries.push(TraceReportEntry {
+            run_id,
+            score: summary.score(),
+            summary,
+        });
+    }
+    Ok(CompareTracesOutput {
+        entries,
+        comparison: loop_core::benchmark::compare_traces(ranked),
+    })
+}
+
 pub(crate) fn append(path: &str, event: Event) -> Result<OperationOutput> {
     let mut store = store(path)?;
     append_and_notify(&mut store, &event, "event_append_failed")?;
@@ -1114,7 +1215,9 @@ pub fn loop_package() -> &'static Package {
             subscribe_events,
             cleanup_run,
             evaluate_worktree_removal,
-            evaluate_surface_removal
+            evaluate_surface_removal,
+            get_trace,
+            compare_traces
         ))
         .event::<RunChangedEvent>("loop.run_changed")
         .build();

@@ -1,3 +1,4 @@
+export * from "./benchmark";
 export * from "./coordinator";
 export * from "./completion";
 export * from "./config";

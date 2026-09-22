@@ -1,9 +1,10 @@
 use loop_bridge::{
-    ClaimRunnableTasksInput, CleanupRunInput, CompletionCheckInput, CreateRunInput,
-    RequestAttentionInput, ResolveAttentionInput, RunInput, SubmitPlanInput, TaskSpecInput,
-    WorkerInput, WorkerResultInput, cancel_run, claim_runnable_tasks, cleanup_run, create_run,
-    get_snapshot, loop_package, record_worker_result, record_worker_started, request_attention,
-    resolve_attention, submit_plan,
+    CheckResultInput, ClaimRunnableTasksInput, CleanupRunInput, CompareTracesInput,
+    CompletionCheckInput, CreateRunInput, GetTraceInput, RequestAttentionInput,
+    ResolveAttentionInput, RunInput, SubmitPlanInput, TaskSpecInput, VerificationInput,
+    WorkerInput, WorkerResultInput, cancel_run, claim_runnable_tasks, cleanup_run, compare_traces,
+    create_run, get_snapshot, get_trace, loop_package, record_verification, record_worker_result,
+    record_worker_started, request_attention, resolve_attention, submit_plan,
 };
 use loop_core::attention::AttentionKind;
 use loop_core::policy::ComputeClass;
@@ -31,6 +32,12 @@ fn research(id: &str) -> TaskSpecInput {
         maximum_compute: ComputeClass::Strong,
         max_attempts: 3,
     }
+}
+
+fn exhaustible(id: &str) -> TaskSpecInput {
+    let mut task = research(id);
+    task.max_attempts = 1;
+    task
 }
 
 #[test]
@@ -89,6 +96,8 @@ fn rustra_package_exposes_the_orchestration_contract() {
         "getSnapshot",
         "subscribeEvents",
         "cleanupRun",
+        "getTrace",
+        "compareTraces",
     ] {
         assert!(commands.contains(required), "missing command {required}");
     }
@@ -729,4 +738,270 @@ fn stale_execution_owner_cannot_request_attention() {
         .open_attention_ids
         .is_empty()
     );
+}
+
+fn claim_and_work(database_path: &str, run_id: &str, task_id: &str, worker_id: &str) {
+    claim_runnable_tasks(ClaimRunnableTasksInput {
+        database_path: database_path.into(),
+        run_id: run_id.into(),
+        running_task_ids: vec![],
+        max_workers: 1,
+        max_frontier_workers: 1,
+        execution_owner: None,
+    })
+    .unwrap();
+    record_worker_started(WorkerInput {
+        database_path: database_path.into(),
+        run_id: run_id.into(),
+        task_id: task_id.into(),
+        worker_id: worker_id.into(),
+        execution_owner: None,
+    })
+    .unwrap();
+}
+
+fn pass_verification(database_path: &str, run_id: &str, task_id: &str) {
+    record_verification(VerificationInput {
+        database_path: database_path.into(),
+        run_id: run_id.into(),
+        task_id: task_id.into(),
+        passed: true,
+        checks: vec![CheckResultInput {
+            id: "tests".into(),
+            passed: true,
+        }],
+        reason: String::new(),
+        execution_owner: None,
+    })
+    .unwrap();
+}
+
+fn finish_worker(database_path: &str, run_id: &str, task_id: &str, worker_id: &str, success: bool) {
+    record_worker_result(WorkerResultInput {
+        database_path: database_path.into(),
+        run_id: run_id.into(),
+        task_id: task_id.into(),
+        worker_id: worker_id.into(),
+        success,
+        summary: if success {
+            "done".into()
+        } else {
+            "failed".into()
+        },
+        execution_owner: None,
+    })
+    .unwrap();
+}
+
+#[test]
+fn get_trace_aggregates_completed_run_metrics() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("trace-clean.db").display().to_string();
+    create_run(CreateRunInput {
+        database_path: path.clone(),
+        run_id: "trace-clean".into(),
+    })
+    .unwrap();
+    submit_plan(SubmitPlanInput {
+        database_path: path.clone(),
+        run_id: "trace-clean".into(),
+        tasks: vec![research("solo-task")],
+    })
+    .unwrap();
+    claim_and_work(&path, "trace-clean", "solo-task", "worker-1");
+    finish_worker(&path, "trace-clean", "solo-task", "worker-1", true);
+    pass_verification(&path, "trace-clean", "solo-task");
+
+    let trace = get_trace(GetTraceInput {
+        database_path: path,
+        run_id: "trace-clean".into(),
+    })
+    .unwrap();
+    assert_eq!(trace.run_id, "trace-clean");
+    assert_eq!(trace.summary.tasks_created, 1);
+    assert_eq!(trace.summary.tasks_completed, 1);
+    assert_eq!(trace.summary.worker_starts, 1);
+    assert_eq!(trace.summary.worker_finishes, 1);
+    assert_eq!(trace.summary.worker_failures, 0);
+    assert_eq!(trace.summary.verification_passes, 1);
+    assert_eq!(trace.summary.verification_failures, 0);
+    assert_eq!(trace.summary.attention_created, 0);
+    assert_eq!(trace.summary.attention_resolved, 0);
+    assert_eq!(trace.summary.total_events, 8);
+    assert_eq!(trace.summary.elapsed_ms, None);
+    assert_eq!(trace.score.reliability, 1000);
+    assert_eq!(trace.score.autonomy, 1000);
+    assert_eq!(trace.score.first_pass, 1000);
+    assert_eq!(trace.score.total(), 3000);
+}
+
+#[test]
+fn get_trace_counts_retries_failures_and_attention() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("trace-retry.db").display().to_string();
+    create_run(CreateRunInput {
+        database_path: path.clone(),
+        run_id: "trace-retry".into(),
+    })
+    .unwrap();
+    submit_plan(SubmitPlanInput {
+        database_path: path.clone(),
+        run_id: "trace-retry".into(),
+        tasks: vec![exhaustible("fragile-task")],
+    })
+    .unwrap();
+    claim_and_work(&path, "trace-retry", "fragile-task", "worker-1");
+    finish_worker(&path, "trace-retry", "fragile-task", "worker-1", false);
+    let snapshot = get_snapshot(RunInput {
+        database_path: path.clone(),
+        run_id: "trace-retry".into(),
+    })
+    .unwrap();
+    assert_eq!(snapshot.open_attention_ids.len(), 1);
+    resolve_attention(ResolveAttentionInput {
+        database_path: path.clone(),
+        run_id: "trace-retry".into(),
+        attention_id: snapshot.open_attention_ids[0].clone(),
+        resolution: "retry".into(),
+    })
+    .unwrap();
+    record_worker_started(WorkerInput {
+        database_path: path.clone(),
+        run_id: "trace-retry".into(),
+        task_id: "fragile-task".into(),
+        worker_id: "worker-2".into(),
+        execution_owner: None,
+    })
+    .unwrap();
+    finish_worker(&path, "trace-retry", "fragile-task", "worker-2", true);
+    pass_verification(&path, "trace-retry", "fragile-task");
+
+    let trace = get_trace(GetTraceInput {
+        database_path: path,
+        run_id: "trace-retry".into(),
+    })
+    .unwrap();
+    assert_eq!(trace.summary.total_events, 14);
+    assert_eq!(trace.summary.tasks_completed, 1);
+    assert_eq!(trace.summary.worker_starts, 2);
+    assert_eq!(trace.summary.worker_finishes, 2);
+    // Store runs express failures as VerificationFailed; the WorkerFailed
+    // event kind is reserved for runtime reconciliation.
+    assert_eq!(trace.summary.worker_failures, 0);
+    assert_eq!(trace.summary.verification_passes, 1);
+    assert_eq!(trace.summary.verification_failures, 1);
+    assert_eq!(trace.summary.attention_created, 1);
+    assert_eq!(trace.summary.attention_resolved, 1);
+    assert_eq!(trace.score.first_pass, 500);
+    assert_eq!(trace.score.total(), 2500);
+}
+
+#[test]
+fn get_trace_rejects_unknown_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("trace-missing.db").display().to_string();
+    let error = get_trace(GetTraceInput {
+        database_path: path,
+        run_id: "no-such-run".into(),
+    })
+    .unwrap_err();
+    assert!(error.to_string().contains("run_not_found"));
+}
+
+#[test]
+fn compare_traces_ranks_runs_by_deterministic_score() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("compare.db").display().to_string();
+    for run_id in ["bench-retried", "bench-clean"] {
+        create_run(CreateRunInput {
+            database_path: path.clone(),
+            run_id: run_id.into(),
+        })
+        .unwrap();
+        let task = if run_id == "bench-retried" {
+            exhaustible("task")
+        } else {
+            research("task")
+        };
+        submit_plan(SubmitPlanInput {
+            database_path: path.clone(),
+            run_id: run_id.into(),
+            tasks: vec![task],
+        })
+        .unwrap();
+    }
+    claim_and_work(&path, "bench-clean", "task", "worker-1");
+    finish_worker(&path, "bench-clean", "task", "worker-1", true);
+    pass_verification(&path, "bench-clean", "task");
+    claim_and_work(&path, "bench-retried", "task", "worker-1");
+    finish_worker(&path, "bench-retried", "task", "worker-1", false);
+    let snapshot = get_snapshot(RunInput {
+        database_path: path.clone(),
+        run_id: "bench-retried".into(),
+    })
+    .unwrap();
+    resolve_attention(ResolveAttentionInput {
+        database_path: path.clone(),
+        run_id: "bench-retried".into(),
+        attention_id: snapshot.open_attention_ids[0].clone(),
+        resolution: "retry".into(),
+    })
+    .unwrap();
+    record_worker_started(WorkerInput {
+        database_path: path.clone(),
+        run_id: "bench-retried".into(),
+        task_id: "task".into(),
+        worker_id: "worker-2".into(),
+        execution_owner: None,
+    })
+    .unwrap();
+    finish_worker(&path, "bench-retried", "task", "worker-2", true);
+    pass_verification(&path, "bench-retried", "task");
+
+    // Input order is preserved in `entries`; the ranking itself is deterministic.
+    let report = compare_traces(CompareTracesInput {
+        database_path: path.clone(),
+        run_ids: vec![
+            "bench-retried".into(),
+            "bench-clean".into(),
+            "bench-clean".into(),
+        ],
+    })
+    .unwrap();
+    assert_eq!(
+        report.entries.len(),
+        2,
+        "duplicate run_ids are deduplicated"
+    );
+    assert_eq!(report.entries[0].run_id, "bench-retried");
+    assert_eq!(report.entries[1].run_id, "bench-clean");
+    let rankings: Vec<_> = report
+        .comparison
+        .rankings
+        .iter()
+        .map(|ranking| (ranking.label.as_str(), ranking.score.total()))
+        .collect();
+    assert_eq!(
+        rankings,
+        vec![("bench-clean", 3000), ("bench-retried", 2500)]
+    );
+    assert_eq!(report.comparison.best().unwrap().label, "bench-clean");
+}
+
+#[test]
+fn compare_traces_rejects_empty_and_unknown_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("compare-invalid.db").display().to_string();
+    let empty = compare_traces(CompareTracesInput {
+        database_path: path.clone(),
+        run_ids: vec![],
+    })
+    .unwrap_err();
+    assert!(empty.to_string().contains("invalid_comparison"));
+    let missing = compare_traces(CompareTracesInput {
+        database_path: path,
+        run_ids: vec!["no-such-run".into()],
+    })
+    .unwrap_err();
+    assert!(missing.to_string().contains("run_not_found"));
 }

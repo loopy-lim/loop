@@ -14,7 +14,7 @@ use thiserror::Error;
 use crate::migration::migrate;
 
 pub struct SqliteStore {
-    connection: Connection,
+    pub(crate) connection: Connection,
 }
 
 impl SqliteStore {

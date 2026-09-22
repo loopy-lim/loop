@@ -1,0 +1,26 @@
+# Persona benchmark configuration.
+#
+# Runs the same task intent under each workflow profile's DAG template
+# (plan-first, spike-first, tdd-first), once per iteration, then compares the
+# persisted run traces (task completion, verification retries, attention
+# density) into a ranked report.
+#
+# Re-run with:
+#   loop benchmark run config/persona-benchmark.example.toml
+#
+# Machine-readable report (full trace summaries and ranking):
+#   loop benchmark run config/persona-benchmark.example.toml --json
+#
+# Useful flags:
+#   --database <path>    SQLite store the benchmark runs and reads traces from
+#   --config <directory> Loop configuration directory (providers, scheduler)
+#
+# Every execution generates a fresh run id, so re-runs accumulate in the store
+# instead of overwriting earlier evidence. Each profile iteration executes a
+# three-stage DAG (front evidence stage -> implementation -> verification gate)
+# so traces differ only where the workflow shape differs.
+
+name = "persona-benchmark-auth"
+intent = "Implement JWT validation middleware with signed tokens and expiry checks"
+profiles = ["plan-first", "spike-first", "tdd-first"]
+iterations = 1

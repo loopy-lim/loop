@@ -1,5 +1,4 @@
-import { existsSync } from "node:fs";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -13,6 +12,8 @@ import {
 } from "@loop/orchestrator/config";
 import { compactLines, renderSnapshot, renderTaskContext, type OutputLimits } from "@loop/presentation";
 import { observeRun, spawnOwner } from "./dispatcher";
+import type { BenchmarkReport } from "@loop/orchestrator";
+import type { ProviderRegistry } from "@loop/providers";
 import type { SnapshotOutput, TaskSpecInput } from "@loop/protocol";
 
 export interface CliIo {
@@ -31,6 +32,7 @@ export interface RunCliOptions {
   leadRunner?: (input: InteractiveLeadInvocation) => Promise<number>;
   executablePath?: string;
   stdin?: string;
+  providers?: ProviderRegistry;
 }
 
 export interface InteractiveLeadInvocation {
@@ -194,6 +196,30 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
         options.leadRunner ?? runInteractiveLead,
         options.executablePath ?? process.execPath,
       );
+    }
+    if (parsed.command === "benchmark") {
+      const [subcommand, configPath] = parsed.operands;
+      if (subcommand !== "run" || !configPath) {
+        throw new UsageError("benchmark requires 'run <config-path>' (see config/persona-benchmark.example.toml)");
+      }
+      const config = configuration(parsed);
+      const protocol = await loadProtocol();
+      await protocol.rustra.ready();
+      const { buildProviderRegistry, parseBenchmarkConfig, runBenchmark } = await import("@loop/orchestrator");
+      const benchmark = parseBenchmarkConfig(readFileSync(configPath, "utf8"), configPath);
+      const providers = options.providers ?? buildProviderRegistry({ config, projectRoot: process.cwd() });
+      const report = await runBenchmark({
+        control: protocol,
+        providers,
+        databasePath: config.databasePath,
+        benchmark,
+        workingDirectory: process.cwd(),
+        maxWorkers: config.scheduler.maxWorkers,
+        maxFrontierWorkers: config.scheduler.maxFrontierWorkers,
+      });
+      if (parsed.json) io.stdout(`${JSON.stringify(report)}\n`);
+      else io.stdout(formatBenchmarkReport(report, config.output));
+      return 0;
     }
     if (parsed.command === "verify-install") {
       const receipt = await verifyInstall(process.cwd());
@@ -519,6 +545,38 @@ export function formatCleanupSnapshot(
   }).join("\n")}\n`;
 }
 
+export function formatBenchmarkReport(report: BenchmarkReport, limits: OutputLimits): string {
+  const { benchmark } = report;
+  const lines = [
+    `Benchmark: ${benchmark.name}`,
+    `Intent: ${benchmark.intent}`,
+    `Profiles: ${benchmark.profiles.join(", ")} · ${benchmark.iterations} iteration(s) each`,
+  ];
+  for (const run of report.runs) {
+    const created = run.summary.tasks_created ?? 0;
+    const completed = run.summary.tasks_completed ?? 0;
+    const attempts = (run.summary.verification_passes ?? 0) + (run.summary.verification_failures ?? 0);
+    lines.push(
+      `${run.status === "completed" ? "✓" : "!"} ${run.profile} iter ${run.iteration} · ${run.runId}` +
+        ` · ${run.status} · tasks ${completed}/${created} · attempts ${attempts}` +
+        ` · retries ${run.summary.verification_failures ?? 0} · attention ${run.summary.attention_created ?? 0}`,
+    );
+  }
+  lines.push("Ranking (total score, highest first)");
+  report.comparison.rankings.forEach((ranking, index) => {
+    const total = ranking.score.reliability + ranking.score.autonomy + ranking.score.first_pass;
+    lines.push(
+      `${index + 1}. ${ranking.label} · total ${total}` +
+        ` (reliability ${ranking.score.reliability} · autonomy ${ranking.score.autonomy} · first-pass ${ranking.score.first_pass})`,
+    );
+  });
+  return `${compactLines(lines, {
+    lineLimit: limits.statusLineLimit,
+    lineTextLimit: limits.lineTextLimit,
+    overflow: (omitted) => `… ${omitted} more report lines (use --json for the full report)`,
+  }).join("\n")}\n`;
+}
+
 export function formatModelList(
   models: Array<{ computeClass: string; id: string }>,
   limits: OutputLimits,
@@ -737,6 +795,7 @@ Usage:
   loop steer <run-id> <task-id|all> <message>
   loop resolve <run-id> <attention-id> <approved|retry|cancel|answer>
   loop cleanup [run-id] [--execute] [--keep <N>]
+  loop benchmark run <config-path>  Run a persona benchmark config and compare run traces (see config/persona-benchmark.example.toml)
   loop run <intent>                 Start the interactive Loop agent with an initial request
   loop verify-install [--json]      Run the offline fake-provider acceptance
 

@@ -209,7 +209,7 @@
     },
     {
       "name": "claimExecution",
-      "commandId": 31,
+      "commandId": 33,
       "inputType": "ExecutionLeaseInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -392,8 +392,214 @@
       }
     },
     {
-      "name": "configureRun",
+      "name": "compareTraces",
       "commandId": 24,
+      "inputType": "CompareTracesInput",
+      "outputType": "CompareTracesOutput",
+      "inputSchema": {
+        "title": "CompareTracesInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "runIds"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "CompareTracesOutput",
+        "type": "object",
+        "required": [
+          "comparison",
+          "entries"
+        ],
+        "properties": {
+          "entries": {
+            "description": "One row per compared run, in input order (duplicates removed).",
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/TraceReportEntry"
+            }
+          },
+          "comparison": {
+            "description": "Deterministic ranking by score, highest first.",
+            "allOf": [
+              {
+                "$ref": "#/definitions/TraceComparison"
+              }
+            ]
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "TraceReportEntry": {
+          "description": "Per-run row of a benchmark report: aggregated metrics plus derived score.",
+          "type": "object",
+          "required": [
+            "runId",
+            "score",
+            "summary"
+          ],
+          "properties": {
+            "runId": {
+              "type": "string"
+            },
+            "summary": {
+              "$ref": "#/definitions/TraceSummary"
+            },
+            "score": {
+              "$ref": "#/definitions/TraceScore"
+            }
+          }
+        },
+        "TraceSummary": {
+          "description": "Aggregate, deterministic metrics for one run's ordered event sequence.\n\nEvery counter is derived purely from event kinds; `elapsed_ms` is the only wall-clock field and is never invented here — a caller with a clock (such as a store query joining recorded timings) may fill it in.",
+          "type": "object",
+          "properties": {
+            "total_events": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "tasks_created": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "tasks_completed": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "worker_starts": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "worker_finishes": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "worker_failures": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "verification_passes": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "verification_failures": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "attention_created": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "attention_resolved": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "elapsed_ms": {
+              "default": null,
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        },
+        "TraceScore": {
+          "description": "Deterministic comparison score for a [`TraceSummary`].\n\nEach component is per-mille (0..=1000); `total` is therefore 0..=3000.",
+          "type": "object",
+          "required": [
+            "autonomy",
+            "first_pass",
+            "reliability"
+          ],
+          "properties": {
+            "reliability": {
+              "description": "Completed tasks out of created tasks.",
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "autonomy": {
+              "description": "Resolved attention out of created attention; a run that never needed attention scores full marks.",
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "first_pass": {
+              "description": "Verification passes out of verification attempts.",
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            }
+          }
+        },
+        "TraceComparison": {
+          "type": "object",
+          "required": [
+            "rankings"
+          ],
+          "properties": {
+            "rankings": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/TraceRanking"
+              }
+            }
+          }
+        },
+        "TraceRanking": {
+          "type": "object",
+          "required": [
+            "label",
+            "score"
+          ],
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "score": {
+              "$ref": "#/definitions/TraceScore"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "configureRun",
+      "commandId": 26,
       "inputType": "ConfigureRunInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -1133,7 +1339,7 @@
     },
     {
       "name": "getRunPlan",
-      "commandId": 25,
+      "commandId": 27,
       "inputType": "RunInput",
       "outputType": "RunPlanOutput",
       "inputSchema": {
@@ -1589,7 +1795,7 @@
     },
     {
       "name": "getTaskContext",
-      "commandId": 26,
+      "commandId": 28,
       "inputType": "TaskContextInput",
       "outputType": "TaskContextOutput",
       "inputSchema": {
@@ -1872,8 +2078,157 @@
       }
     },
     {
+      "name": "getTrace",
+      "commandId": 23,
+      "inputType": "GetTraceInput",
+      "outputType": "GetTraceOutput",
+      "inputSchema": {
+        "title": "GetTraceInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "runId"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "GetTraceOutput",
+        "type": "object",
+        "required": [
+          "runId",
+          "score",
+          "summary"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/definitions/TraceSummary"
+          },
+          "score": {
+            "$ref": "#/definitions/TraceScore"
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "TraceSummary": {
+          "description": "Aggregate, deterministic metrics for one run's ordered event sequence.\n\nEvery counter is derived purely from event kinds; `elapsed_ms` is the only wall-clock field and is never invented here — a caller with a clock (such as a store query joining recorded timings) may fill it in.",
+          "type": "object",
+          "properties": {
+            "total_events": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "tasks_created": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "tasks_completed": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "worker_starts": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "worker_finishes": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "worker_failures": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "verification_passes": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "verification_failures": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "attention_created": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "attention_resolved": {
+              "default": 0,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "elapsed_ms": {
+              "default": null,
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        },
+        "TraceScore": {
+          "description": "Deterministic comparison score for a [`TraceSummary`].\n\nEach component is per-mille (0..=1000); `total` is therefore 0..=3000.",
+          "type": "object",
+          "required": [
+            "autonomy",
+            "first_pass",
+            "reliability"
+          ],
+          "properties": {
+            "reliability": {
+              "description": "Completed tasks out of created tasks.",
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "autonomy": {
+              "description": "Resolved attention out of created attention; a run that never needed attention scores full marks.",
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "first_pass": {
+              "description": "Verification passes out of verification attempts.",
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
       "name": "listRuns",
-      "commandId": 35,
+      "commandId": 37,
       "inputType": "ListRunsInput",
       "outputType": "Array_of_RunListOutput",
       "inputSchema": {
@@ -1964,7 +2319,7 @@
     },
     {
       "name": "prepareRun",
-      "commandId": 23,
+      "commandId": 25,
       "inputType": "PrepareRunInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -2144,7 +2499,7 @@
     },
     {
       "name": "reconcileTask",
-      "commandId": 34,
+      "commandId": 36,
       "inputType": "ReconcileTaskInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -2187,7 +2542,7 @@
     },
     {
       "name": "recordActivity",
-      "commandId": 29,
+      "commandId": 31,
       "inputType": "RecordActivityInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -2236,7 +2591,7 @@
     },
     {
       "name": "recordCheckReceipts",
-      "commandId": 27,
+      "commandId": 29,
       "inputType": "RecordCheckReceiptsInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -2620,7 +2975,7 @@
     },
     {
       "name": "releaseExecution",
-      "commandId": 33,
+      "commandId": 35,
       "inputType": "ReleaseExecutionInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -2659,7 +3014,7 @@
     },
     {
       "name": "renewExecution",
-      "commandId": 32,
+      "commandId": 34,
       "inputType": "ExecutionLeaseInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -2857,7 +3212,7 @@
     },
     {
       "name": "steerRun",
-      "commandId": 30,
+      "commandId": 32,
       "inputType": "SteerRunInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -2902,7 +3257,7 @@
     },
     {
       "name": "stopVerification",
-      "commandId": 28,
+      "commandId": 30,
       "inputType": "StopVerificationInput",
       "outputType": "OperationOutput",
       "inputSchema": {

@@ -162,7 +162,7 @@ function _pcDecodeF32(buf: Uint8Array, offset: number): { value: number; bytesRe
 
 import { createComplexCodec, createSchemaPostcardCodec } from '@rustra/types';
 import type { FrameCodec, RustraError, ComplexSchema } from '@rustra/types';
-import type { ActiveWorkerOutput, AddTaskInput, Array_of_EventOutput, Array_of_RunListOutput, AttentionKind, AttentionSnapshotOutput, CheckReceipt, CheckResultInput, ClaimRunnableTasksInput, CleanupRunInput, CleanupRunOutput, CompletionCheckInput, ComputeClass, ConfigureRunInput, CreateRunInput, DecisionInput, DependencyResultOutput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, EventOutput, ExecutionLeaseInput, ListRunsInput, OperationOutput, PolicyEvaluationOutput, PrepareRunInput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RunInput, RunListOutput, RunPlanOutput, RunState, SkippedArtifactOutput, SnapshotOutput, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, TaskKind, TaskSnapshotOutput, TaskSpecInput, TaskState, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
+import type { ActiveWorkerOutput, AddTaskInput, Array_of_EventOutput, Array_of_RunListOutput, AttentionKind, AttentionSnapshotOutput, CheckReceipt, CheckResultInput, ClaimRunnableTasksInput, CleanupRunInput, CleanupRunOutput, CompareTracesInput, CompareTracesOutput, CompletionCheckInput, ComputeClass, ConfigureRunInput, CreateRunInput, DecisionInput, DependencyResultOutput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, EventOutput, ExecutionLeaseInput, GetTraceInput, GetTraceOutput, ListRunsInput, OperationOutput, PolicyEvaluationOutput, PrepareRunInput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RunInput, RunListOutput, RunPlanOutput, RunState, SkippedArtifactOutput, SnapshotOutput, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, TaskKind, TaskSnapshotOutput, TaskSpecInput, TaskState, TraceComparison, TraceRanking, TraceReportEntry, TraceScore, TraceSummary, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
 
 export const addTaskCodec: FrameCodec<AddTaskInput, OperationOutput> = {
   commandId: 4,
@@ -368,14 +368,14 @@ export const cancelRunCodec: FrameCodec<RunInput, OperationOutput> = {
 };
 
 export const claimExecutionCodec: FrameCodec<ExecutionLeaseInput, OperationOutput> = {
-  commandId: 31,
+  commandId: 33,
   execution: "sync",
 
   encode(args: ExecutionLeaseInput): ArrayBuffer {
     // [cmd_id: u16 LE][postcard(ExecutionLeaseInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 31, true);
+    new DataView(cmdId.buffer).setUint16(0, 33, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -395,7 +395,7 @@ export const claimExecutionCodec: FrameCodec<ExecutionLeaseInput, OperationOutpu
       out = grown;
     };
     ensure(2);
-    out[w++] = 31; out[w++] = 0;
+    out[w++] = 33; out[w++] = 0;
     { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.owner; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
@@ -620,15 +620,209 @@ export const cleanupRunCodec: FrameCodec<CleanupRunInput, CleanupRunOutput> = {
   },
 };
 
-export const configureRunCodec: FrameCodec<ConfigureRunInput, OperationOutput> = {
+export const compareTracesCodec: FrameCodec<CompareTracesInput, CompareTracesOutput> = {
   commandId: 24,
+  execution: "sync",
+
+  encode(args: CompareTracesInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(CompareTracesInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 24, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    {
+      const _arr = args.runIds;
+      parts.push(_pcEncodeVarint(_arr.length));
+      for (let _i = 0; _i < _arr.length; _i++) {
+        parts.push(_pcEncodeString(_arr[_i]));
+      }
+    }
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: CompareTracesOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<CompareTracesOutput> = {};
+    {
+      const _len = _pcDecodeVarint(u8, offset);
+      offset += _len.bytesRead;
+      const _arr: TraceReportEntry[] = new Array(_len.value);
+      for (let _i = 0; _i < _len.value; _i++) {
+        const _obj: TraceReportEntry = {} as TraceReportEntry;
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.runId = _v.value;
+          offset += _v.bytesRead;
+        }
+        {
+          const _obj8: TraceSummary = {} as TraceSummary;
+          {
+            const _v = _pcDecodeVarint(u8, offset);
+            _obj8.total_events = _v.value;
+            offset += _v.bytesRead;
+          }
+          {
+            const _v = _pcDecodeVarint(u8, offset);
+            _obj8.tasks_created = _v.value;
+            offset += _v.bytesRead;
+          }
+          {
+            const _v = _pcDecodeVarint(u8, offset);
+            _obj8.tasks_completed = _v.value;
+            offset += _v.bytesRead;
+          }
+          {
+            const _v = _pcDecodeVarint(u8, offset);
+            _obj8.worker_starts = _v.value;
+            offset += _v.bytesRead;
+          }
+          {
+            const _v = _pcDecodeVarint(u8, offset);
+            _obj8.worker_finishes = _v.value;
+            offset += _v.bytesRead;
+          }
+          {
+            const _v = _pcDecodeVarint(u8, offset);
+            _obj8.worker_failures = _v.value;
+            offset += _v.bytesRead;
+          }
+          {
+            const _v = _pcDecodeVarint(u8, offset);
+            _obj8.verification_passes = _v.value;
+            offset += _v.bytesRead;
+          }
+          {
+            const _v = _pcDecodeVarint(u8, offset);
+            _obj8.verification_failures = _v.value;
+            offset += _v.bytesRead;
+          }
+          {
+            const _v = _pcDecodeVarint(u8, offset);
+            _obj8.attention_created = _v.value;
+            offset += _v.bytesRead;
+          }
+          {
+            const _v = _pcDecodeVarint(u8, offset);
+            _obj8.attention_resolved = _v.value;
+            offset += _v.bytesRead;
+          }
+          {
+            const _tag = u8[offset];
+            offset += 1;
+            if (_tag === 0) {
+              _obj8.elapsed_ms = null;
+            } else {
+              {
+                const _v = _pcDecodeVarint64(u8, offset);
+                _obj8.elapsed_ms = _v.value;
+                offset += _v.bytesRead;
+              }
+            }
+          }
+          _obj.summary = _obj8;
+        }
+        {
+          const _obj8: TraceScore = {} as TraceScore;
+          {
+            const _v = _pcDecodeVarint(u8, offset);
+            _obj8.reliability = _v.value;
+            offset += _v.bytesRead;
+          }
+          {
+            const _v = _pcDecodeVarint(u8, offset);
+            _obj8.autonomy = _v.value;
+            offset += _v.bytesRead;
+          }
+          {
+            const _v = _pcDecodeVarint(u8, offset);
+            _obj8.first_pass = _v.value;
+            offset += _v.bytesRead;
+          }
+          _obj.score = _obj8;
+        }
+        _arr[_i] = _obj;
+      }
+      result.entries = _arr;
+    }
+    {
+      const _obj: TraceComparison = {} as TraceComparison;
+      {
+        const _len = _pcDecodeVarint(u8, offset);
+        offset += _len.bytesRead;
+        const _arr: TraceRanking[] = new Array(_len.value);
+        for (let _i = 0; _i < _len.value; _i++) {
+          const _obj: TraceRanking = {} as TraceRanking;
+          {
+            const _v = _pcDecodeString(u8, offset);
+            _obj.label = _v.value;
+            offset += _v.bytesRead;
+          }
+          {
+            const _obj10: TraceScore = {} as TraceScore;
+            {
+              const _v = _pcDecodeVarint(u8, offset);
+              _obj10.reliability = _v.value;
+              offset += _v.bytesRead;
+            }
+            {
+              const _v = _pcDecodeVarint(u8, offset);
+              _obj10.autonomy = _v.value;
+              offset += _v.bytesRead;
+            }
+            {
+              const _v = _pcDecodeVarint(u8, offset);
+              _obj10.first_pass = _v.value;
+              offset += _v.bytesRead;
+            }
+            _obj.score = _obj10;
+          }
+          _arr[_i] = _obj;
+        }
+        _obj.rankings = _arr;
+      }
+      result.comparison = _obj;
+    }
+    return { ok: true, result: result as CompareTracesOutput };
+  },
+};
+
+export const configureRunCodec: FrameCodec<ConfigureRunInput, OperationOutput> = {
+  commandId: 26,
   execution: "sync",
 
   encode(args: ConfigureRunInput): ArrayBuffer {
     // [cmd_id: u16 LE][postcard(ConfigureRunInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 24, true);
+    new DataView(cmdId.buffer).setUint16(0, 26, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -647,7 +841,7 @@ export const configureRunCodec: FrameCodec<ConfigureRunInput, OperationOutput> =
       out = grown;
     };
     ensure(2);
-    out[w++] = 24; out[w++] = 0;
+    out[w++] = 26; out[w++] = 0;
     { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.intent; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
@@ -1609,7 +1803,7 @@ export const getRunCodec: FrameCodec<RunInput, SnapshotOutput> = {
 };
 
 export const getRunPlanCodec: FrameCodec<RunInput, RunPlanOutput> = {
-  commandId: 25,
+  commandId: 27,
   execution: "sync",
   syncFields: ["databasePath","runId"],
 
@@ -1617,7 +1811,7 @@ export const getRunPlanCodec: FrameCodec<RunInput, RunPlanOutput> = {
     // [cmd_id: u16 LE][postcard(RunInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 25, true);
+    new DataView(cmdId.buffer).setUint16(0, 27, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -1634,7 +1828,7 @@ export const getRunPlanCodec: FrameCodec<RunInput, RunPlanOutput> = {
       out = grown;
     };
     ensure(2);
-    out[w++] = 25; out[w++] = 0;
+    out[w++] = 27; out[w++] = 0;
     { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     return out.subarray(0, w);
@@ -2152,7 +2346,7 @@ export const getSnapshotCodec: FrameCodec<RunInput, SnapshotOutput> = {
 };
 
 export const getTaskContextCodec: FrameCodec<TaskContextInput, TaskContextOutput> = {
-  commandId: 26,
+  commandId: 28,
   execution: "sync",
   syncFields: ["databasePath","runId","taskId"],
 
@@ -2160,7 +2354,7 @@ export const getTaskContextCodec: FrameCodec<TaskContextInput, TaskContextOutput
     // [cmd_id: u16 LE][postcard(TaskContextInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 26, true);
+    new DataView(cmdId.buffer).setUint16(0, 28, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -2178,7 +2372,7 @@ export const getTaskContextCodec: FrameCodec<TaskContextInput, TaskContextOutput
       out = grown;
     };
     ensure(2);
-    out[w++] = 26; out[w++] = 0;
+    out[w++] = 28; out[w++] = 0;
     { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.taskId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
@@ -2492,7 +2686,164 @@ export const getTaskContextCodec: FrameCodec<TaskContextInput, TaskContextOutput
   },
 };
 
-export const listRunsCodec = createSchemaPostcardCodec(35, {"title":"ListRunsInput","type":"object","required":["databasePath"],"properties":{"databasePath":{"type":"string"}}} as ComplexSchema, {"title":"Array_of_RunListOutput","type":"array","items":{"$ref":"#/definitions/RunListOutput"}} as ComplexSchema, {"TaskSpecInput":{"type":"object","required":["completionChecks","dependencies","id","kind","maxAttempts","maximumCompute","minimumCompute","preferredCompute","readScope","requirements","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"requirements":{"type":"array","items":{"type":"string"}},"completionChecks":{"type":"array","items":{"$ref":"#/definitions/CompletionCheckInput"}},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"maxAttempts":{"type":"integer","format":"uint16","minimum":0}}},"TaskKind":{"type":"string","enum":["research","decision","implementation","verification","integration"]},"CompletionCheckInput":{"type":"object","required":["args","command","id","timeoutMs"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":["string","null"]},"timeoutMs":{"type":"integer","format":"uint64","minimum":0}}},"ComputeClass":{"type":"string","enum":["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"]},"SkippedArtifactOutput":{"type":"object","required":["artifact","reason"],"properties":{"artifact":{"type":"string"},"reason":{"type":"string"}}},"RunState":{"type":"string","enum":["active","pausing","paused","cancelling","attention","completed","failed","cancelled"]},"TaskSnapshotOutput":{"type":"object","required":["attempt","blockedBy","dependencies","id","kind","preferredCompute","readScope","state","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"state":{"$ref":"#/definitions/TaskState"},"attempt":{"type":"integer","format":"uint16","minimum":0},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"blockedBy":{"type":"array","items":{"type":"string"}},"lastFailure":{"type":["string","null"]},"activity":{"type":["string","null"]},"resultSummary":{"type":["string","null"]}}},"TaskState":{"type":"string","enum":["pending","ready","running","verifying","attention","blocked","done","failed","cancelled"]},"ActiveWorkerOutput":{"type":"object","required":["id","taskId"],"properties":{"id":{"type":"string"},"taskId":{"type":"string"}}},"AttentionSnapshotOutput":{"type":"object","required":["id","kind","summary"],"properties":{"id":{"type":"string"},"kind":{"$ref":"#/definitions/AttentionKind"},"summary":{"type":"string"},"taskId":{"type":["string","null"]}}},"AttentionKind":{"type":"string","enum":["question","decision","approval","conflict","failure"]},"DependencyResultOutput":{"type":"object","required":["summary","taskId","title"],"properties":{"taskId":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"}}},"CheckReceipt":{"type":"object","required":["args","command","durationMs","exitCode","id","stderr","stdout","timedOut","workingDirectory"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":"string"},"exitCode":{"type":"integer","format":"int32"},"stdout":{"type":"string"},"stderr":{"type":"string"},"timedOut":{"type":"boolean"},"durationMs":{"type":"integer","format":"uint64","minimum":0}}},"RunListOutput":{"type":"object","required":["runId","state"],"properties":{"runId":{"type":"string"},"state":{"$ref":"#/definitions/RunState"}}},"CheckResultInput":{"type":"object","required":["id","passed"],"properties":{"id":{"type":"string"},"passed":{"type":"boolean"}}},"EventOutput":{"type":"object","required":["payloadJson","sequence"],"properties":{"sequence":{"type":"integer","format":"int64"},"payloadJson":{"type":"string"}}}} as Record<string, ComplexSchema>, true)! as FrameCodec<ListRunsInput, Array_of_RunListOutput>;
+export const getTraceCodec: FrameCodec<GetTraceInput, GetTraceOutput> = {
+  commandId: 23,
+  execution: "sync",
+  syncFields: ["databasePath","runId"],
+
+  encode(args: GetTraceInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(GetTraceInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 23, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    parts.push(_pcEncodeString(args.runId));
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  encodeInto(args: GetTraceInput, reuse?: Uint8Array): Uint8Array {
+    let out = reuse ?? new Uint8Array(64);
+    let w = 0;
+    const ensure = (need: number) => {
+      if (w + need <= out.length) return;
+      const grown = new Uint8Array(Math.max(out.length * 2, w + need));
+      grown.set(out.subarray(0, w));
+      out = grown;
+    };
+    ensure(2);
+    out[w++] = 23; out[w++] = 0;
+    { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    return out.subarray(0, w);
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: GetTraceOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<GetTraceOutput> = {};
+    {
+      const _v = _pcDecodeString(u8, offset);
+      result.runId = _v.value;
+      offset += _v.bytesRead;
+    }
+    {
+      const _obj: TraceSummary = {} as TraceSummary;
+      {
+        const _v = _pcDecodeVarint(u8, offset);
+        _obj.total_events = _v.value;
+        offset += _v.bytesRead;
+      }
+      {
+        const _v = _pcDecodeVarint(u8, offset);
+        _obj.tasks_created = _v.value;
+        offset += _v.bytesRead;
+      }
+      {
+        const _v = _pcDecodeVarint(u8, offset);
+        _obj.tasks_completed = _v.value;
+        offset += _v.bytesRead;
+      }
+      {
+        const _v = _pcDecodeVarint(u8, offset);
+        _obj.worker_starts = _v.value;
+        offset += _v.bytesRead;
+      }
+      {
+        const _v = _pcDecodeVarint(u8, offset);
+        _obj.worker_finishes = _v.value;
+        offset += _v.bytesRead;
+      }
+      {
+        const _v = _pcDecodeVarint(u8, offset);
+        _obj.worker_failures = _v.value;
+        offset += _v.bytesRead;
+      }
+      {
+        const _v = _pcDecodeVarint(u8, offset);
+        _obj.verification_passes = _v.value;
+        offset += _v.bytesRead;
+      }
+      {
+        const _v = _pcDecodeVarint(u8, offset);
+        _obj.verification_failures = _v.value;
+        offset += _v.bytesRead;
+      }
+      {
+        const _v = _pcDecodeVarint(u8, offset);
+        _obj.attention_created = _v.value;
+        offset += _v.bytesRead;
+      }
+      {
+        const _v = _pcDecodeVarint(u8, offset);
+        _obj.attention_resolved = _v.value;
+        offset += _v.bytesRead;
+      }
+      {
+        const _tag = u8[offset];
+        offset += 1;
+        if (_tag === 0) {
+          _obj.elapsed_ms = null;
+        } else {
+          {
+            const _v = _pcDecodeVarint64(u8, offset);
+            _obj.elapsed_ms = _v.value;
+            offset += _v.bytesRead;
+          }
+        }
+      }
+      result.summary = _obj;
+    }
+    {
+      const _obj: TraceScore = {} as TraceScore;
+      {
+        const _v = _pcDecodeVarint(u8, offset);
+        _obj.reliability = _v.value;
+        offset += _v.bytesRead;
+      }
+      {
+        const _v = _pcDecodeVarint(u8, offset);
+        _obj.autonomy = _v.value;
+        offset += _v.bytesRead;
+      }
+      {
+        const _v = _pcDecodeVarint(u8, offset);
+        _obj.first_pass = _v.value;
+        offset += _v.bytesRead;
+      }
+      result.score = _obj;
+    }
+    return { ok: true, result: result as GetTraceOutput };
+  },
+};
+
+export const listRunsCodec = createSchemaPostcardCodec(37, {"title":"ListRunsInput","type":"object","required":["databasePath"],"properties":{"databasePath":{"type":"string"}}} as ComplexSchema, {"title":"Array_of_RunListOutput","type":"array","items":{"$ref":"#/definitions/RunListOutput"}} as ComplexSchema, {"TaskSpecInput":{"type":"object","required":["completionChecks","dependencies","id","kind","maxAttempts","maximumCompute","minimumCompute","preferredCompute","readScope","requirements","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"requirements":{"type":"array","items":{"type":"string"}},"completionChecks":{"type":"array","items":{"$ref":"#/definitions/CompletionCheckInput"}},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"maxAttempts":{"type":"integer","format":"uint16","minimum":0}}},"TaskKind":{"type":"string","enum":["research","decision","implementation","verification","integration"]},"CompletionCheckInput":{"type":"object","required":["args","command","id","timeoutMs"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":["string","null"]},"timeoutMs":{"type":"integer","format":"uint64","minimum":0}}},"ComputeClass":{"type":"string","enum":["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"]},"SkippedArtifactOutput":{"type":"object","required":["artifact","reason"],"properties":{"artifact":{"type":"string"},"reason":{"type":"string"}}},"TraceReportEntry":{"description":"Per-run row of a benchmark report: aggregated metrics plus derived score.","type":"object","required":["runId","score","summary"],"properties":{"runId":{"type":"string"},"summary":{"$ref":"#/definitions/TraceSummary"},"score":{"$ref":"#/definitions/TraceScore"}}},"TraceSummary":{"description":"Aggregate, deterministic metrics for one run's ordered event sequence.\n\nEvery counter is derived purely from event kinds; `elapsed_ms` is the only wall-clock field and is never invented here — a caller with a clock (such as a store query joining recorded timings) may fill it in.","type":"object","properties":{"total_events":{"default":0,"type":"integer","format":"uint32","minimum":0},"tasks_created":{"default":0,"type":"integer","format":"uint32","minimum":0},"tasks_completed":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_starts":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_finishes":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_failures":{"default":0,"type":"integer","format":"uint32","minimum":0},"verification_passes":{"default":0,"type":"integer","format":"uint32","minimum":0},"verification_failures":{"default":0,"type":"integer","format":"uint32","minimum":0},"attention_created":{"default":0,"type":"integer","format":"uint32","minimum":0},"attention_resolved":{"default":0,"type":"integer","format":"uint32","minimum":0},"elapsed_ms":{"default":null,"type":["integer","null"],"format":"uint64","minimum":0}}},"TraceScore":{"description":"Deterministic comparison score for a [`TraceSummary`].\n\nEach component is per-mille (0..=1000); `total` is therefore 0..=3000.","type":"object","required":["autonomy","first_pass","reliability"],"properties":{"reliability":{"description":"Completed tasks out of created tasks.","type":"integer","format":"uint16","minimum":0},"autonomy":{"description":"Resolved attention out of created attention; a run that never needed attention scores full marks.","type":"integer","format":"uint16","minimum":0},"first_pass":{"description":"Verification passes out of verification attempts.","type":"integer","format":"uint16","minimum":0}}},"TraceComparison":{"type":"object","required":["rankings"],"properties":{"rankings":{"type":"array","items":{"$ref":"#/definitions/TraceRanking"}}}},"TraceRanking":{"type":"object","required":["label","score"],"properties":{"label":{"type":"string"},"score":{"$ref":"#/definitions/TraceScore"}}},"RunState":{"type":"string","enum":["active","pausing","paused","cancelling","attention","completed","failed","cancelled"]},"TaskSnapshotOutput":{"type":"object","required":["attempt","blockedBy","dependencies","id","kind","preferredCompute","readScope","state","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"state":{"$ref":"#/definitions/TaskState"},"attempt":{"type":"integer","format":"uint16","minimum":0},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"blockedBy":{"type":"array","items":{"type":"string"}},"lastFailure":{"type":["string","null"]},"activity":{"type":["string","null"]},"resultSummary":{"type":["string","null"]}}},"TaskState":{"type":"string","enum":["pending","ready","running","verifying","attention","blocked","done","failed","cancelled"]},"ActiveWorkerOutput":{"type":"object","required":["id","taskId"],"properties":{"id":{"type":"string"},"taskId":{"type":"string"}}},"AttentionSnapshotOutput":{"type":"object","required":["id","kind","summary"],"properties":{"id":{"type":"string"},"kind":{"$ref":"#/definitions/AttentionKind"},"summary":{"type":"string"},"taskId":{"type":["string","null"]}}},"AttentionKind":{"type":"string","enum":["question","decision","approval","conflict","failure"]},"DependencyResultOutput":{"type":"object","required":["summary","taskId","title"],"properties":{"taskId":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"}}},"CheckReceipt":{"type":"object","required":["args","command","durationMs","exitCode","id","stderr","stdout","timedOut","workingDirectory"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":"string"},"exitCode":{"type":"integer","format":"int32"},"stdout":{"type":"string"},"stderr":{"type":"string"},"timedOut":{"type":"boolean"},"durationMs":{"type":"integer","format":"uint64","minimum":0}}},"RunListOutput":{"type":"object","required":["runId","state"],"properties":{"runId":{"type":"string"},"state":{"$ref":"#/definitions/RunState"}}},"CheckResultInput":{"type":"object","required":["id","passed"],"properties":{"id":{"type":"string"},"passed":{"type":"boolean"}}},"EventOutput":{"type":"object","required":["payloadJson","sequence"],"properties":{"sequence":{"type":"integer","format":"int64"},"payloadJson":{"type":"string"}}}} as Record<string, ComplexSchema>, true)! as FrameCodec<ListRunsInput, Array_of_RunListOutput>;
 
 export const pauseRunCodec: FrameCodec<RunInput, OperationOutput> = {
   commandId: 14,
@@ -2565,14 +2916,14 @@ export const pauseRunCodec: FrameCodec<RunInput, OperationOutput> = {
 };
 
 export const prepareRunCodec: FrameCodec<PrepareRunInput, OperationOutput> = {
-  commandId: 23,
+  commandId: 25,
   execution: "sync",
 
   encode(args: PrepareRunInput): ArrayBuffer {
     // [cmd_id: u16 LE][postcard(PrepareRunInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 23, true);
+    new DataView(cmdId.buffer).setUint16(0, 25, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -2706,14 +3057,14 @@ export const prepareRunCodec: FrameCodec<PrepareRunInput, OperationOutput> = {
 };
 
 export const reconcileTaskCodec: FrameCodec<ReconcileTaskInput, OperationOutput> = {
-  commandId: 34,
+  commandId: 36,
   execution: "sync",
 
   encode(args: ReconcileTaskInput): ArrayBuffer {
     // [cmd_id: u16 LE][postcard(ReconcileTaskInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 34, true);
+    new DataView(cmdId.buffer).setUint16(0, 36, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -2732,7 +3083,7 @@ export const reconcileTaskCodec: FrameCodec<ReconcileTaskInput, OperationOutput>
       out = grown;
     };
     ensure(2);
-    out[w++] = 34; out[w++] = 0;
+    out[w++] = 36; out[w++] = 0;
     { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.taskId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
@@ -2779,14 +3130,14 @@ export const reconcileTaskCodec: FrameCodec<ReconcileTaskInput, OperationOutput>
 };
 
 export const recordActivityCodec: FrameCodec<RecordActivityInput, OperationOutput> = {
-  commandId: 29,
+  commandId: 31,
   execution: "sync",
 
   encode(args: RecordActivityInput): ArrayBuffer {
     // [cmd_id: u16 LE][postcard(RecordActivityInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 29, true);
+    new DataView(cmdId.buffer).setUint16(0, 31, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -2843,14 +3194,14 @@ export const recordActivityCodec: FrameCodec<RecordActivityInput, OperationOutpu
 };
 
 export const recordCheckReceiptsCodec: FrameCodec<RecordCheckReceiptsInput, OperationOutput> = {
-  commandId: 27,
+  commandId: 29,
   execution: "sync",
 
   encode(args: RecordCheckReceiptsInput): ArrayBuffer {
     // [cmd_id: u16 LE][postcard(RecordCheckReceiptsInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 27, true);
+    new DataView(cmdId.buffer).setUint16(0, 29, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -3258,7 +3609,7 @@ export const recordWorkerStoppedCodec: FrameCodec<WorkerInput, OperationOutput> 
 };
 
 export const releaseExecutionCodec: FrameCodec<ReleaseExecutionInput, OperationOutput> = {
-  commandId: 33,
+  commandId: 35,
   execution: "sync",
   syncFields: ["databasePath","runId","owner"],
 
@@ -3266,7 +3617,7 @@ export const releaseExecutionCodec: FrameCodec<ReleaseExecutionInput, OperationO
     // [cmd_id: u16 LE][postcard(ReleaseExecutionInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 33, true);
+    new DataView(cmdId.buffer).setUint16(0, 35, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -3284,7 +3635,7 @@ export const releaseExecutionCodec: FrameCodec<ReleaseExecutionInput, OperationO
       out = grown;
     };
     ensure(2);
-    out[w++] = 33; out[w++] = 0;
+    out[w++] = 35; out[w++] = 0;
     { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.owner; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
@@ -3330,14 +3681,14 @@ export const releaseExecutionCodec: FrameCodec<ReleaseExecutionInput, OperationO
 };
 
 export const renewExecutionCodec: FrameCodec<ExecutionLeaseInput, OperationOutput> = {
-  commandId: 32,
+  commandId: 34,
   execution: "sync",
 
   encode(args: ExecutionLeaseInput): ArrayBuffer {
     // [cmd_id: u16 LE][postcard(ExecutionLeaseInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 32, true);
+    new DataView(cmdId.buffer).setUint16(0, 34, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -3357,7 +3708,7 @@ export const renewExecutionCodec: FrameCodec<ExecutionLeaseInput, OperationOutpu
       out = grown;
     };
     ensure(2);
-    out[w++] = 32; out[w++] = 0;
+    out[w++] = 34; out[w++] = 0;
     { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.owner; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
@@ -3627,14 +3978,14 @@ export const resumeRunCodec: FrameCodec<RunInput, OperationOutput> = {
 };
 
 export const steerRunCodec: FrameCodec<SteerRunInput, OperationOutput> = {
-  commandId: 30,
+  commandId: 32,
   execution: "sync",
 
   encode(args: SteerRunInput): ArrayBuffer {
     // [cmd_id: u16 LE][postcard(SteerRunInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 30, true);
+    new DataView(cmdId.buffer).setUint16(0, 32, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -3690,14 +4041,14 @@ export const steerRunCodec: FrameCodec<SteerRunInput, OperationOutput> = {
 };
 
 export const stopVerificationCodec: FrameCodec<StopVerificationInput, OperationOutput> = {
-  commandId: 28,
+  commandId: 30,
   execution: "sync",
 
   encode(args: StopVerificationInput): ArrayBuffer {
     // [cmd_id: u16 LE][postcard(StopVerificationInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 28, true);
+    new DataView(cmdId.buffer).setUint16(0, 30, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -3892,7 +4243,7 @@ export const submitPlanCodec: FrameCodec<SubmitPlanInput, SubmitPlanOutput> = {
   },
 };
 
-export const subscribeEventsCodec = createSchemaPostcardCodec(19, {"title":"SubscribeEventsInput","type":"object","required":["afterSequence","databasePath","limit","runId"],"properties":{"databasePath":{"type":"string"},"runId":{"type":"string"},"afterSequence":{"type":"integer","format":"int64"},"limit":{"type":"integer","format":"uint16","minimum":0}}} as ComplexSchema, {"title":"Array_of_EventOutput","type":"array","items":{"$ref":"#/definitions/EventOutput"}} as ComplexSchema, {"TaskSpecInput":{"type":"object","required":["completionChecks","dependencies","id","kind","maxAttempts","maximumCompute","minimumCompute","preferredCompute","readScope","requirements","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"requirements":{"type":"array","items":{"type":"string"}},"completionChecks":{"type":"array","items":{"$ref":"#/definitions/CompletionCheckInput"}},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"maxAttempts":{"type":"integer","format":"uint16","minimum":0}}},"TaskKind":{"type":"string","enum":["research","decision","implementation","verification","integration"]},"CompletionCheckInput":{"type":"object","required":["args","command","id","timeoutMs"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":["string","null"]},"timeoutMs":{"type":"integer","format":"uint64","minimum":0}}},"ComputeClass":{"type":"string","enum":["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"]},"SkippedArtifactOutput":{"type":"object","required":["artifact","reason"],"properties":{"artifact":{"type":"string"},"reason":{"type":"string"}}},"RunState":{"type":"string","enum":["active","pausing","paused","cancelling","attention","completed","failed","cancelled"]},"TaskSnapshotOutput":{"type":"object","required":["attempt","blockedBy","dependencies","id","kind","preferredCompute","readScope","state","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"state":{"$ref":"#/definitions/TaskState"},"attempt":{"type":"integer","format":"uint16","minimum":0},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"blockedBy":{"type":"array","items":{"type":"string"}},"lastFailure":{"type":["string","null"]},"activity":{"type":["string","null"]},"resultSummary":{"type":["string","null"]}}},"TaskState":{"type":"string","enum":["pending","ready","running","verifying","attention","blocked","done","failed","cancelled"]},"ActiveWorkerOutput":{"type":"object","required":["id","taskId"],"properties":{"id":{"type":"string"},"taskId":{"type":"string"}}},"AttentionSnapshotOutput":{"type":"object","required":["id","kind","summary"],"properties":{"id":{"type":"string"},"kind":{"$ref":"#/definitions/AttentionKind"},"summary":{"type":"string"},"taskId":{"type":["string","null"]}}},"AttentionKind":{"type":"string","enum":["question","decision","approval","conflict","failure"]},"DependencyResultOutput":{"type":"object","required":["summary","taskId","title"],"properties":{"taskId":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"}}},"CheckReceipt":{"type":"object","required":["args","command","durationMs","exitCode","id","stderr","stdout","timedOut","workingDirectory"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":"string"},"exitCode":{"type":"integer","format":"int32"},"stdout":{"type":"string"},"stderr":{"type":"string"},"timedOut":{"type":"boolean"},"durationMs":{"type":"integer","format":"uint64","minimum":0}}},"RunListOutput":{"type":"object","required":["runId","state"],"properties":{"runId":{"type":"string"},"state":{"$ref":"#/definitions/RunState"}}},"CheckResultInput":{"type":"object","required":["id","passed"],"properties":{"id":{"type":"string"},"passed":{"type":"boolean"}}},"EventOutput":{"type":"object","required":["payloadJson","sequence"],"properties":{"sequence":{"type":"integer","format":"int64"},"payloadJson":{"type":"string"}}}} as Record<string, ComplexSchema>, true)! as FrameCodec<SubscribeEventsInput, Array_of_EventOutput>;
+export const subscribeEventsCodec = createSchemaPostcardCodec(19, {"title":"SubscribeEventsInput","type":"object","required":["afterSequence","databasePath","limit","runId"],"properties":{"databasePath":{"type":"string"},"runId":{"type":"string"},"afterSequence":{"type":"integer","format":"int64"},"limit":{"type":"integer","format":"uint16","minimum":0}}} as ComplexSchema, {"title":"Array_of_EventOutput","type":"array","items":{"$ref":"#/definitions/EventOutput"}} as ComplexSchema, {"TaskSpecInput":{"type":"object","required":["completionChecks","dependencies","id","kind","maxAttempts","maximumCompute","minimumCompute","preferredCompute","readScope","requirements","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"requirements":{"type":"array","items":{"type":"string"}},"completionChecks":{"type":"array","items":{"$ref":"#/definitions/CompletionCheckInput"}},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"maxAttempts":{"type":"integer","format":"uint16","minimum":0}}},"TaskKind":{"type":"string","enum":["research","decision","implementation","verification","integration"]},"CompletionCheckInput":{"type":"object","required":["args","command","id","timeoutMs"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":["string","null"]},"timeoutMs":{"type":"integer","format":"uint64","minimum":0}}},"ComputeClass":{"type":"string","enum":["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"]},"SkippedArtifactOutput":{"type":"object","required":["artifact","reason"],"properties":{"artifact":{"type":"string"},"reason":{"type":"string"}}},"TraceReportEntry":{"description":"Per-run row of a benchmark report: aggregated metrics plus derived score.","type":"object","required":["runId","score","summary"],"properties":{"runId":{"type":"string"},"summary":{"$ref":"#/definitions/TraceSummary"},"score":{"$ref":"#/definitions/TraceScore"}}},"TraceSummary":{"description":"Aggregate, deterministic metrics for one run's ordered event sequence.\n\nEvery counter is derived purely from event kinds; `elapsed_ms` is the only wall-clock field and is never invented here — a caller with a clock (such as a store query joining recorded timings) may fill it in.","type":"object","properties":{"total_events":{"default":0,"type":"integer","format":"uint32","minimum":0},"tasks_created":{"default":0,"type":"integer","format":"uint32","minimum":0},"tasks_completed":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_starts":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_finishes":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_failures":{"default":0,"type":"integer","format":"uint32","minimum":0},"verification_passes":{"default":0,"type":"integer","format":"uint32","minimum":0},"verification_failures":{"default":0,"type":"integer","format":"uint32","minimum":0},"attention_created":{"default":0,"type":"integer","format":"uint32","minimum":0},"attention_resolved":{"default":0,"type":"integer","format":"uint32","minimum":0},"elapsed_ms":{"default":null,"type":["integer","null"],"format":"uint64","minimum":0}}},"TraceScore":{"description":"Deterministic comparison score for a [`TraceSummary`].\n\nEach component is per-mille (0..=1000); `total` is therefore 0..=3000.","type":"object","required":["autonomy","first_pass","reliability"],"properties":{"reliability":{"description":"Completed tasks out of created tasks.","type":"integer","format":"uint16","minimum":0},"autonomy":{"description":"Resolved attention out of created attention; a run that never needed attention scores full marks.","type":"integer","format":"uint16","minimum":0},"first_pass":{"description":"Verification passes out of verification attempts.","type":"integer","format":"uint16","minimum":0}}},"TraceComparison":{"type":"object","required":["rankings"],"properties":{"rankings":{"type":"array","items":{"$ref":"#/definitions/TraceRanking"}}}},"TraceRanking":{"type":"object","required":["label","score"],"properties":{"label":{"type":"string"},"score":{"$ref":"#/definitions/TraceScore"}}},"RunState":{"type":"string","enum":["active","pausing","paused","cancelling","attention","completed","failed","cancelled"]},"TaskSnapshotOutput":{"type":"object","required":["attempt","blockedBy","dependencies","id","kind","preferredCompute","readScope","state","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"state":{"$ref":"#/definitions/TaskState"},"attempt":{"type":"integer","format":"uint16","minimum":0},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"blockedBy":{"type":"array","items":{"type":"string"}},"lastFailure":{"type":["string","null"]},"activity":{"type":["string","null"]},"resultSummary":{"type":["string","null"]}}},"TaskState":{"type":"string","enum":["pending","ready","running","verifying","attention","blocked","done","failed","cancelled"]},"ActiveWorkerOutput":{"type":"object","required":["id","taskId"],"properties":{"id":{"type":"string"},"taskId":{"type":"string"}}},"AttentionSnapshotOutput":{"type":"object","required":["id","kind","summary"],"properties":{"id":{"type":"string"},"kind":{"$ref":"#/definitions/AttentionKind"},"summary":{"type":"string"},"taskId":{"type":["string","null"]}}},"AttentionKind":{"type":"string","enum":["question","decision","approval","conflict","failure"]},"DependencyResultOutput":{"type":"object","required":["summary","taskId","title"],"properties":{"taskId":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"}}},"CheckReceipt":{"type":"object","required":["args","command","durationMs","exitCode","id","stderr","stdout","timedOut","workingDirectory"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":"string"},"exitCode":{"type":"integer","format":"int32"},"stdout":{"type":"string"},"stderr":{"type":"string"},"timedOut":{"type":"boolean"},"durationMs":{"type":"integer","format":"uint64","minimum":0}}},"RunListOutput":{"type":"object","required":["runId","state"],"properties":{"runId":{"type":"string"},"state":{"$ref":"#/definitions/RunState"}}},"CheckResultInput":{"type":"object","required":["id","passed"],"properties":{"id":{"type":"string"},"passed":{"type":"boolean"}}},"EventOutput":{"type":"object","required":["payloadJson","sequence"],"properties":{"sequence":{"type":"integer","format":"int64"},"payloadJson":{"type":"string"}}}} as Record<string, ComplexSchema>, true)! as FrameCodec<SubscribeEventsInput, Array_of_EventOutput>;
 
 export const updateTaskCodec: FrameCodec<UpdateTaskInput, OperationOutput> = {
   commandId: 5,
