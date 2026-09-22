@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 
 import { assertWorktreeInsideProject } from "./worktree";
@@ -97,12 +97,23 @@ export class HerdrWorkerRuntime {
   readonly #cancelPollMs: number;
   readonly #workspaces = new Map<string, WorkspaceRef>();
   readonly #turns = new Map<string, Promise<void>>();
+  readonly #pendingWorkspaces = new Map<string, Promise<{ workspaceId: string; paneId: string }>>();
 
   constructor(options: HerdrWorkerRuntimeOptions = {}) {
     this.#runner = options.runner ?? new NodeHerdrRunner();
     this.#command = options.command ?? "herdr";
     this.#cancelGraceMs = options.cancelGraceMs ?? 2_000;
     this.#cancelPollMs = options.cancelPollMs ?? 50;
+
+    process.on("exit", () => {
+      for (const ws of this.#workspaces.values()) {
+        try {
+          spawnSync(this.#command, ["workspace", "close", ws.workspaceId], { stdio: "ignore" });
+        } catch {
+          // ignore
+        }
+      }
+    });
   }
 
   async start(input: HerdrWorkerInput): Promise<HerdrWorkerHandle> {
@@ -124,6 +135,7 @@ export class HerdrWorkerRuntime {
     ]);
     const paneId = requiredString(tab, ["result", "root_pane", "pane_id"]);
     const tabId = requiredString(tab, ["result", "tab", "tab_id"]);
+    await this.#run(["pane", "rename", paneId, workerId]);
     if (this.#workspaces.has(input.runId)) {
       this.#workspaces.get(input.runId)!.tabIds.add(tabId);
     }
@@ -369,23 +381,34 @@ export class HerdrWorkerRuntime {
     if (cached) {
       return { workspaceId: cached.workspaceId, paneId: cached.rootPaneId };
     }
-    const payload = await this.#run([
-      "workspace",
-      "create",
-      "--cwd",
-      input.projectRoot,
-      "--label",
-      `loop-${input.runId}`,
-      "--no-focus",
-    ]);
-    const rootTabId = optionalString(payload, ["result", "tab", "tab_id"]);
-    const workspace: WorkspaceRef = {
-      workspaceId: requiredString(payload, ["result", "workspace", "workspace_id"]),
-      rootPaneId: requiredString(payload, ["result", "root_pane", "pane_id"]),
-      tabIds: new Set<string>(rootTabId ? [rootTabId] : []),
-    };
-    this.#workspaces.set(input.runId, workspace);
-    return { workspaceId: workspace.workspaceId, paneId: workspace.rootPaneId };
+    const pending = this.#pendingWorkspaces.get(input.runId);
+    if (pending) return pending;
+    
+    const promise = (async () => {
+      try {
+        const payload = await this.#run([
+          "workspace",
+          "create",
+          "--cwd",
+          input.projectRoot,
+          "--label",
+          `loop-${input.runId}`,
+          "--no-focus",
+        ]);
+        const rootTabId = optionalString(payload, ["result", "tab", "tab_id"]);
+        const workspace: WorkspaceRef = {
+          workspaceId: requiredString(payload, ["result", "workspace", "workspace_id"]),
+          rootPaneId: requiredString(payload, ["result", "root_pane", "pane_id"]),
+          tabIds: new Set<string>(rootTabId ? [rootTabId] : []),
+        };
+        this.#workspaces.set(input.runId, workspace);
+        return { workspaceId: workspace.workspaceId, paneId: workspace.rootPaneId };
+      } finally {
+        this.#pendingWorkspaces.delete(input.runId);
+      }
+    })();
+    this.#pendingWorkspaces.set(input.runId, promise);
+    return promise;
   }
 
   async #run(args: string[]): Promise<unknown> {

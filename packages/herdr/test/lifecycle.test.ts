@@ -37,6 +37,7 @@ test("starts a recognized agent in a no-focus Herdr pane and submits its task", 
       "loop-task-1",
       "--no-focus",
     ],
+    ["pane", "rename", "w1:p2", "loop-task-1"],
     [
       "agent",
       "start",
@@ -129,7 +130,7 @@ test("uses an explicit caller pane instead of creating a workspace", async () =>
 
   expect(runner.calls[0]).toContain("w7");
   expect(runner.calls.flat()).not.toContain("workspace");
-  expect(runner.calls[1]).toEqual(["pane", "run", "w7:p2", "bun", "test"]);
+  expect(runner.calls[2]).toEqual(["pane", "run", "w7:p2", "bun", "test"]);
 });
 
 test("long requested agent names stay unique within Herdr's 32-character limit", async () => {
@@ -530,6 +531,9 @@ function scriptedRunner(): HerdrRunner & { calls: string[][] } {
       if (args[0] === "agent" && args[1] === "read") {
         // Real herdr `read` prints raw pane text, not the JSON envelope.
         return { exitCode: 0, stdout: "worker output", stderr: "" };
+      }
+      if (args[0] === "pane" && args[1] === "rename") {
+        return result({ result: {} });
       }
       return result({ result: {} });
     },

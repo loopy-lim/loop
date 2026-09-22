@@ -73,6 +73,13 @@ export class HerdrAgentProvider implements AgentProvider {
   }
 
   async start(input: StartWorkerInput): Promise<WorkerHandle> {
+    const callerWorkspaceId = process.env.HERDR_WORKSPACE_ID;
+    const callerPaneId = process.env.HERDR_PANE_ID;
+    const caller = callerWorkspaceId && callerPaneId ? {
+      workspaceId: callerWorkspaceId,
+      paneId: callerPaneId,
+    } : undefined;
+
     const handle = await this.#runtime.start({
       projectRoot: this.#projectRoot,
       runId: input.runId,
@@ -82,6 +89,7 @@ export class HerdrAgentProvider implements AgentProvider {
       execution: { type: "agent", kind: this.#kind, args: this.#args },
       prompt: buildWorkerPrompt(input),
       waitForPrompt: true,
+      caller,
     });
     const listeners = new Set<(event: ProviderEvent) => void>();
     let resolveCancellation!: (result: WorkerResult) => void;
