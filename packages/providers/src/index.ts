@@ -8,6 +8,5 @@ export * from "./codex/adapter";
 export * from "./antigravity/adapter";
 export * from "./zai/api";
 export * from "./zai/cli";
-export * from "./jev/client";
 export * from "./pi/adapter";
 export * from "./antigravity/persistent";

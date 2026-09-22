@@ -4,11 +4,16 @@ import { spawn } from "node:child_process";
 import { Type } from "typebox";
 import type { RunSummary } from "@loop/orchestrator";
 import { loadLoopConfig } from "@loop/orchestrator/config";
-import { type OutputLimits, singleLine } from "@loop/presentation";
-import type { SnapshotOutput, TaskSpecInput } from "@loop/protocol";
+import { compactLines, type OutputLimits, singleLine } from "@loop/presentation";
+import type {
+  RunListOutput,
+  SnapshotOutput,
+  TaskContextOutput,
+  TaskSpecInput,
+} from "@loop/protocol";
 
 import { validateDecomposition } from "./lead/decompose";
-import { decompositionPrompt } from "./lead/prompts";
+import { decompositionPrompt, taskSpecInputDescription } from "./lead/prompts";
 import {
   HerdrLifecycleReporter,
   registerHerdrLifecycle,
@@ -16,7 +21,7 @@ import {
   type PiLifecycleEvent,
 } from "./herdr-lifecycle";
 import { renderModels } from "./ui/models";
-import { renderSnapshot } from "./ui/snapshot";
+import { renderRuns, renderSnapshot, renderTaskContext } from "./ui/snapshot";
 import { renderLoopRunSummary } from "./ui/summary";
 
 interface PiContext {
@@ -74,7 +79,17 @@ export interface LoopLeadBackend {
   }): Promise<RunSummary>;
   snapshot(runId: string, cwd: string): Promise<SnapshotOutput>;
   cancel(runId: string, cwd: string): Promise<SnapshotOutput>;
+  pause(runId: string, cwd: string): Promise<SnapshotOutput>;
   resume(runId: string, cwd: string): Promise<SnapshotOutput>;
+  steer(runId: string, taskId: string, message: string, cwd: string): Promise<SnapshotOutput>;
+  resolve(
+    runId: string,
+    attentionId: string,
+    resolution: string,
+    cwd: string,
+  ): Promise<SnapshotOutput>;
+  task(runId: string, taskId: string, cwd: string): Promise<TaskContextOutput>;
+  runs(cwd: string): Promise<RunListOutput[]>;
   models(cwd: string): Promise<string[]>;
 }
 
@@ -99,7 +114,7 @@ export function registerLoopExtension(
     parameters: Type.Object({
       intent: Type.String({ description: "The user's complete engineering intent" }),
       tasksJson: Type.String({
-        description: "JSON TaskSpecInput[] with dependencies, scopes, compute bounds, and completion checks",
+        description: taskSpecInputDescription(),
       }),
       runId: Type.Optional(Type.String({ description: "Stable run id; omit to generate one" })),
     }),
@@ -111,7 +126,7 @@ export function registerLoopExtension(
         singleLine(`Run ${runId}`, limits.lineTextLimit),
         singleLine(`Starting ${tasks.length} tasks`, limits.lineTextLimit),
       ].join("\n"), { runId }));
-      const summary = await backend.run({
+      const summary = normalizeRunSummary(await backend.run({
         intent: params.intent,
         tasks,
         runId,
@@ -123,8 +138,8 @@ export function registerLoopExtension(
             state: snapshot.state,
           }));
         },
-      });
-      const text = renderLoopRunSummary(runId, summary, limits);
+      }), tasks.length);
+      const text = renderLeadRunSummary(runId, summary, limits);
       context.ui.notify(text, summary.status === "completed" ? "success" : "warning");
       return result(text, { runId, status: summary.status });
     },
@@ -133,21 +148,65 @@ export function registerLoopExtension(
   pi.registerCommand("loop", {
     description: "Show or control the current durable Loop run",
     async handler(rawArgs, context) {
-      const [command = "status", requestedRunId] = rawArgs.trim().split(/\s+/).filter(Boolean);
-      const runId = requestedRunId ?? currentRunId;
+      const parts = rawArgs.trim().split(/\s+/).filter(Boolean);
+      const command = parts.shift() ?? "status";
       if (command === "models") {
         context.ui.notify(renderModels(await backend.models(context.cwd), limits), "info");
         return;
       }
+      if (command === "runs") {
+        context.ui.notify(renderRuns(await backend.runs(context.cwd), limits), "info");
+        return;
+      }
+      if (command === "task") {
+        const [runId, taskId] = parts;
+        if (!runId || !taskId) {
+          context.ui.notify("Usage: /loop task <run> <task>", "warning");
+          return;
+        }
+        currentRunId = runId;
+        context.ui.notify(
+          renderTaskContext(await backend.task(runId, taskId, context.cwd), limits),
+          "info",
+        );
+        return;
+      }
+      if (command === "steer" || command === "resolve") {
+        const [runId, targetId, ...messageParts] = parts;
+        const message = messageParts.join(" ");
+        if (!runId || !targetId || !message) {
+          const target = command === "steer" ? "<task|all> <message>" : "<id> <resolution>";
+          context.ui.notify(`Usage: /loop ${command} <run> ${target}`, "warning");
+          return;
+        }
+        currentRunId = runId;
+        const snapshot = command === "steer"
+          ? await backend.steer(runId, targetId, message, context.cwd)
+          : await backend.resolve(runId, targetId, message, context.cwd);
+        context.ui.notify(
+          renderSnapshot("status", snapshot, limits),
+          snapshot.state === "attention" ? "warning" : "info",
+        );
+        return;
+      }
+      if (!["status", "graph", "workers", "attention", "cancel", "pause", "resume"].includes(command)) {
+        context.ui.notify("Unknown Loop command. Use status, graph, workers, attention, runs, task, pause, resume, steer, resolve, cancel, or models.", "warning");
+        return;
+      }
+      const requestedRunId = parts[0];
+      const runId = requestedRunId ?? currentRunId;
       if (!runId) {
         context.ui.notify("No Loop run yet. Submit an engineering request first.", "warning");
         return;
       }
+      currentRunId = runId;
       const snapshot = command === "cancel"
         ? await backend.cancel(runId, context.cwd)
-        : command === "resume"
-          ? await backend.resume(runId, context.cwd)
-          : await backend.snapshot(runId, context.cwd);
+        : command === "pause"
+          ? await backend.pause(runId, context.cwd)
+          : command === "resume"
+            ? await backend.resume(runId, context.cwd)
+            : await backend.snapshot(runId, context.cwd);
       const rendered = renderSnapshot(command, snapshot, limits);
       context.ui.notify(rendered, snapshot.state === "attention" ? "warning" : "info");
     },
@@ -175,11 +234,46 @@ class DefaultLoopLeadBackend implements LoopLeadBackend {
   }
 
   async cancel(runId: string, cwd: string): Promise<SnapshotOutput> {
-    return this.#json(["cancel", runId, "--json"], cwd);
+    await this.#json<unknown>(["cancel", runId, "--json"], cwd);
+    return this.snapshot(runId, cwd);
+  }
+
+  async pause(runId: string, cwd: string): Promise<SnapshotOutput> {
+    await this.#json<unknown>(["pause", runId, "--json"], cwd);
+    return this.snapshot(runId, cwd);
   }
 
   async resume(runId: string, cwd: string): Promise<SnapshotOutput> {
-    return this.#json(["resume", runId, "--json"], cwd);
+    await this.#json<unknown>(["resume", runId, "--json"], cwd);
+    return this.snapshot(runId, cwd);
+  }
+
+  async steer(
+    runId: string,
+    taskId: string,
+    message: string,
+    cwd: string,
+  ): Promise<SnapshotOutput> {
+    await this.#json<unknown>(["steer", runId, taskId, message, "--json"], cwd);
+    return this.snapshot(runId, cwd);
+  }
+
+  async resolve(
+    runId: string,
+    attentionId: string,
+    resolution: string,
+    cwd: string,
+  ): Promise<SnapshotOutput> {
+    await this.#json<unknown>(["resolve", runId, attentionId, resolution, "--json"], cwd);
+    return this.snapshot(runId, cwd);
+  }
+
+  async task(runId: string, taskId: string, cwd: string): Promise<TaskContextOutput> {
+    return this.#json(["task", runId, taskId, "--json"], cwd);
+  }
+
+  async runs(cwd: string): Promise<RunListOutput[]> {
+    return this.#json(["runs", "--json"], cwd);
   }
 
   async models(cwd: string): Promise<string[]> {
@@ -205,7 +299,7 @@ class DefaultLoopLeadBackend implements LoopLeadBackend {
   }
 }
 
-function runLoopPlan(input: {
+export function runLoopPlan(input: {
   intent: string;
   tasks: TaskSpecInput[];
   runId: string;
@@ -222,8 +316,44 @@ function runLoopPlan(input: {
     let buffer = "";
     let stderr = "";
     let summary: RunSummary | undefined;
+    let settled = false;
+    let ownerObserved = false;
+    let disconnectRequested = false;
+    const runningSummary = (): RunSummary => ({
+      status: "running",
+      tasks: input.tasks.length,
+      escalations: [],
+      providersByTask: {},
+      startedAt: {},
+      finishedAt: {},
+    });
+    const cleanup = () => input.signal.removeEventListener("abort", disconnectObserver);
+    const succeed = (value: RunSummary) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const disconnectObserver = () => {
+      if (settled) return;
+      if (!ownerObserved) {
+        disconnectRequested = true;
+        return;
+      }
+      child.kill("SIGTERM");
+      succeed(runningSummary());
+    };
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
+    child.stdin.on("error", (error) => {
+      if (!settled) fail(error);
+    });
     child.stdout.on("data", (chunk: string) => {
       buffer += chunk;
       const lines = buffer.split(/\r?\n/);
@@ -231,18 +361,27 @@ function runLoopPlan(input: {
       for (const line of lines.filter(Boolean)) {
         try {
           const event = JSON.parse(line) as { type?: string; value?: unknown };
-          if (event.type === "snapshot") input.onProgress?.(event.value as SnapshotOutput);
-          if (event.type === "summary") summary = event.value as RunSummary;
+          if (event.type === "snapshot") {
+            ownerObserved = true;
+            input.onProgress?.(event.value as SnapshotOutput);
+          }
+          if (event.type === "summary") {
+            ownerObserved = true;
+            summary = normalizeRunSummary(event.value, input.tasks.length);
+          }
+          if (disconnectRequested && ownerObserved) disconnectObserver();
         } catch {
-          reject(new Error("Loop returned invalid progress JSON"));
+          child.kill("SIGTERM");
+          fail(new Error("Loop returned invalid progress JSON"));
         }
       }
     });
     child.stderr.on("data", (chunk: string) => (stderr += chunk));
-    child.on("error", reject);
+    child.on("error", fail);
     child.on("close", (code) => {
-      if (code === 0 && summary) resolve(summary);
-      else reject(new Error((stderr || `Loop exited ${code} without a summary`).slice(-4_000)));
+      if (settled) return;
+      if (code === 0 && summary) succeed(summary);
+      else fail(new Error((stderr || `Loop exited ${code} without a summary`).slice(-4_000)));
     });
     child.stdin.end(JSON.stringify({
       intent: input.intent,
@@ -250,9 +389,8 @@ function runLoopPlan(input: {
       workingDirectory: input.cwd,
       tasks: input.tasks,
     }));
-    const cancel = () => child.kill("SIGTERM");
-    if (input.signal.aborted) cancel();
-    else input.signal.addEventListener("abort", cancel, { once: true });
+    if (input.signal.aborted) disconnectObserver();
+    else input.signal.addEventListener("abort", disconnectObserver, { once: true });
   });
 }
 
@@ -304,10 +442,42 @@ function leadInstructions(intent: string): string {
   return [
     "You are the interactive Lead for Loop.",
     "For an engineering execution request, inspect only enough context to create a small dependency DAG, then call loop_run exactly once.",
-    "Every task must declare dependencies, readScope, writeScope, requirements, preferredCompute, minimumCompute, maximumCompute, maxAttempts, and at least one machine-verifiable completionChecks entry.",
+    "Every task must declare dependencies, exact read and write ownership, requirements, preferredCompute, minimumCompute, maximumCompute, maxAttempts, and at least one machine-verifiable completionChecks entry.",
+    "Requirements must name the result and evidence the worker returns; downstream tasks receive dependency result summaries rather than implicit context.",
     "Research tasks may run in parallel. Decision and integration tasks must be serialized. Do not claim completion yourself; Loop verifies it.",
     decompositionPrompt(intent),
   ].join("\n");
+}
+
+function normalizeRunSummary(value: unknown, fallbackTasks: number): RunSummary {
+  const summary = value && typeof value === "object" ? value as Partial<RunSummary> : {};
+  return {
+    status: summary.status ?? "running",
+    tasks: summary.tasks ?? fallbackTasks,
+    escalations: summary.escalations ?? [],
+    providersByTask: summary.providersByTask ?? {},
+    startedAt: summary.startedAt ?? {},
+    finishedAt: summary.finishedAt ?? {},
+  };
+}
+
+function renderLeadRunSummary(
+  runId: string,
+  summary: RunSummary,
+  limits: OutputLimits,
+): string {
+  if (summary.status !== "running") return renderLoopRunSummary(runId, summary, limits);
+  return compactLines([
+    `Run ${runId}`,
+    "State: running",
+    `Tasks: ${summary.tasks}`,
+    "Execution continues in the detached owner; this observer disconnected.",
+    `Next: /loop status ${runId}`,
+  ], {
+    lineLimit: limits.statusLineLimit,
+    lineTextLimit: limits.lineTextLimit,
+    overflow: (omitted) => `… ${omitted} more status lines`,
+  }).join("\n");
 }
 
 function result(text: string, details: Record<string, unknown>): PiToolResult {

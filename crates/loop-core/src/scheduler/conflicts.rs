@@ -7,10 +7,20 @@ pub fn write_scopes_overlap(left: &[String], right: &[String]) -> bool {
 }
 
 fn normalized_prefix(parent: &str, child: &str) -> bool {
-    let parent = parent.trim_end_matches("/**").trim_end_matches('/');
-    let child = child.trim_end_matches("/**").trim_end_matches('/');
-    parent == child
+    let prefix = |scope: &str| -> String {
+        let parts: Vec<_> = scope
+            .split('/')
+            .take_while(|part| !part.contains(['*', '?', '[', '{']))
+            .filter(|part| !part.is_empty() && *part != ".")
+            .collect();
+        parts.join("/")
+    };
+    let parent = prefix(parent);
+    let child = prefix(child);
+    parent.is_empty()
+        || child.is_empty()
+        || parent == child
         || child
-            .strip_prefix(parent)
+            .strip_prefix(&parent)
             .is_some_and(|rest| rest.starts_with('/'))
 }

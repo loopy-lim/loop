@@ -75,3 +75,14 @@ test("rejects completion working directories outside the project", async () => {
     ),
   ).rejects.toThrow(/outside the project root/);
 });
+
+test("cancellation stops verification and preserves redacted evidence", async () => {
+  const root = mkdtempSync(join(tmpdir(), "loop-check-cancel-"));
+  const stop = new AbortController();
+  const pending = new NodeCompletionRunner().run(process.execPath, ["--eval", "console.log('api_key=secret');setInterval(() => {}, 1000)"], { cwd: root, timeoutMs: 10000, signal: stop.signal });
+  setTimeout(() => stop.abort(), 80);
+  const result = await pending;
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stdout).not.toContain("secret");
+  expect(result.timedOut).toBe(false);
+});

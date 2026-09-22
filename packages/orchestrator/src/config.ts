@@ -27,7 +27,6 @@ export interface ProviderConfig {
   auth?: "api_key" | "native" | "none";
   apiKeyEnv?: string;
   mode?: "api" | "cli" | "interactive" | "persistent";
-  fallback?: string;
 }
 
 export interface LoopConfig {
@@ -222,9 +221,18 @@ function parseModels(document: Record<string, unknown>): ModelProfile[] {
 function parseProviders(document: Record<string, unknown>): Record<string, ProviderConfig> {
   const entries = record(document.providers, "providers");
   return Object.fromEntries(
-    Object.entries(entries).map(([id, value]) => {
+    Object.entries(entries).flatMap(([id, value]) => {
       const entry = record(value, `providers.${id}`);
       const enabled = boolean(entry.enabled, `providers.${id}.enabled`);
+      if (id === "jev") {
+        if (enabled) {
+          throw new ConfigError(
+            "config.unsupported_provider",
+            "provider jev is no longer supported; remove or disable providers.jev",
+          );
+        }
+        return [];
+      }
       const auth = optionalText(entry.auth) as ProviderConfig["auth"];
       const apiKeyEnv = optionalText(entry.api_key_env);
       if (apiKeyEnv && !/^[A-Z_][A-Z0-9_]*$/.test(apiKeyEnv)) {
@@ -239,7 +247,7 @@ function parseProviders(document: Record<string, unknown>): Record<string, Provi
           `provider ${id} requires api_key_env`,
         );
       }
-      return [
+      return [[
         id,
         {
           enabled,
@@ -248,9 +256,8 @@ function parseProviders(document: Record<string, unknown>): Record<string, Provi
           auth,
           apiKeyEnv,
           mode: optionalText(entry.mode) as ProviderConfig["mode"],
-          fallback: optionalText(entry.fallback),
         },
-      ];
+      ]];
     }),
   );
 }

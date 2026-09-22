@@ -69,7 +69,7 @@ test("first milestone runs the DAG, bounds concurrency, and escalates one delibe
       task("research-a", "research"),
       task("research-b", "research"),
       task("research-c", "research"),
-      task("decision", "decision", ["research-a", "research-b", "research-c"]),
+      task("decision", "decision", ["research-a", "research-b", "research-c"], [".loop/decision"]),
       task("impl-a", "implementation", ["decision"], ["crates/a/**"]),
       task("impl-b", "implementation", ["decision"], ["packages/b/**"]),
       task("verification", "verification", ["impl-a", "impl-b"]),

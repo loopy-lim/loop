@@ -1,12 +1,17 @@
 import { expect, test } from "bun:test";
 
+import type { SnapshotOutput, TaskContextOutput } from "@loop/protocol";
+
 import {
   compactFindings,
   renderAttention,
   renderGraph,
   renderModels,
   renderRunSummary,
+  renderRuns,
+  renderSnapshot,
   renderStatus,
+  renderTaskContext,
   renderWorkers,
   validateDecomposition,
 } from "../src";
@@ -129,6 +134,142 @@ test("graph, workers, and models reserve their last line for exact overflow coun
   }
 });
 
+test("generated snapshots render graph state, activity, results, failures, and scopes compactly", () => {
+  const snapshot = richSnapshot();
+
+  const graph = renderSnapshot("graph", snapshot, limits);
+  expect(graph).toContain("research ← root");
+  expect(graph).toContain("impl ← research");
+  expect(graph).toContain("blocked: review");
+  expect(graph).toContain("r: src/**");
+  expect(graph).toContain("w: src/impl.ts");
+
+  const status = renderSnapshot("status", snapshot, limits);
+  expect(status).toContain("Inspecting call sites");
+  expect(status).toContain("Found the protocol seam");
+  expect(status).toContain("Typecheck failed");
+  expect(status.split("\n").length).toBeLessThanOrEqual(8);
+});
+
+test("snapshot attention is actionable and preserves the next command within six lines", () => {
+  const snapshot = richSnapshot({
+    attention: Array.from({ length: 7 }, (_, index) => ({
+      id: `attention-${index + 1}`,
+      kind: "approval" as const,
+      summary: `Approve option ${index + 1}`,
+      taskId: "impl",
+    })),
+    openAttentionIds: Array.from({ length: 7 }, (_, index) => `attention-${index + 1}`),
+  });
+
+  const output = renderSnapshot("attention", snapshot, limits);
+  expect(output.split("\n").length).toBeLessThanOrEqual(6);
+  expect(output).toContain("approval attention-1 · impl · Approve option 1");
+  expect(output.split("\n").at(-1))
+    .toBe("Next: /loop resolve render-run attention-1 <resolution>");
+});
+
+test("run discovery and generated task context stay bounded and show execution evidence", () => {
+  const runs = renderRuns(Array.from({ length: 10 }, (_, index) => ({
+    runId: `run-${index + 1}`,
+    state: index === 0 ? "attention" as const : "active" as const,
+  })), limits);
+  expect(runs.split("\n")).toHaveLength(8);
+  expect(runs.split("\n").at(-1)).toBe("… 3 more runs");
+
+  const context: TaskContextOutput = {
+    intent: "Implement compact status",
+    workingDirectory: "/project",
+    task: {
+      id: "impl",
+      title: "Implement rendering",
+      kind: "implementation",
+      dependencies: ["research"],
+      readScope: ["packages/protocol/**"],
+      writeScope: ["packages/presentation/**"],
+      requirements: ["Keep status within eight lines"],
+      completionChecks: [{
+        id: "tests",
+        command: "bun",
+        args: ["test", "packages/pi-loop"],
+        workingDirectory: null,
+        timeoutMs: 120_000,
+      }],
+      preferredCompute: "fast",
+      minimumCompute: "tiny",
+      maximumCompute: "strong",
+      maxAttempts: 3,
+    },
+    attempt: 2,
+    dependencyResults: [{
+      taskId: "research",
+      title: "Inspect protocol",
+      summary: "SnapshotOutput owns the display fields",
+    }],
+    resultSummary: "Renderer implemented with generated types",
+    previousFailure: "Previous typecheck failed",
+    previousChecks: [{
+      id: "tests",
+      command: "bun",
+      args: ["test"],
+      workingDirectory: "/project",
+      exitCode: 1,
+      stdout: "",
+      stderr: "expected status line",
+      timedOut: false,
+      durationMs: 12,
+    }],
+    guidance: ["Preserve the generated type boundary"],
+  };
+  const detail = renderTaskContext(context, limits);
+  expect(detail).toContain("Dependencies: research");
+  expect(detail).toContain("Read: packages/protocol/**");
+  expect(detail).toContain("Write: packages/presentation/**");
+  expect(detail).toContain("Result research: SnapshotOutput owns the display fields");
+  expect(detail).toContain("Result: Renderer implemented with generated types");
+  expect(detail).toContain("Failure: Previous typecheck failed");
+  expect(detail).toContain("Check tests · exit 1 · expected status line");
+  expect(detail.split("\n").length).toBeLessThanOrEqual(8);
+});
+
+test("status prioritizes attention and active work before completed history", () => {
+  const snapshot = richSnapshot({
+    tasks: [
+      ...Array.from({ length: 7 }, (_, index) => ({
+        id: `done-${index + 1}`,
+        title: `Done ${index + 1}`,
+        kind: "implementation" as const,
+        state: "done" as const,
+        attempt: 1,
+        preferredCompute: "fast" as const,
+        dependencies: [],
+        readScope: [],
+        writeScope: [],
+        blockedBy: [],
+        resultSummary: "complete",
+      })),
+      {
+        id: "current",
+        title: "Current work",
+        kind: "implementation",
+        state: "running",
+        attempt: 1,
+        preferredCompute: "fast",
+        dependencies: [],
+        readScope: [],
+        writeScope: ["src/current.ts"],
+        blockedBy: [],
+        activity: "Editing current work",
+      },
+    ],
+  });
+
+  const output = renderSnapshot("status", snapshot, limits);
+  expect(output).toContain("current · running · Current work · activity: Editing current work");
+  expect(output).not.toContain("done-5");
+  expect(output.split("\n").length).toBeLessThanOrEqual(8);
+});
+
 test("every renderer normalizes line breaks and caps lines at 160 graphemes", () => {
   const output = renderWorkers([{
     id: `worker\r\n${"👩🏽‍💻".repeat(200)}`,
@@ -170,3 +311,44 @@ test("Lead decomposition rejects missing dependencies and write ownership", () =
     ]),
   ).toThrow();
 });
+
+function richSnapshot(overrides: Partial<SnapshotOutput> = {}): SnapshotOutput {
+  return {
+    runId: "render-run",
+    state: "attention",
+    tasks: [{
+      id: "research",
+      title: "Inspect protocol",
+      kind: "research",
+      state: "done",
+      attempt: 1,
+      preferredCompute: "fast",
+      dependencies: [],
+      readScope: ["packages/protocol/**"],
+      writeScope: [],
+      blockedBy: [],
+      resultSummary: "Found the protocol seam",
+    }, {
+      id: "impl",
+      title: "Implement rendering",
+      kind: "implementation",
+      state: "blocked",
+      attempt: 2,
+      preferredCompute: "fast",
+      dependencies: ["research"],
+      readScope: ["src/**"],
+      writeScope: ["src/impl.ts"],
+      blockedBy: ["review"],
+      activity: "Inspecting call sites",
+      lastFailure: "Typecheck failed",
+    }],
+    activeWorkers: [],
+    openAttentionIds: ["review"],
+    attention: [{ id: "review", kind: "approval", summary: "Approve the edit", taskId: "impl" }],
+    intent: "Implement compact status",
+    workingDirectory: "/project",
+    guidance: [],
+    lastSequence: 12,
+    ...overrides,
+  };
+}

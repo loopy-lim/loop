@@ -49,8 +49,42 @@ test("starts a recognized agent in a no-focus Herdr pane and submits its task", 
       "--sandbox",
       "workspace-write",
     ],
-    ["agent", "prompt", "loop-task-1", "Implement task 1", "--wait", "--until", "done", "--timeout", "300000"],
+    ["agent", "prompt", "loop-task-1", "Implement task 1"],
   ]);
+});
+
+test("propagates prompt delivery failures and closes only the new worker tab", async () => {
+  const calls: string[][] = [];
+  const runner: HerdrRunner = {
+    async run(_command, args) {
+      calls.push(args);
+      if (args[0] === "workspace") {
+        return result({ result: { workspace: { workspace_id: "w1" }, root_pane: { pane_id: "w1:p1" } } });
+      }
+      if (args[0] === "tab" && args[1] === "create") {
+        return result({ result: { tab: { tab_id: "w1:t2" }, root_pane: { pane_id: "w1:p2" } } });
+      }
+      if (args[0] === "agent" && args[1] === "prompt") {
+        return { exitCode: 1, stdout: "", stderr: JSON.stringify({ error: { code: "agent_blocked", message: "prompt rejected" } }) };
+      }
+      return result({ result: {} });
+    },
+  };
+  const runtime = new HerdrWorkerRuntime({ runner });
+
+  await expect(runtime.start({
+    projectRoot: "/project",
+    runId: "run-prompt-failure",
+    taskId: "task",
+    worktree: "/project",
+    execution: { type: "agent", kind: "codex", args: [] },
+    prompt: "do work",
+    waitForPrompt: true,
+  })).rejects.toThrow("agent_blocked");
+
+  expect(calls).toContainEqual(["agent", "prompt", "loop-task", "do work"]);
+  expect(calls).toContainEqual(["tab", "close", "w1:t2"]);
+  expect(calls.some((args) => args[0] === "workspace" && args[1] === "close")).toBe(false);
 });
 
 test("reattaches with opaque identifiers and maps Herdr lifecycle states", async () => {
@@ -74,6 +108,7 @@ test("reattaches with opaque identifiers and maps Herdr lifecycle states", async
     ["agent", "get", "loop-task-1"],
     ["agent", "read", "loop-task-1", "--source", "recent-unwrapped", "--lines", "40"],
     ["agent", "send-keys", "loop-task-1", "ctrl+c"],
+    ["agent", "get", "loop-task-1"],
     ["tab", "close", "w1:t2"],
   ]);
 });
@@ -130,7 +165,7 @@ test("surfaces redacted structured Herdr errors", async () => {
       run: async () => ({
         exitCode: 1,
         stdout: "",
-        stderr: JSON.stringify({ error: { code: "agent_blocked", message: "token=secret" } }),
+        stderr: JSON.stringify({ error: { code: "agent_blocked", message: "Authorization: Basic secret" } }),
       }),
     },
   });
@@ -145,6 +180,69 @@ test("surfaces redacted structured Herdr errors", async () => {
       prompt: "",
     }),
   ).rejects.toThrow(/agent_blocked.*\[credential\]=\[redacted\]/);
+  await expect(
+    runtime.start({
+      projectRoot: "/project",
+      runId: "run-2",
+      taskId: "task",
+      worktree: "/project",
+      execution: { type: "command", command: "true", args: [] },
+      prompt: "",
+    }),
+  ).rejects.not.toThrow(/secret/);
+});
+
+test("cancel force-closes only a worker tab after grace and confirms it stopped", async () => {
+  const calls: string[][] = [];
+  let closed = false;
+  const runner: HerdrRunner = {
+    async run(_command, args) {
+      calls.push(args);
+      if (args[0] === "agent" && args[1] === "get") {
+        if (closed) return { exitCode: 1, stdout: "", stderr: JSON.stringify({ error: { code: "agent_not_found", message: "gone" } }) };
+        return result({ result: { agent: { agent_status: "working" } } });
+      }
+      if (args[0] === "tab" && args[1] === "close") {
+        closed = true;
+        return result({ result: {} });
+      }
+      return result({ result: {} });
+    },
+  };
+  const runtime = new HerdrWorkerRuntime({ runner, cancelGraceMs: 10, cancelPollMs: 0 });
+  const handle = { workerId: "worker", workspaceId: "caller-workspace", tabId: "worker-tab", paneId: "worker-pane", taskId: "task", agentName: "worker" };
+
+  await runtime.cancel(handle);
+
+  expect(calls).toContainEqual(["tab", "close", "worker-tab"]);
+  expect(calls.some((args) => args[0] === "workspace" && args[1] === "close")).toBe(false);
+});
+
+test("cancel rejects when the worker tab cannot be force-closed", async () => {
+  const calls: string[][] = [];
+  const runner: HerdrRunner = {
+    async run(_command, args) {
+      calls.push(args);
+      if (args[0] === "agent" && args[1] === "get") {
+        return result({ result: { agent: { agent_status: "working" } } });
+      }
+      if (args[0] === "tab" && args[1] === "close") {
+        return {
+          exitCode: 1,
+          stdout: "",
+          stderr: JSON.stringify({ error: { code: "tab_close_failed", message: "still open" } }),
+        };
+      }
+      return result({ result: {} });
+    },
+  };
+  const runtime = new HerdrWorkerRuntime({ runner, cancelGraceMs: 0, cancelPollMs: 0 });
+  const handle = { workerId: "worker", workspaceId: "caller-workspace", tabId: "worker-tab", paneId: "worker-pane", taskId: "task", agentName: "worker" };
+
+  await expect(runtime.cancel(handle)).rejects.toThrow("tab_close_failed");
+
+  expect(calls).toContainEqual(["tab", "close", "worker-tab"]);
+  expect(calls.some((args) => args[0] === "workspace" && args[1] === "close")).toBe(false);
 });
 
 test("closes workspace using herdr workspace close driven through injected runner", async () => {
@@ -280,6 +378,132 @@ test("returns already_gone when closing an untracked runId", async () => {
   const runtime = new HerdrWorkerRuntime({ runner });
   const res = await runtime.closeWorkspace("run-never-started");
   expect(res).toEqual({ closed: true, reason: "already_gone" });
+});
+
+test("propagates an untracked workspace lookup failure instead of claiming absence", async () => {
+  const runner: HerdrRunner = {
+    async run(_cmd, args) {
+      expect(args).toEqual(["workspace", "list"]);
+      return {
+        exitCode: 1,
+        stdout: "",
+        stderr: JSON.stringify({
+          error: { code: "permission_denied", message: "workspace listing denied" },
+        }),
+      };
+    },
+  };
+
+  const runtime = new HerdrWorkerRuntime({ runner });
+  await expect(runtime.closeWorkspace("run-unobservable")).rejects.toThrow(
+    /permission_denied.*workspace listing denied/,
+  );
+});
+
+test("rejects a malformed workspace list instead of claiming absence", async () => {
+  const runner: HerdrRunner = {
+    async run(_cmd, args) {
+      expect(args).toEqual(["workspace", "list"]);
+      return result({ result: {} });
+    },
+  };
+
+  const runtime = new HerdrWorkerRuntime({ runner });
+  await expect(runtime.closeWorkspace("run-unobservable")).rejects.toThrow(
+    /workspace list response is missing workspaces/,
+  );
+});
+
+test("rejects a matching discovered workspace without a usable workspace id", async () => {
+  for (const workspace of [
+    { label: "loop-run-malformed-match" },
+    { label: "loop-run-malformed-match", workspace_id: "" },
+  ]) {
+    const runner: HerdrRunner = {
+      async run(_cmd, args) {
+        expect(args).toEqual(["workspace", "list"]);
+        return result({ result: { workspaces: [workspace] } });
+      },
+    };
+
+    const runtime = new HerdrWorkerRuntime({ runner });
+    await expect(runtime.closeWorkspace("run-malformed-match")).rejects.toThrow(
+      /matching Herdr workspace is missing workspace_id/,
+    );
+  }
+});
+
+test("rejects a malformed fallback tab list for a rediscovered workspace", async () => {
+  const calls: string[][] = [];
+  const runner: HerdrRunner = {
+    async run(_cmd, args) {
+      calls.push(args);
+      if (args[0] === "workspace" && args[1] === "list") {
+        return result({
+          result: {
+            workspaces: [
+              { label: "loop-run-malformed-tabs", workspace_id: "w-malformed-tabs" },
+            ],
+          },
+        });
+      }
+      if (args[0] === "workspace" && args[1] === "close") {
+        return {
+          exitCode: 2,
+          stdout: "",
+          stderr: JSON.stringify({
+            error: { code: "unknown_command", message: "workspace close unsupported" },
+          }),
+        };
+      }
+      if (args[0] === "tab" && args[1] === "list") {
+        return result({ result: {} });
+      }
+      return result({ result: {} });
+    },
+  };
+
+  const runtime = new HerdrWorkerRuntime({ runner });
+  await expect(runtime.closeWorkspace("run-malformed-tabs")).rejects.toThrow(
+    /tab list response is missing tabs/,
+  );
+  expect(calls).not.toContainEqual(["tab", "close", expect.any(String)]);
+});
+
+test("rejects fallback tab listings without a usable tab id for a rediscovered workspace", async () => {
+  for (const tabs of [[], [{ number: 1 }], [{ tab_id: "" }]]) {
+    const runner: HerdrRunner = {
+      async run(_cmd, args) {
+        if (args[0] === "workspace" && args[1] === "list") {
+          return result({
+            result: {
+              workspaces: [
+                { label: "loop-run-tabs-without-id", workspace_id: "w-tabs-without-id" },
+              ],
+            },
+          });
+        }
+        if (args[0] === "workspace" && args[1] === "close") {
+          return {
+            exitCode: 2,
+            stdout: "",
+            stderr: JSON.stringify({
+              error: { code: "unknown_command", message: "workspace close unsupported" },
+            }),
+          };
+        }
+        if (args[0] === "tab" && args[1] === "list") {
+          return result({ result: { tabs } });
+        }
+        return result({ result: {} });
+      },
+    };
+
+    const runtime = new HerdrWorkerRuntime({ runner });
+    await expect(runtime.closeWorkspace("run-tabs-without-id")).rejects.toThrow(
+      /tab list did not identify any tabs/,
+    );
+  }
 });
 
 function scriptedRunner(): HerdrRunner & { calls: string[][] } {

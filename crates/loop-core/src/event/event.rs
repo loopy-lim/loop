@@ -37,10 +37,48 @@ impl Event {
     }
 }
 
+pub fn worker_recovery_attention(run_id: &str, task_id: &TaskId, worker_id: &str) -> Attention {
+    Attention::for_task(
+        format!("recovery-{run_id}-{worker_id}"),
+        crate::attention::AttentionKind::Failure,
+        format!("Worker {worker_id} stopped outside cancellation; confirm it is stopped before retrying"),
+        task_id.clone(),
+    )
+}
+
+pub fn verification_recovery_attention(run_id: &str, task_id: &TaskId) -> Attention {
+    Attention::for_task(
+        format!("recovery-{run_id}-{task_id}-verification"),
+        crate::attention::AttentionKind::Failure,
+        "Verification stopped outside cancellation; confirm it is stopped before retrying",
+        task_id.clone(),
+    )
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum EventKind {
     RunCreated,
+    RunConfigured {
+        intent: String,
+        working_directory: String,
+    },
+    GuidanceAdded {
+        task_id: Option<TaskId>,
+        message: String,
+    },
+    TaskOutputRecorded {
+        task_id: TaskId,
+        summary: String,
+    },
+    CheckReceiptsRecorded {
+        task_id: TaskId,
+        checks: Vec<CheckReceipt>,
+    },
+    TaskActivityRecorded {
+        task_id: TaskId,
+        activity: String,
+    },
     TaskCreated(Task),
     TaskReady(TaskId),
     WorkerStarted {
@@ -76,6 +114,19 @@ pub enum EventKind {
     },
     TaskCompleted(TaskId),
     RunCompleted,
+    RunPauseRequested,
+    RunPaused,
+    RunCancellationRequested,
+    VerificationStopped {
+        task_id: TaskId,
+    },
+    TaskExecutionReconciled {
+        task_id: TaskId,
+    },
+    WorkerStopped {
+        task_id: TaskId,
+        worker_id: String,
+    },
     RunCancelled,
     RunResumed,
     ArtifactCreated(Artifact),
@@ -89,3 +140,22 @@ pub enum EventKind {
     },
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckReceipt {
+    pub id: String,
+    pub command: String,
+    pub args: Vec<String>,
+    pub working_directory: String,
+    pub exit_code: i32,
+    pub stdout: String,
+    pub stderr: String,
+    pub timed_out: bool,
+    pub duration_ms: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct Guidance {
+    pub task_id: Option<TaskId>,
+    pub message: String,
+}

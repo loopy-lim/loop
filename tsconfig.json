@@ -9,5 +9,5 @@
     "types": ["bun"],
     "verbatimModuleSyntax": true
   },
-  "include": ["packages/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"]
+  "include": ["packages/**/*.ts", "plugins/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"]
 }

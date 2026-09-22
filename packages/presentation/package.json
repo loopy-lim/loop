@@ -3,5 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": "./src/compact.ts"
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@loop/protocol": "workspace:*"
+  }
 }

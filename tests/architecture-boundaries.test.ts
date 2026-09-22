@@ -30,7 +30,7 @@ test("loop-core exports only provider-neutral orchestration modules", () => {
   ];
   for (const file of files) {
     const source = readFileSync(file, "utf8");
-    expect(source).not.toMatch(/Codex|Herdr|PiRuntime|Antigravity|Z\.AI|Jev/);
+    expect(source).not.toMatch(/Codex|Herdr|PiRuntime|Antigravity|Z\.AI/);
     expect(source).not.toMatch(/\bprovider\b/i);
   }
 });

@@ -3,6 +3,7 @@ use loop_core::policy::ComputeClass;
 use loop_core::run::RunState;
 use loop_core::task::{
     CompletionCheck, CompletionContract, Task, TaskId, TaskKind, TaskState, VerificationEvidence,
+    WorkOwnership,
 };
 
 fn implementation_task() -> Task {
@@ -11,6 +12,7 @@ fn implementation_task() -> Task {
         "implementation",
         TaskKind::Implementation,
     )
+    .ownership(WorkOwnership::new(std::iter::empty::<&str>(), ["src/**"]))
     .compute(ComputeClass::Fast, ComputeClass::Tiny, ComputeClass::Strong)
     .completion_contract(CompletionContract::new([CompletionCheck::new("tests")]))
     .build()
@@ -131,5 +133,73 @@ fn exhausted_verification_moves_the_task_to_human_attention() {
     assert_eq!(
         projection.tasks[&TaskId::from("impl")].state,
         TaskState::Attention
+    );
+}
+
+#[test]
+fn stopped_work_outside_cancellation_becomes_recovery_attention() {
+    let mut projection = RunProjection::default();
+    for event in [
+        Event::new("run-1", EventKind::RunCreated),
+        Event::new("run-1", EventKind::TaskCreated(implementation_task())),
+        Event::new("run-1", EventKind::TaskReady(TaskId::from("impl"))),
+        Event::new(
+            "run-1",
+            EventKind::WorkerStarted {
+                task_id: TaskId::from("impl"),
+                worker_id: "worker-1".into(),
+            },
+        ),
+        Event::new(
+            "run-1",
+            EventKind::WorkerStopped {
+                task_id: TaskId::from("impl"),
+                worker_id: "worker-1".into(),
+            },
+        ),
+    ] {
+        projection.apply(&event).unwrap();
+    }
+    assert_eq!(projection.run_state, Some(RunState::Attention));
+    assert_eq!(
+        projection.tasks[&TaskId::from("impl")].state,
+        TaskState::Attention
+    );
+    assert!(projection.has_open_attention());
+}
+
+#[test]
+fn generic_ready_event_cannot_bypass_verification_reconciliation() {
+    let mut projection = RunProjection::default();
+    for event in [
+        Event::new("run-1", EventKind::RunCreated),
+        Event::new("run-1", EventKind::TaskCreated(implementation_task())),
+        Event::new("run-1", EventKind::TaskReady(TaskId::from("impl"))),
+        Event::new(
+            "run-1",
+            EventKind::WorkerStarted {
+                task_id: TaskId::from("impl"),
+                worker_id: "worker-1".into(),
+            },
+        ),
+        Event::new(
+            "run-1",
+            EventKind::WorkerFinished {
+                task_id: TaskId::from("impl"),
+                worker_id: "worker-1".into(),
+            },
+        ),
+    ] {
+        projection.apply(&event).unwrap();
+    }
+    assert!(projection
+        .apply(&Event::new(
+            "run-1",
+            EventKind::TaskReady(TaskId::from("impl")),
+        ))
+        .is_err());
+    assert_eq!(
+        projection.tasks[&TaskId::from("impl")].state,
+        TaskState::Verifying
     );
 }

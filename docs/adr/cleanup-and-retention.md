@@ -1,5 +1,7 @@
 # 정리 트리거, 보존 규칙, 안전 계약
 
+> 2026-09-22 안정화 개정: 아래 D3.5의 "purge와 teardown은 서로를 막지 않는다"는 규칙은 [그래프 실행 안정화 설계](../superpowers/specs/2026-09-22-reliable-graph-interventions-design.md)의 안전 계약으로 대체한다. 외부 정리가 실패하거나 상태가 불확실하면 실행 기록을 보존한다. 아래 본문은 최초 결정의 이력이다.
+
 - **일자:** 2026-09-22
 - **검증:** 2026-09-22, research pass 6 기준 재확인 — 라벨 파생(`herdr-agent.ts:73` → `client.ts:82-92,291-297`), `assertWorktreeInsideProject`의 빈 relative 경로 미거부(`worktree.ts`), `AttentionKind` variant 존재(`crates/loop-core/src/attention/attention.rs:10`), 빈 `crates/loop-core/src/herdr/`, `config/policy.toml` 내 `[retention]` 부재를 코드로 대조 확인
 - **상태:** 결정됨; 구현은 후속 작업

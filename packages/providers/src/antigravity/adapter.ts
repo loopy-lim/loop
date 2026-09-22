@@ -1,5 +1,6 @@
 import { NodeProcessRunner, type ProcessRunner } from "../process";
 import { ProcessProvider } from "../process-provider";
+import { buildWorkerPrompt } from "../prompt";
 import type { ProviderCapabilities, StartWorkerInput } from "../types";
 import type { ResumeWorkerInput, WorkerHandle } from "../types";
 
@@ -61,7 +62,7 @@ export class AntigravityProvider extends ProcessProvider {
     ];
     if (this.#sandbox) args.push("--sandbox");
     if (this.#model) args.push("--model", this.#model);
-    args.push("--print", [input.title, ...input.requirements].join("\n"));
+    args.push("--print", buildWorkerPrompt(input));
     return { command: this.#command, args, cwd };
   }
 

@@ -1,8 +1,9 @@
-import { spawn } from "node:child_process";
+import { NodeProcessRunner } from "@loop/providers";
 import { realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
 
 import type { CompletionCheckInput } from "@loop/protocol";
+import { redact } from "./redact";
 
 export interface CompletionProcessResult {
   exitCode: number;
@@ -14,13 +15,17 @@ export interface CompletionProcessResult {
 export interface CompletionEvidence extends CompletionProcessResult {
   id: string;
   passed: boolean;
+  command: string;
+  args: string[];
+  workingDirectory: string;
+  durationMs: number;
 }
 
 export interface CompletionRunner {
   run(
     command: string,
     args: string[],
-    options: { cwd: string; timeoutMs: number },
+    options: { cwd: string; timeoutMs: number; signal?: AbortSignal },
   ): Promise<CompletionProcessResult>;
 }
 
@@ -30,15 +35,22 @@ export class CompletionVerifier {
   async verify(
     checks: CompletionCheckInput[],
     rootDirectory: string,
+    signal?: AbortSignal,
   ): Promise<CompletionEvidence[]> {
     const root = realpathSync(resolve(rootDirectory));
     const results: CompletionEvidence[] = [];
     for (const check of checks) {
+      signal?.throwIfAborted();
+      const started = Date.now();
       const cwd = safeWorkingDirectory(root, check.workingDirectory);
       const timeoutMs = safeTimeout(check.timeoutMs, check.id);
-      const result = await this.runner.run(check.command, [...check.args], { cwd, timeoutMs });
+      const result = await this.runner.run(check.command, [...check.args], { cwd, timeoutMs, signal });
       results.push({
         id: check.id,
+        command: check.command,
+        args: [...check.args],
+        workingDirectory: cwd,
+        durationMs: Date.now() - started,
         passed: !result.timedOut && result.exitCode === 0,
         ...result,
       });
@@ -48,49 +60,28 @@ export class CompletionVerifier {
 }
 
 export class NodeCompletionRunner implements CompletionRunner {
-  run(
-    command: string,
-    args: string[],
-    options: { cwd: string; timeoutMs: number },
-  ): Promise<CompletionProcessResult> {
-    return new Promise((resolveResult) => {
-      const child = spawn(command, args, {
-        cwd: options.cwd,
-        env: process.env,
-        shell: false,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let stdout = "";
-      let stderr = "";
-      let timedOut = false;
-      let settled = false;
-      child.stdout.on("data", (chunk) => {
-        stdout = bounded(stdout + String(chunk));
-      });
-      child.stderr.on("data", (chunk) => {
-        stderr = bounded(stderr + String(chunk));
-      });
-      const timeout = setTimeout(() => {
-        timedOut = true;
-        child.kill("SIGTERM");
-        setTimeout(() => {
-          if (!settled) child.kill("SIGKILL");
-        }, 500).unref();
-      }, options.timeoutMs);
-      timeout.unref();
-
-      const finish = (exitCode: number) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        resolveResult({ exitCode, stdout, stderr: redact(stderr), timedOut });
-      };
-      child.on("error", (error) => {
-        stderr = bounded(`${stderr}\n${error.message}`);
-        finish(1);
-      });
-      child.on("close", (code, signal) => finish(code ?? (signal ? 128 : 1)));
-    });
+  async run(command: string, args: string[], options: { cwd: string; timeoutMs: number; signal?: AbortSignal }): Promise<CompletionProcessResult> {
+    const process = new NodeProcessRunner().start(command, args, { cwd: options.cwd });
+    let timedOut = false;
+    let stopping: Promise<void> | undefined;
+    let rejectStop!: (error: unknown) => void;
+    const stopFailure = new Promise<never>((_, reject) => { rejectStop = reject; });
+    const stop = () => {
+      stopping ??= process.cancel();
+      void stopping.catch(rejectStop);
+    };
+    const timeout = setTimeout(() => { timedOut = true; stop(); }, options.timeoutMs);
+    options.signal?.addEventListener("abort", stop, { once: true });
+    if (options.signal?.aborted) stop();
+    try {
+      const result = await Promise.race([process.result, stopFailure]);
+      await stopping;
+      if (!stopping) await process.cancel();
+      return { ...result, stdout: redact(result.stdout), stderr: redact(result.stderr), timedOut };
+    } finally {
+      clearTimeout(timeout);
+      options.signal?.removeEventListener("abort", stop);
+    }
   }
 }
 
@@ -112,17 +103,4 @@ function safeTimeout(value: number | bigint, id: string): number {
     throw new Error(`completion check ${id} has an invalid timeout`);
   }
   return timeout;
-}
-
-function bounded(value: string): string {
-  return value.slice(-16_000);
-}
-
-function redact(value: string): string {
-  return bounded(
-    value.replace(
-      /(?:api[_-]?key|token|authorization|password)\s*[:=]\s*\S+/gi,
-      "[credential]=[redacted]",
-    ),
-  );
 }

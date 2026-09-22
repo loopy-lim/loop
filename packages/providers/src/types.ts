@@ -1,3 +1,5 @@
+import type { TaskContextOutput } from "@loop/protocol";
+
 export type WorkerStatus = "starting" | "running" | "completed" | "failed" | "cancelled";
 
 export type ProviderFailureKind =
@@ -20,6 +22,7 @@ export interface ProviderCapabilities {
 }
 
 export interface StartWorkerInput {
+  context?: TaskContextOutput;
   runId: string;
   taskId: string;
   title: string;
@@ -61,6 +64,7 @@ export interface AgentProvider {
   start(input: StartWorkerInput): Promise<WorkerHandle>;
   resume?(sessionId: string, input: ResumeWorkerInput): Promise<WorkerHandle>;
   cancel(workerId: string): Promise<void>;
+  release?(workerId: string): Promise<void>;
   status(workerId: string): Promise<WorkerStatus>;
   result(workerId: string): Promise<WorkerResult>;
   subscribe?(workerId: string, listener: (event: ProviderEvent) => void): () => void;

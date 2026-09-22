@@ -1,195 +1,494 @@
-import { expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import {
+  HerdrWorkerRuntime,
+  type CloseWorkspaceResult,
+  type HerdrRunner,
+} from "@loop/herdr";
 import * as protocol from "@loop/protocol";
-import { ProviderRegistry, FakeProvider } from "@loop/providers";
-import type { HerdrWorkerRuntime, CloseWorkspaceResult } from "@loop/herdr";
-import { Orchestrator } from "../src/coordinator";
 
-class FakeHerdr implements Partial<HerdrWorkerRuntime> {
-  closedWorkspaces: string[] = [];
-  closedTabs: string[] = [];
-  
+import { cleanupRun } from "../src/cleanup";
+import type { OrchestrationControl } from "../src/control";
+
+class FakeHerdr {
+  closedRuns: string[] = [];
+  beforeClose?: (runId: string) => Promise<void> | void;
+  failure?: Error;
+  result: CloseWorkspaceResult = { closed: true, reason: "workspace_closed" };
+
   async closeWorkspace(runId: string): Promise<CloseWorkspaceResult> {
-    if (runId === "already-gone") {
-      return { closed: true, reason: "already_gone" };
-    }
-    if (runId === "fail") {
-      throw new Error("simulated failure");
-    }
-    this.closedWorkspaces.push(runId);
-    return { closed: true };
+    this.closedRuns.push(runId);
+    await this.beforeClose?.(runId);
+    if (this.failure) throw this.failure;
+    return this.result;
   }
 }
 
-test("cleanupRun purges store, tears down herdr, and removes worktree safely", async () => {
+const temporaryDirectories: string[] = [];
+
+beforeAll(async () => {
   await protocol.rustra.ready();
-  const projectRoot = mkdtempSync(join(tmpdir(), "loop-cleanup-test-"));
-  const worktreePath = join(projectRoot, "worktree-1");
-  mkdirSync(worktreePath, { recursive: true });
-  writeFileSync(join(worktreePath, "file.txt"), "hello");
-
-  const databasePath = join(projectRoot, "loop.sqlite");
-  const runId = "test-run";
-  await protocol.createRun({ databasePath, runId });
-  // Add a task to make the run have a valid structure if needed, then we cancel it to make it terminal.
-  await protocol.cancelRun({ databasePath, runId });
-
-  const fakeHerdr = new FakeHerdr() as unknown as HerdrWorkerRuntime;
-  const orchestrator = new Orchestrator({
-    control: protocol,
-    providers: new ProviderRegistry([new FakeProvider("fake", ["fast"])]),
-    maxWorkers: 1,
-    herdr: fakeHerdr,
-  });
-
-  // Dry run first
-  const dryReport = await orchestrator.cleanupRun({
-    databasePath,
-    runId,
-    projectRoot,
-    worktree: worktreePath,
-    isMerged: true,
-    isClean: true,
-    dryRun: true,
-  });
-
-  expect(dryReport.skippedArtifacts).toBeEmpty();
-  expect(dryReport.removedArtifacts).toContain(runId); // store run record
-  expect(dryReport.removedArtifacts).toContain(`loop-${runId}`); // herdr surface
-  expect(dryReport.removedArtifacts).toContain(worktreePath);
-  expect(dryReport.reasons[worktreePath]).toBe("dry_run");
-
-  // Execute
-  const executeReport = await orchestrator.cleanupRun({
-    databasePath,
-    runId,
-    projectRoot,
-    worktree: worktreePath,
-    isMerged: true,
-    isClean: true,
-    dryRun: false,
-  });
-
-  expect(executeReport.skippedArtifacts).toBeEmpty();
-  expect(executeReport.removedArtifacts).toContain(runId);
-  expect(executeReport.removedArtifacts).toContain(`loop-${runId}`);
-  expect(executeReport.removedArtifacts).toContain(worktreePath);
-  
-  // Verify fake herdr was called
-  expect((fakeHerdr as any).closedWorkspaces).toContain(runId);
-  
-  // Verify worktree is removed
-  const { existsSync } = await import("node:fs");
-  expect(existsSync(worktreePath)).toBe(false);
 });
 
-test("cleanupRun refuses unmerged/dirty worktrees and non-owned surfaces", async () => {
-  await protocol.rustra.ready();
-  const projectRoot = mkdtempSync(join(tmpdir(), "loop-cleanup-refusal-"));
-  const worktreePath = join(projectRoot, "worktree-2");
-  mkdirSync(worktreePath, { recursive: true });
-
-  const databasePath = join(projectRoot, "loop.sqlite");
-  const runId = "test-refusal";
-  await protocol.createRun({ databasePath, runId });
-  await protocol.cancelRun({ databasePath, runId });
-
-  const fakeHerdr = new FakeHerdr() as unknown as HerdrWorkerRuntime;
-  const orchestrator = new Orchestrator({
-    control: protocol,
-    providers: new ProviderRegistry([new FakeProvider("fake", ["fast"])]),
-    maxWorkers: 1,
-    herdr: fakeHerdr,
-  });
-
-  const report = await orchestrator.cleanupRun({
-    databasePath,
-    runId,
-    projectRoot,
-    worktree: worktreePath,
-    isMerged: false, // Refusal 1
-    caller: { workspaceId: "w1", paneId: "w1:p1" }, // Refusal 2
-    dryRun: false,
-  });
-
-  expect(report.skippedArtifacts).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({ artifact: "w1:p1", reason: expect.stringContaining("caller-owned surface cannot be removed") }),
-      expect.objectContaining({ artifact: worktreePath, reason: expect.stringContaining("unmerged") })
-    ])
-  );
-  expect(report.removedArtifacts).toContain(runId);
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
-test("cleanupRun treats already-gone surfaces as success", async () => {
-  await protocol.rustra.ready();
-  const projectRoot = mkdtempSync(join(tmpdir(), "loop-cleanup-gone-"));
-  const databasePath = join(projectRoot, "loop.sqlite");
-  const runId = "already-gone";
+function temporaryDirectory(prefix: string): string {
+  const directory = mkdtempSync(join(tmpdir(), prefix));
+  temporaryDirectories.push(directory);
+  return directory;
+}
+
+function git(cwd: string, ...args: string[]): string {
+  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
+}
+
+function repository(prefix = "loop-cleanup-repo-"): {
+  container: string;
+  projectRoot: string;
+} {
+  const container = temporaryDirectory(prefix);
+  const projectRoot = join(container, "project");
+  mkdirSync(projectRoot);
+  git(projectRoot, "init", "-b", "main");
+  git(projectRoot, "config", "user.email", "loop-cleanup@example.invalid");
+  git(projectRoot, "config", "user.name", "Loop Cleanup Test");
+  writeFileSync(join(projectRoot, "README.md"), "fixture\n");
+  git(projectRoot, "add", "README.md");
+  git(projectRoot, "commit", "-m", "fixture");
+  return { container, projectRoot };
+}
+
+function registeredWorktree(projectRoot: string, name = "candidate"): string {
+  const worktree = join(projectRoot, ".worktrees", name);
+  mkdirSync(join(projectRoot, ".worktrees"), { recursive: true });
+  git(projectRoot, "worktree", "add", "-b", `cleanup-${name}`, worktree);
+  return worktree;
+}
+
+async function createRun(databasePath: string, runId: string, terminal = true): Promise<void> {
   await protocol.createRun({ databasePath, runId });
-  await protocol.cancelRun({ databasePath, runId });
+  if (terminal) await protocol.cancelRun({ databasePath, runId });
+}
 
-  const fakeHerdr = new FakeHerdr() as unknown as HerdrWorkerRuntime;
-  const orchestrator = new Orchestrator({
-    control: protocol,
-    providers: new ProviderRegistry([new FakeProvider("fake", ["fast"])]),
-    maxWorkers: 1,
-    herdr: fakeHerdr,
+function requestHerdr(fake: FakeHerdr): HerdrWorkerRuntime {
+  return fake as unknown as HerdrWorkerRuntime;
+}
+
+describe("cleanupRun", () => {
+  test("dry-run plans first and changes no external or persisted state", async () => {
+    const { projectRoot } = repository();
+    const worktree = registeredWorktree(projectRoot);
+    const databasePath = join(projectRoot, "loop.sqlite");
+    const runId = "dry-run";
+    await createRun(databasePath, runId);
+    const herdr = new FakeHerdr();
+
+    const report = await cleanupRun(protocol, {
+      databasePath,
+      runId,
+      projectRoot,
+      worktree,
+      keepRecent: 0,
+      herdr: requestHerdr(herdr),
+    });
+
+    expect(report.skippedArtifacts).toBeEmpty();
+    expect(report.reasons[runId]).toBe("dry_run");
+    expect(report.reasons[`loop-${runId}`]).toBe("dry_run");
+    expect(report.reasons[worktree]).toBe("dry_run");
+    expect(herdr.closedRuns).toBeEmpty();
+    expect(existsSync(worktree)).toBe(true);
+    expect((await protocol.getSnapshot({ databasePath, runId })).state).toBe("cancelled");
   });
 
-  const report = await orchestrator.cleanupRun({
-    databasePath,
-    runId,
-    projectRoot,
-    dryRun: false,
+  test("active run refusal prevents every external cleanup effect", async () => {
+    const { projectRoot } = repository();
+    const worktree = registeredWorktree(projectRoot);
+    const databasePath = join(projectRoot, "loop.sqlite");
+    const runId = "active-run";
+    await createRun(databasePath, runId, false);
+    const herdr = new FakeHerdr();
+
+    const report = await cleanupRun(protocol, {
+      databasePath,
+      runId,
+      projectRoot,
+      worktree,
+      keepRecent: 0,
+      dryRun: false,
+      herdr: requestHerdr(herdr),
+    });
+
+    expect(report.skippedArtifacts).toContainEqual({
+      artifact: runId,
+      reason: expect.stringContaining("non-terminal"),
+    });
+    expect(herdr.closedRuns).toBeEmpty();
+    expect(existsSync(worktree)).toBe(true);
+    expect((await protocol.getSnapshot({ databasePath, runId })).state).toBe("active");
   });
 
-  expect(report.skippedArtifacts).toBeEmpty();
-  expect(report.removedArtifacts).toContain(`loop-${runId}`);
-  expect(report.reasons[`loop-${runId}`]).toBe("already_gone");
-});
+  test("default retention keeps eight recent runs and prevents external cleanup", async () => {
+    const { projectRoot } = repository();
+    const databasePath = join(projectRoot, "loop.sqlite");
+    const runId = "retained-run";
+    await createRun(databasePath, runId);
+    const herdr = new FakeHerdr();
 
-test("cleanupRun reports partial failure if herdr fails to close workspace", async () => {
-  await protocol.rustra.ready();
-  const projectRoot = mkdtempSync(join(tmpdir(), "loop-cleanup-partial-"));
-  const worktreePath = join(projectRoot, "worktree-partial");
-  mkdirSync(worktreePath, { recursive: true });
+    const report = await cleanupRun(protocol, {
+      databasePath,
+      runId,
+      projectRoot,
+      dryRun: false,
+      herdr: requestHerdr(herdr),
+    });
 
-  const databasePath = join(projectRoot, "loop.sqlite");
-  const runId = "fail";
-  await protocol.createRun({ databasePath, runId });
-  await protocol.cancelRun({ databasePath, runId });
-
-  const fakeHerdr = new FakeHerdr() as unknown as HerdrWorkerRuntime;
-  const orchestrator = new Orchestrator({
-    control: protocol,
-    providers: new ProviderRegistry([new FakeProvider("fake", ["fast"])]),
-    maxWorkers: 1,
-    herdr: fakeHerdr,
+    expect(report.skippedArtifacts).toContainEqual({
+      artifact: runId,
+      reason: expect.stringContaining("keep_recent = 8"),
+    });
+    expect(herdr.closedRuns).toBeEmpty();
+    expect((await protocol.getSnapshot({ databasePath, runId })).state).toBe("cancelled");
   });
 
-  const report = await orchestrator.cleanupRun({
-    databasePath,
-    runId,
-    projectRoot,
-    worktree: worktreePath,
-    isMerged: true,
-    isClean: true,
-    dryRun: false,
+  test("ordinary directories are not accepted as Git-owned worktrees", async () => {
+    const { projectRoot } = repository();
+    const ordinaryDirectory = join(projectRoot, "ordinary-directory");
+    mkdirSync(ordinaryDirectory);
+    const databasePath = join(projectRoot, "loop.sqlite");
+    const runId = "ordinary-directory";
+    await createRun(databasePath, runId);
+    const herdr = new FakeHerdr();
+
+    const report = await cleanupRun(protocol, {
+      databasePath,
+      runId,
+      projectRoot,
+      worktree: ordinaryDirectory,
+      keepRecent: 0,
+      dryRun: false,
+      herdr: requestHerdr(herdr),
+    });
+
+    expect(report.skippedArtifacts).toContainEqual({
+      artifact: ordinaryDirectory,
+      reason: expect.stringContaining("registered Git worktree"),
+    });
+    expect(existsSync(ordinaryDirectory)).toBe(true);
+    expect(herdr.closedRuns).toBeEmpty();
+    expect((await protocol.getSnapshot({ databasePath, runId })).state).toBe("cancelled");
   });
 
-  // store is purged, worktree is removed, but herdr failed.
-  expect(report.removedArtifacts).toContain(runId);
-  expect(report.removedArtifacts).toContain(worktreePath);
-  expect(report.skippedArtifacts).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({
-        artifact: `loop-${runId}`,
-        reason: expect.stringContaining("failed to close surface: simulated failure"),
-      })
-    ])
-  );
+  test("dirty worktrees, including untracked files, are preserved", async () => {
+    const { projectRoot } = repository();
+    const worktree = registeredWorktree(projectRoot, "dirty");
+    writeFileSync(join(worktree, "untracked.txt"), "do not remove\n");
+    const databasePath = join(projectRoot, "loop.sqlite");
+    const runId = "dirty-worktree";
+    await createRun(databasePath, runId);
+    const herdr = new FakeHerdr();
+
+    const report = await cleanupRun(protocol, {
+      databasePath,
+      runId,
+      projectRoot,
+      worktree,
+      keepRecent: 0,
+      dryRun: false,
+      isClean: true,
+      isMerged: true,
+      herdr: requestHerdr(herdr),
+    });
+
+    expect(report.skippedArtifacts).toContainEqual({
+      artifact: worktree,
+      reason: expect.stringContaining("uncommitted"),
+    });
+    expect(existsSync(join(worktree, "untracked.txt"))).toBe(true);
+    expect(herdr.closedRuns).toBeEmpty();
+    expect((await protocol.getSnapshot({ databasePath, runId })).state).toBe("cancelled");
+  });
+
+  test("worktrees with commits not reachable from main HEAD are preserved", async () => {
+    const { projectRoot } = repository();
+    const worktree = registeredWorktree(projectRoot, "unmerged");
+    writeFileSync(join(worktree, "feature.txt"), "unmerged\n");
+    git(worktree, "add", "feature.txt");
+    git(worktree, "commit", "-m", "unmerged fixture");
+    const databasePath = join(projectRoot, "loop.sqlite");
+    const runId = "unmerged-worktree";
+    await createRun(databasePath, runId);
+    const herdr = new FakeHerdr();
+
+    const report = await cleanupRun(protocol, {
+      databasePath,
+      runId,
+      projectRoot,
+      worktree,
+      keepRecent: 0,
+      dryRun: false,
+      isClean: true,
+      isMerged: true,
+      herdr: requestHerdr(herdr),
+    });
+
+    expect(report.skippedArtifacts).toContainEqual({
+      artifact: worktree,
+      reason: expect.stringContaining("unmerged"),
+    });
+    expect(existsSync(worktree)).toBe(true);
+    expect(herdr.closedRuns).toBeEmpty();
+    expect((await protocol.getSnapshot({ databasePath, runId })).state).toBe("cancelled");
+  });
+
+  test("canonical path checks reject an in-project symlink that escapes the project", async () => {
+    const { container, projectRoot } = repository();
+    const externalWorktree = join(container, "external-worktree");
+    git(projectRoot, "worktree", "add", "-b", "cleanup-external", externalWorktree);
+    const symlink = join(projectRoot, "linked-outside");
+    symlinkSync(externalWorktree, symlink, "dir");
+    const databasePath = join(projectRoot, "loop.sqlite");
+    const runId = "symlink-escape";
+    await createRun(databasePath, runId);
+    const herdr = new FakeHerdr();
+
+    const report = await cleanupRun(protocol, {
+      databasePath,
+      runId,
+      projectRoot,
+      worktree: symlink,
+      keepRecent: 0,
+      dryRun: false,
+      herdr: requestHerdr(herdr),
+    });
+
+    expect(report.skippedArtifacts).toContainEqual({
+      artifact: symlink,
+      reason: expect.stringContaining("outside"),
+    });
+    expect(existsSync(externalWorktree)).toBe(true);
+    expect(herdr.closedRuns).toBeEmpty();
+    expect((await protocol.getSnapshot({ databasePath, runId })).state).toBe("cancelled");
+  });
+
+  test("a registered child whose name starts with two dots remains eligible", async () => {
+    const { projectRoot } = repository();
+    const worktree = join(projectRoot, "..safe");
+    git(projectRoot, "worktree", "add", "-b", "cleanup-dotdot-safe", worktree);
+    const databasePath = join(projectRoot, "loop.sqlite");
+    const runId = "dotdot-safe";
+    await createRun(databasePath, runId);
+
+    const report = await cleanupRun(protocol, {
+      databasePath,
+      runId,
+      projectRoot,
+      worktree,
+      keepRecent: 0,
+    });
+
+    expect(report.skippedArtifacts).toBeEmpty();
+    expect(report.reasons[worktree]).toBe("dry_run");
+    expect(existsSync(worktree)).toBe(true);
+    expect((await protocol.getSnapshot({ databasePath, runId })).state).toBe("cancelled");
+  });
+
+  test("caller-owned and lead surfaces are refused without touching other artifacts", async () => {
+    for (const ownership of [
+      { caller: { workspaceId: "caller-workspace", paneId: "caller-pane" } },
+      { isLeadPane: true },
+    ]) {
+      const { projectRoot } = repository("loop-cleanup-owned-surface-");
+      const worktree = registeredWorktree(projectRoot);
+      const databasePath = join(projectRoot, "loop.sqlite");
+      const runId = ownership.caller ? "caller-owned" : "lead-owned";
+      await createRun(databasePath, runId);
+      const herdr = new FakeHerdr();
+
+      const report = await cleanupRun(protocol, {
+        databasePath,
+        runId,
+        projectRoot,
+        worktree,
+        keepRecent: 0,
+        dryRun: false,
+        herdr: requestHerdr(herdr),
+        ...ownership,
+      });
+
+      expect(report.skippedArtifacts[0]?.reason).toContain("caller-owned surface");
+      expect(herdr.closedRuns).toBeEmpty();
+      expect(existsSync(worktree)).toBe(true);
+      expect((await protocol.getSnapshot({ databasePath, runId })).state).toBe("cancelled");
+    }
+  });
+
+  test("failed external teardown preserves the run record", async () => {
+    const { projectRoot } = repository();
+    const databasePath = join(projectRoot, "loop.sqlite");
+    const runId = "teardown-failure";
+    await createRun(databasePath, runId);
+    const herdr = new FakeHerdr();
+    herdr.failure = new Error("simulated teardown failure");
+
+    const report = await cleanupRun(protocol, {
+      databasePath,
+      runId,
+      projectRoot,
+      keepRecent: 0,
+      dryRun: false,
+      herdr: requestHerdr(herdr),
+    });
+
+    expect(report.skippedArtifacts).toContainEqual({
+      artifact: `loop-${runId}`,
+      reason: expect.stringContaining("simulated teardown failure"),
+    });
+    expect((await protocol.getSnapshot({ databasePath, runId })).state).toBe("cancelled");
+  });
+
+  test("a real Herdr lookup failure is unknown and preserves the run record", async () => {
+    const { projectRoot } = repository();
+    const databasePath = join(projectRoot, "loop.sqlite");
+    const runId = "lookup-failure";
+    await createRun(databasePath, runId);
+    const runner: HerdrRunner = {
+      async run(_command, args) {
+        expect(args).toEqual(["workspace", "list"]);
+        return {
+          exitCode: 1,
+          stdout: "",
+          stderr: JSON.stringify({
+            error: { code: "permission_denied", message: "workspace listing denied" },
+          }),
+        };
+      },
+    };
+    const herdr = new HerdrWorkerRuntime({ runner });
+
+    const report = await cleanupRun(protocol, {
+      databasePath,
+      runId,
+      projectRoot,
+      keepRecent: 0,
+      dryRun: false,
+      herdr,
+    });
+
+    expect(report.skippedArtifacts).toContainEqual({
+      artifact: `loop-${runId}`,
+      reason: expect.stringContaining("permission_denied"),
+    });
+    expect((await protocol.getSnapshot({ databasePath, runId })).state).toBe("cancelled");
+  });
+
+  test("worktree facts are revalidated after surface teardown before removal", async () => {
+    const { projectRoot } = repository();
+    const worktree = registeredWorktree(projectRoot, "stale");
+    const databasePath = join(projectRoot, "loop.sqlite");
+    const runId = "stale-worktree";
+    await createRun(databasePath, runId);
+    const herdr = new FakeHerdr();
+    herdr.beforeClose = () => {
+      writeFileSync(join(worktree, "late-commit.txt"), "created during teardown\n");
+      git(worktree, "add", "late-commit.txt");
+      git(worktree, "commit", "-m", "advance after cleanup preflight");
+    };
+
+    const report = await cleanupRun(protocol, {
+      databasePath,
+      runId,
+      projectRoot,
+      worktree,
+      keepRecent: 0,
+      dryRun: false,
+      herdr: requestHerdr(herdr),
+    });
+
+    expect(report.skippedArtifacts).toContainEqual({
+      artifact: worktree,
+      reason: expect.stringContaining("changed after cleanup preflight"),
+    });
+    expect(existsSync(worktree)).toBe(true);
+    expect((await protocol.getSnapshot({ databasePath, runId })).state).toBe("cancelled");
+  });
+
+  test("successful external cleanup precedes the store purge and uses Git worktree removal", async () => {
+    const { projectRoot } = repository();
+    const worktree = registeredWorktree(projectRoot, "success");
+    const databasePath = join(projectRoot, "loop.sqlite");
+    const runId = "successful-cleanup";
+    await createRun(databasePath, runId);
+    const herdr = new FakeHerdr();
+    let externalStateAtPurge: { surfaceClosed: boolean; worktreeGone: boolean } | undefined;
+    const observedCleanup = Object.assign(
+      async (input: Parameters<typeof protocol.cleanupRun>[0]) => {
+        if (!input.dryRun) {
+          externalStateAtPurge = {
+            surfaceClosed: herdr.closedRuns.includes(runId),
+            worktreeGone: !existsSync(worktree),
+          };
+        }
+        return await protocol.cleanupRun(input);
+      },
+      { commandId: protocol.cleanupRun.commandId },
+    );
+    const control: OrchestrationControl = {
+      ...protocol,
+      cleanupRun: observedCleanup,
+    };
+
+    const report = await cleanupRun(control, {
+      databasePath,
+      runId,
+      projectRoot,
+      worktree,
+      keepRecent: 0,
+      dryRun: false,
+      herdr: requestHerdr(herdr),
+    });
+
+    expect(report.skippedArtifacts).toBeEmpty();
+    expect(externalStateAtPurge).toEqual({ surfaceClosed: true, worktreeGone: true });
+    expect(existsSync(worktree)).toBe(false);
+    expect(git(projectRoot, "worktree", "list", "--porcelain")).not.toContain(worktree);
+    await expect(protocol.getSnapshot({ databasePath, runId })).rejects.toThrow();
+  });
+
+  test("an already-gone Loop-owned surface is idempotent and still permits purge", async () => {
+    const { projectRoot } = repository();
+    const databasePath = join(projectRoot, "loop.sqlite");
+    const runId = "already-gone";
+    await createRun(databasePath, runId);
+    const herdr = new FakeHerdr();
+    herdr.result = { closed: true, reason: "already_gone" };
+
+    const report = await cleanupRun(protocol, {
+      databasePath,
+      runId,
+      projectRoot,
+      keepRecent: 0,
+      dryRun: false,
+      herdr: requestHerdr(herdr),
+    });
+
+    expect(report.skippedArtifacts).toBeEmpty();
+    expect(report.reasons[`loop-${runId}`]).toBe("already_gone");
+    await expect(protocol.getSnapshot({ databasePath, runId })).rejects.toThrow();
+  });
 });

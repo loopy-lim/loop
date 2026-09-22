@@ -6,7 +6,7 @@
 // DO NOT EDIT — changes will be overwritten and fail codegen --check.
 // ────────────────────────────────────────────────────────────
 
-import { addTaskCodec, cancelRunCodec, claimRunnableTasksCodec, cleanupRunCodec, createRunCodec, evaluateSurfaceRemovalCodec, evaluateWorktreeRemovalCodec, getRunCodec, getSnapshotCodec, recordDecisionCodec, recordVerificationCodec, recordWorkerResultCodec, recordWorkerStartedCodec, requestAttentionCodec, resolveAttentionCodec, resumeRunCodec, submitPlanCodec, subscribeEventsCodec, updateTaskCodec } from './frame-codecs.js';
+import { addTaskCodec, cancelRunCodec, claimExecutionCodec, claimRunnableTasksCodec, cleanupRunCodec, configureRunCodec, confirmPausedCodec, createRunCodec, evaluateSurfaceRemovalCodec, evaluateWorktreeRemovalCodec, getRunCodec, getRunPlanCodec, getSnapshotCodec, getTaskContextCodec, listRunsCodec, pauseRunCodec, prepareRunCodec, reconcileTaskCodec, recordActivityCodec, recordCheckReceiptsCodec, recordDecisionCodec, recordVerificationCodec, recordWorkerResultCodec, recordWorkerStartedCodec, recordWorkerStoppedCodec, releaseExecutionCodec, renewExecutionCodec, requestAttentionCodec, resolveAttentionCodec, resumeRunCodec, steerRunCodec, stopVerificationCodec, submitPlanCodec, subscribeEventsCodec, updateTaskCodec } from './frame-codecs.js';
 
 export const frameRegistry = new Map<string, import('@rustra/types').FrameCodec<any, any>>([
   // route: postcard
@@ -14,9 +14,15 @@ export const frameRegistry = new Map<string, import('@rustra/types').FrameCodec<
   // route: postcard
   ['cancelRun', cancelRunCodec],
   // route: postcard
+  ['claimExecution', claimExecutionCodec],
+  // route: postcard
   ['claimRunnableTasks', claimRunnableTasksCodec],
   // route: postcard
   ['cleanupRun', cleanupRunCodec],
+  // route: postcard
+  ['configureRun', configureRunCodec],
+  // route: postcard
+  ['confirmPaused', confirmPausedCodec],
   // route: postcard
   ['createRun', createRunCodec],
   // route: postcard
@@ -26,7 +32,23 @@ export const frameRegistry = new Map<string, import('@rustra/types').FrameCodec<
   // route: postcard
   ['getRun', getRunCodec],
   // route: postcard
+  ['getRunPlan', getRunPlanCodec],
+  // route: postcard
   ['getSnapshot', getSnapshotCodec],
+  // route: postcard
+  ['getTaskContext', getTaskContextCodec],
+  // route: postcard
+  ['listRuns', listRunsCodec],
+  // route: postcard
+  ['pauseRun', pauseRunCodec],
+  // route: postcard
+  ['prepareRun', prepareRunCodec],
+  // route: postcard
+  ['reconcileTask', reconcileTaskCodec],
+  // route: postcard
+  ['recordActivity', recordActivityCodec],
+  // route: postcard
+  ['recordCheckReceipts', recordCheckReceiptsCodec],
   // route: postcard
   ['recordDecision', recordDecisionCodec],
   // route: postcard
@@ -36,11 +58,21 @@ export const frameRegistry = new Map<string, import('@rustra/types').FrameCodec<
   // route: postcard
   ['recordWorkerStarted', recordWorkerStartedCodec],
   // route: postcard
+  ['recordWorkerStopped', recordWorkerStoppedCodec],
+  // route: postcard
+  ['releaseExecution', releaseExecutionCodec],
+  // route: postcard
+  ['renewExecution', renewExecutionCodec],
+  // route: postcard
   ['requestAttention', requestAttentionCodec],
   // route: postcard
   ['resolveAttention', resolveAttentionCodec],
   // route: postcard
   ['resumeRun', resumeRunCodec],
+  // route: postcard
+  ['steerRun', steerRunCodec],
+  // route: postcard
+  ['stopVerification', stopVerificationCodec],
   // route: postcard
   ['submitPlan', submitPlanCodec],
   // route: postcard

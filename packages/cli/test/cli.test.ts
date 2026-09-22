@@ -246,10 +246,11 @@ test("human CLI renderers share line limits and exact overflow summaries", () =>
     listLineLimit: 4,
     lineTextLimit: 160,
   };
-  const snapshot = {
+  const snapshot: protocol.SnapshotOutput = {
+    intent: "", workingDirectory: "/project", guidance: [], attention: [], lastSequence: 1,
     runId: "render-run",
     state: "active",
-    tasks: Array.from({ length: 7 }, (_, index) => ({ id: `task-${index + 1}`, state: "ready" })),
+    tasks: Array.from({ length: 7 }, (_, index) => ({ id: `task-${index + 1}`, title: "task", kind: "research", state: "ready", preferredCompute: "fast", attempt: 0, dependencies: [], readScope: [], writeScope: [], blockedBy: [] })),
     activeWorkers: Array.from({ length: 7 }, (_, index) => ({
       id: `worker-${index + 1}`,
       taskId: `task-${index + 1}`,
@@ -258,9 +259,9 @@ test("human CLI renderers share line limits and exact overflow summaries", () =>
   };
 
   expect(formatSnapshot("graph", snapshot, limits).trim().split("\n")).toEqual([
-    "task-1 · ready",
-    "task-2 · ready",
-    "task-3 · ready",
+    "task-1 ← root · ready · r: - · w: -",
+    "task-2 ← root · ready · r: - · w: -",
+    "task-3 ← root · ready · r: - · w: -",
     "… 4 more tasks",
   ]);
   expect(formatSnapshot("workers", snapshot, limits).trim().split("\n").at(-1))
@@ -268,8 +269,8 @@ test("human CLI renderers share line limits and exact overflow summaries", () =>
   expect(formatSnapshot("attention", snapshot, limits).trim().split("\n")).toEqual([
     "Attention: 7 open",
     "attention-1",
-    "attention-2",
-    "… 5 more attention items",
+    "… 6 more attention items",
+    "Next: loop resolve render-run attention-1 <resolution>",
   ]);
   expect(formatModelList(
     Array.from({ length: 7 }, (_, index) => ({
@@ -322,3 +323,22 @@ function output(): {
     stderr: () => stderr.join(""),
   };
 }
+
+test("runs, pause, guidance and attention resolution operate on durable state", async () => {
+  await protocol.rustra.ready();
+  const databasePath = join(mkdtempSync(join(tmpdir(), "loop-cli-controls-")), "loop.sqlite");
+  const input = { databasePath, runId: "controls" };
+  await protocol.createRun(input);
+  const flags = ["--config", join(root, "config"), "--database", databasePath, "--json"];
+  const list = output();
+  expect(await runCli(["runs", ...flags], { io: list.io })).toBe(0);
+  expect(JSON.parse(list.stdout())).toContainEqual({ runId: "controls", state: "active" });
+  expect(await runCli(["pause", "controls", ...flags], { io: output().io })).toBe(0);
+  expect((await protocol.getSnapshot(input)).state).toBe("paused");
+  expect(await runCli(["steer", "controls", "all", "Preserve compatibility", ...flags], { io: output().io })).toBe(0);
+  expect((await protocol.getSnapshot(input)).guidance).toEqual(["Preserve compatibility"]);
+  await protocol.requestAttention({ ...input, attentionId: "approval", kind: "approval", summary: "Approve change" });
+  expect(await runCli(["resolve", "controls", "approval", "approved", ...flags], { io: output().io })).toBe(0);
+  expect((await protocol.getSnapshot(input)).openAttentionIds).toEqual([]);
+  expect((await protocol.getSnapshot(input)).state).toBe("paused");
+});

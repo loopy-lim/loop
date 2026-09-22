@@ -60,6 +60,20 @@ impl Attention {
         if self.state == AttentionState::Resolved {
             return Err(AttentionError::AlreadyResolved);
         }
+        let allowed = matches!(
+            (self.kind, &resolution),
+            (_, AttentionResolution::Cancel)
+                | (AttentionKind::Approval, AttentionResolution::Approved)
+                | (AttentionKind::Approval, AttentionResolution::Rejected(_))
+                | (AttentionKind::Failure, AttentionResolution::Retry)
+                | (
+                    AttentionKind::Question | AttentionKind::Decision | AttentionKind::Conflict,
+                    AttentionResolution::Answer(_)
+                )
+        );
+        if !allowed {
+            return Err(AttentionError::InvalidResolution);
+        }
         self.state = AttentionState::Resolved;
         self.resolution = Some(resolution);
         Ok(())
@@ -70,4 +84,6 @@ impl Attention {
 pub enum AttentionError {
     #[error("attention is already resolved")]
     AlreadyResolved,
+    #[error("resolution is not valid for this attention kind")]
+    InvalidResolution,
 }

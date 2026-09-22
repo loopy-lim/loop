@@ -5,7 +5,7 @@
   "type": "module",
   "exports": "./src/index.ts",
   "dependencies": {
-    "@rustra/bun": "file:../../../rustra-bridge/packages/bun",
-    "@rustra/types": "file:../../../rustra-bridge/packages/types"
+    "@rustra/bun": "0.10.2",
+    "@rustra/types": "0.12.0"
   }
 }

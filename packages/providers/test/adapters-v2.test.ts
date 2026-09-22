@@ -7,10 +7,11 @@ import {
   FakeProvider,
   PiProvider,
   HerdrAgentProvider,
-  JevClient,
   ProviderRegistry,
   ZaiApiProvider,
+  ZaiCliProvider,
   type ProcessRunner,
+  type StartWorkerInput,
   normalizeProcessResult,
 } from "../src";
 
@@ -70,7 +71,7 @@ class FailingRunner extends FakeRunner {
       result: Promise.resolve({
         exitCode: 1,
         stdout: "",
-        stderr: "Authorization: secret-value",
+        stderr: "Authorization: Basic secret-value",
       }),
       cancel: async () => {},
       subscribe: (listener: (event: { stream: "stdout" | "stderr"; chunk: string }) => void) => {
@@ -83,7 +84,7 @@ class FailingRunner extends FakeRunner {
   }
 }
 
-const input = {
+const input: StartWorkerInput = {
   runId: "run-1",
   taskId: "task-1",
   title: "task",
@@ -92,6 +93,28 @@ const input = {
   attempt: 0,
   requirements: ["edit files"],
   workingDirectory: "/project/task",
+  context: {
+    intent: "CONTEXT_INTENT_ONLY",
+    workingDirectory: "/project/task",
+    task: {
+      id: "task-1",
+      title: "Context task title",
+      kind: "implementation",
+      dependencies: [],
+      readScope: ["packages/providers/**"],
+      writeScope: ["packages/providers/src/**"],
+      requirements: ["Use generated context"],
+      completionChecks: [],
+      preferredCompute: "strong",
+      minimumCompute: "fast",
+      maximumCompute: "frontier",
+      maxAttempts: 3,
+    },
+    attempt: 0,
+    dependencyResults: [],
+    previousChecks: [],
+    guidance: ["Keep the adapter thin"],
+  },
 };
 
 test("Codex adapter probes the official surface and normalizes a completed worker", async () => {
@@ -116,6 +139,8 @@ test("Codex adapter probes the official surface and normalizes a completed worke
   expect(runner.calls.some((call) => call.command === "codex" && call.args.includes("exec"))).toBe(true);
   expect(runner.calls.flatMap((call) => call.args)).toContain("workspace-write");
   expect(runner.calls.find((call) => call.args.includes("exec"))?.args).toContain("/project/task");
+  expect(runner.calls.find((call) => call.args.includes("exec"))?.args.at(-1))
+    .toContain("CONTEXT_INTENT_ONLY");
   expect(runner.calls.flatMap((call) => call.args)).not.toContain(expect.stringContaining("API_KEY"));
 });
 
@@ -137,7 +162,18 @@ test("pi provider launches headless pi with the configured model pattern", async
   expect(launch.args).toContain("--model");
   expect(launch.args).toContain("zai/glm-5.3-flash");
   expect(launch.args).toContain("-p");
+  expect(launch.args.at(-1)).toContain("CONTEXT_INTENT_ONLY");
   expect(launch.args).not.toContain("--sandbox");
+});
+
+test("Z.AI CLI provider uses the shared generated worker context", async () => {
+  const runner = new FakeRunner();
+  const provider = new ZaiCliProvider({ runner, cwd: "/project" });
+
+  await provider.start(input);
+
+  const launch = runner.calls.at(-1)!;
+  expect(launch.args[launch.args.indexOf("--prompt") + 1]).toContain("CONTEXT_INTENT_ONLY");
 });
 
 test("Codex resume uses only arguments supported by the installed resume surface", async () => {
@@ -169,7 +205,7 @@ test("Antigravity adapter discovers models and uses stream-json execution", asyn
     "stream-json",
     "--sandbox",
     "--print",
-    "task\nedit files",
+    expect.stringContaining("CONTEXT_INTENT_ONLY"),
   ]);
   await provider.resume("conversation-1", { ...input, previousWorkerId: "old" });
   expect(runner.calls.at(-1)?.args).toEqual([
@@ -179,7 +215,7 @@ test("Antigravity adapter discovers models and uses stream-json execution", asyn
     "--conversation",
     "conversation-1",
     "--print",
-    "task\nedit files",
+    expect.stringContaining("CONTEXT_INTENT_ONLY"),
   ]);
 });
 
@@ -234,6 +270,7 @@ test("Antigravity stream-json result response is normalized as the final summary
 
 test("Z.AI API adapter keeps the key in the header", async () => {
   let authorization = "";
+  let prompt = "";
   const provider = new ZaiApiProvider({
     id: "zai-api",
     baseUrl: "https://example.invalid/v1",
@@ -242,6 +279,10 @@ test("Z.AI API adapter keeps the key in the header", async () => {
     mode: "general",
     fetch: async (_url, init) => {
       authorization = String((init?.headers as Record<string, string>).Authorization);
+      const body = JSON.parse(String(init?.body)) as {
+        messages: Array<{ content: string }>;
+      };
+      prompt = body.messages[0]?.content ?? "";
       return new Response(JSON.stringify({ choices: [{ message: { content: "done" } }] }), {
         status: 200,
         headers: { "content-type": "application/json" },
@@ -251,7 +292,10 @@ test("Z.AI API adapter keeps the key in the header", async () => {
   const handle = await provider.start(input);
   expect((await provider.result(handle.id)).summary).toBe("done");
   expect(authorization).toBe("Bearer secret-value");
+  expect(prompt).toContain("CONTEXT_INTENT_ONLY");
   expect(JSON.stringify(await provider.status(handle.id))).not.toContain("secret-value");
+  await provider.release!(handle.id);
+  expect(provider.status(handle.id)).rejects.toThrow("unknown worker");
 });
 
 test("Z.AI API adapter redacts provider errors", async () => {
@@ -261,7 +305,7 @@ test("Z.AI API adapter redacts provider errors", async () => {
     model: "configured-model",
     mode: "general",
     fetch: async () => new Response(
-      JSON.stringify({ error: { message: "token=secret-value rejected" } }),
+      JSON.stringify({ error: { message: "Bearer secret-value rejected" } }),
       { status: 401, headers: { "content-type": "application/json" } },
     ),
   });
@@ -269,37 +313,6 @@ test("Z.AI API adapter redacts provider errors", async () => {
   const result = await provider.result(handle.id);
   expect(result.success).toBe(false);
   expect(result.summary).not.toContain("secret-value");
-});
-
-test("Jev remains optional and returns the deterministic fallback when unavailable", async () => {
-  const client = new JevClient({
-    endpoint: "https://example.invalid/decide",
-    fetch: async () => {
-      throw new Error("offline");
-    },
-  });
-  const decision = await client.decide({
-    labels: ["fast", "balanced", "strong"] as const,
-    fallback: "balanced",
-    features: { risk: "medium" },
-    minimumTopScore: 0.65,
-    minimumMargin: 0.15,
-  });
-  expect(decision).toEqual({ label: "balanced", source: "deterministic_fallback" });
-});
-
-test("Jev accepts only an unambiguous typed decision", async () => {
-  const client = new JevClient({
-    endpoint: "https://example.invalid/decide",
-    fetch: async () => new Response(JSON.stringify({ scores: { fast: 0.8, strong: 0.1 } })),
-  });
-  expect(await client.decide({
-    labels: ["fast", "strong"] as const,
-    fallback: "strong",
-    features: { risk: "low" },
-    minimumTopScore: 0.65,
-    minimumMargin: 0.15,
-  })).toEqual({ label: "fast", source: "jev" });
 });
 
 test("provider selection skips an unavailable adapter", async () => {
@@ -359,9 +372,11 @@ test("interactive provider delegates agent lifecycle to Herdr", async () => {
     "workspace-write",
   ]));
   expect(calls.some((args) => args[0] === "agent" && args[1] === "prompt")).toBe(true);
+  const promptCall = calls.find((args) => args[0] === "agent" && args[1] === "prompt");
+  expect(promptCall?.[3]).toContain("CONTEXT_INTENT_ONLY");
 });
 
-test("prompt turn rejection falls back to polling instead of failing the worker", async () => {
+test("prompt delivery rejection fails startup instead of reading stale status", async () => {
   const herdrRunner: HerdrRunner = {
     async run(_command, args) {
       if (args[0] === "workspace") {
@@ -397,11 +412,97 @@ test("prompt turn rejection falls back to polling instead of failing the worker"
     pollIntervalMs: 0,
   });
 
-  const handle = await provider.start(input);
-  expect(await provider.result(handle.id)).toMatchObject({
-    success: true,
-    summary: "work finished despite the hiccup",
+  await expect(provider.start(input)).rejects.toThrow("Herdr returned invalid JSON");
+});
+
+test("Herdr idle state cannot turn stale pane text into a successful result", async () => {
+  let reads = 0;
+  const herdrRunner: HerdrRunner = {
+    async run(_command, args) {
+      if (args[0] === "workspace") {
+        return ok({ result: { workspace: { workspace_id: "workspace-1" }, root_pane: { pane_id: "workspace-1:p1" } } });
+      }
+      if (args[0] === "tab" && args[1] === "create") {
+        return ok({ result: { tab: { tab_id: "workspace-1:t2" }, root_pane: { pane_id: "workspace-1:p2" } } });
+      }
+      if (args[0] === "agent" && args[1] === "get") {
+        return ok({ result: { agent: { agent_status: "idle" } } });
+      }
+      if (args[0] === "agent" && args[1] === "read") {
+        reads += 1;
+        return { exitCode: 0, stdout: "stale output from an earlier turn", stderr: "" };
+      }
+      return ok({ result: {} });
+    },
+  };
+  const provider = new HerdrAgentProvider({
+    id: "idle-safe",
+    runtime: new HerdrWorkerRuntime({ runner: herdrRunner }),
+    kind: "codex",
+    projectRoot: "/project",
+    computeClasses: ["strong"],
+    pollIntervalMs: 0,
+    startGraceMs: 10,
   });
+
+  const handle = await provider.start(input);
+  const result = await provider.result(handle.id);
+
+  expect(result.success).toBe(false);
+  expect(result.failure?.kind).toBe("incomplete_output");
+  expect(reads).toBe(0);
+});
+
+test("Herdr cancellation waits for the active turn and release closes only the worker tab", async () => {
+  const calls: string[][] = [];
+  let observedStatus = "working";
+  const herdrRunner: HerdrRunner = {
+    async run(_command, args) {
+      calls.push(args);
+      if (args[0] === "workspace" && args[1] === "create") {
+        return ok({
+          result: {
+            workspace: { workspace_id: "workspace-owned-by-caller" },
+            tab: { tab_id: "caller-tab" },
+            root_pane: { pane_id: "caller-pane" },
+          },
+        });
+      }
+      if (args[0] === "tab" && args[1] === "create") {
+        return ok({ result: { tab: { tab_id: "worker-tab" }, root_pane: { pane_id: "worker-pane" } } });
+      }
+      if (args[0] === "agent" && args[1] === "get") {
+        return ok({ result: { agent: { agent_status: observedStatus } } });
+      }
+      return ok({ result: {} });
+    },
+  };
+  const provider = new HerdrAgentProvider({
+    id: "herdr-lifecycle",
+    runtime: new HerdrWorkerRuntime({ runner: herdrRunner, cancelGraceMs: 500, cancelPollMs: 0 }),
+    kind: "codex",
+    projectRoot: "/project",
+    computeClasses: ["strong"],
+    pollIntervalMs: 0,
+  });
+  const handle = await provider.start(input);
+
+  let cancelled = false;
+  const cancellation = provider.cancel(handle.id).then(() => {
+    cancelled = true;
+  });
+  await Bun.sleep(10);
+  expect(cancelled).toBe(false);
+
+  observedStatus = "done";
+  await cancellation;
+  expect(await provider.status(handle.id)).toBe("cancelled");
+  expect((await provider.result(handle.id)).failure?.kind).toBe("cancelled");
+
+  await provider.release!(handle.id);
+  expect(calls).toContainEqual(["tab", "close", "worker-tab"]);
+  expect(calls.some((args) => args[0] === "workspace" && args[1] === "close")).toBe(false);
+  expect(provider.status(handle.id)).rejects.toThrow("unknown worker");
 });
 
 function ok(value: unknown) {

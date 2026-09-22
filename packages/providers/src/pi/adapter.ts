@@ -1,5 +1,6 @@
 import { NodeProcessRunner, type ProcessRunner } from "../process";
 import { ProcessProvider } from "../process-provider";
+import { buildWorkerPrompt } from "../prompt";
 import type { ProviderCapabilities, StartWorkerInput } from "../types";
 
 interface PiProviderOptions {
@@ -56,7 +57,7 @@ export class PiProvider extends ProcessProvider {
     const args: string[] = [];
     if (this.#provider) args.push("--provider", this.#provider);
     if (this.#model) args.push("--model", this.#model);
-    args.push("--no-session", "-p", [input.title, ...input.requirements].filter(Boolean).join("\n"));
+    args.push("--no-session", "-p", buildWorkerPrompt(input));
     return { command: this.#command, args, cwd };
   }
 }

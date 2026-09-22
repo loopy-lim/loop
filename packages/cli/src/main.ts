@@ -8,10 +8,12 @@ import { spawn } from "node:child_process";
 import {
   ConfigError,
   loadLoopConfig,
+  resolveConfigDirectory,
   type LoopConfig,
 } from "@loop/orchestrator/config";
-import { compactLines, type OutputLimits } from "@loop/presentation";
-import type { TaskSpecInput } from "@loop/protocol";
+import { compactLines, renderSnapshot, renderTaskContext, type OutputLimits } from "@loop/presentation";
+import { observeRun, spawnOwner } from "./dispatcher";
+import type { SnapshotOutput, TaskSpecInput } from "@loop/protocol";
 
 export interface CliIo {
   stdout(value: string): void;
@@ -70,20 +72,60 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
       else io.stdout(formatModelList(config.models, config.output));
       return 0;
     }
-    if (["status", "graph", "workers", "attention", "cancel", "resume"].includes(parsed.command)) {
+    if (parsed.command === "runs") {
+      const config = configuration(parsed);
+      const protocol = await loadProtocol();
+      await protocol.rustra.ready();
+      const runs = await protocol.listRuns({ databasePath: config.databasePath });
+      if (parsed.json) print(runs, true, io);
+      else io.stdout(compactLines(runs.map(run => `${run.runId} · ${run.state}`), { lineLimit: config.output.listLineLimit, lineTextLimit: config.output.lineTextLimit, overflow: n => `… ${n} more runs` }).join("\n") + "\n");
+      return 0;
+    }
+    if (["status", "graph", "workers", "attention", "cancel", "pause", "resume", "steer", "resolve", "reconcile", "task", "watch"].includes(parsed.command)) {
       const runId = parsed.operands[0];
       if (!runId) throw new UsageError(`${parsed.command} requires <run-id>`);
       const config = configuration(parsed);
       const protocol = await loadProtocol();
       await protocol.rustra.ready();
       const input = { databasePath: config.databasePath, runId };
-      const snapshot = parsed.command === "cancel"
-        ? await protocol.cancelRun(input).then(() => protocol.getSnapshot(input))
-        : parsed.command === "resume"
-          ? await protocol.resumeRun(input).then(() => protocol.getSnapshot(input))
-          : await protocol.getSnapshot(input);
-      if (parsed.json) io.stdout(`${JSON.stringify(snapshot)}\n`);
-      else io.stdout(formatSnapshot(parsed.command, snapshot, config.output));
+      if (parsed.command === "cancel") await protocol.cancelRun(input);
+      if (parsed.command === "pause") await protocol.pauseRun(input);
+      if (parsed.command === "steer") {
+        const [_, taskId, ...message] = parsed.operands;
+        if (!taskId || !message.length) throw new UsageError("steer requires <run-id> <task-id|all> <message>");
+        await protocol.steerRun({ ...input, taskId: taskId === "all" ? null : taskId, message: message.join(" ") });
+      }
+      if (parsed.command === "resolve") {
+        const [_, attentionId, ...resolution] = parsed.operands;
+        if (!attentionId || !resolution.length) throw new UsageError("resolve requires <run-id> <attention-id> <approved|retry|cancel|answer>");
+        await protocol.resolveAttention({ ...input, attentionId, resolution: resolution.join(" ") });
+      }
+      if (parsed.command === "reconcile") {
+        const taskId = parsed.operands[1];
+        if (!taskId || parsed.operands[2] !== "stopped") throw new UsageError("reconcile requires <run-id> <task-id> stopped; first confirm the old worker and checks have stopped");
+        await protocol.reconcileTask({ ...input, taskId, confirmedStopped: true });
+        if ((await protocol.getSnapshot(input)).state === "cancelling") await protocol.cancelRun(input);
+      }
+      if (parsed.command === "task") {
+        const taskId = parsed.operands[1];
+        if (!taskId) throw new UsageError("task requires <run-id> <task-id>");
+        const context = await protocol.getTaskContext({ ...input, taskId });
+        if (parsed.json) print(context, true, io);
+        else io.stdout(renderTaskContext(context, config.output) + "\n");
+        return 0;
+      }
+      if (parsed.command === "resume") {
+        await protocol.resumeRun(input);
+        const plan = await protocol.getRunPlan(input);
+        await launchOwner(parsed, config, runId, plan.workingDirectory, options);
+      }
+      if (parsed.command === "watch") {
+        await observeRun({ snapshot: () => protocol.getSnapshot(input), onSnapshot: snapshot => io.stdout(parsed.json ? JSON.stringify(snapshot) + "\n" : formatSnapshot("status", snapshot, config.output)) });
+      } else {
+        const snapshot = await protocol.getSnapshot(input);
+        if (parsed.json) io.stdout(`${JSON.stringify(snapshot)}\n`);
+        else io.stdout(formatSnapshot(parsed.command, snapshot, config.output));
+      }
       return 0;
     }
     if (parsed.command === "run") {
@@ -108,36 +150,34 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
       ].join("\n") + "\n");
       return receipt.status === "completed" ? 0 : 1;
     }
-    if (parsed.command === "__execute-plan") {
-      const payload = parseExecutionPayload(options.stdin ?? await Bun.stdin.text());
+    if (parsed.command === "__execute-plan" || parsed.command === "__dispatch") {
+      const payload = parsed.command === "__execute-plan" ? parseExecutionPayload(options.stdin ?? await Bun.stdin.text()) : undefined;
+      const runId = payload?.runId ?? parsed.operands[0];
+      if (!runId) throw new UsageError("__dispatch requires <run-id>");
       const config = configuration(parsed);
       const protocol = await loadProtocol();
       await protocol.rustra.ready();
+      const input = { databasePath: config.databasePath, runId };
       const { buildProviderRegistry, LoopRuntime } = await import("@loop/orchestrator");
-      const runtime = new LoopRuntime({
-        control: protocol,
-        databasePath: config.databasePath,
-        providers: buildProviderRegistry({ config, projectRoot: payload.workingDirectory }),
-        maxWorkers: config.scheduler.maxWorkers,
-        maxFrontierWorkers: config.scheduler.maxFrontierWorkers,
-      });
-      const unsubscribe = parsed.stream
-        ? await runtime.subscribe(payload.runId, (snapshot) => {
-            io.stdout(`${JSON.stringify({ type: "snapshot", value: snapshot })}\n`);
-          })
-        : undefined;
-      const summary = await runtime.start({
-        runId: payload.runId,
-        tasks: payload.tasks,
-        workingDirectory: payload.workingDirectory,
-      });
-      unsubscribe?.();
-      io.stdout(parsed.stream
-        ? `${JSON.stringify({ type: "summary", value: summary })}\n`
-        : parsed.json
-          ? `${JSON.stringify(summary)}\n`
-          : `${summary.status}\n`);
-      return summary.status === "completed" ? 0 : 1;
+      const plan = payload ?? await protocol.getRunPlan(input);
+      const runtime = new LoopRuntime({ control: protocol, databasePath: config.databasePath,
+        providers: buildProviderRegistry({ config, projectRoot: plan.workingDirectory }),
+        maxWorkers: config.scheduler.maxWorkers, maxFrontierWorkers: config.scheduler.maxFrontierWorkers });
+      if (payload) {
+        await runtime.prepare(payload);
+        const owner = await launchOwner(parsed, config, runId, plan.workingDirectory, options);
+        if (parsed.detach) { print({ runId, state: "active", ownerPid: owner.pid }, true, io); return 0; }
+        const summary = await observeRun({ snapshot: () => runtime.snapshot(runId), owner,
+          onSnapshot: snapshot => { if (parsed.stream) io.stdout(JSON.stringify({ type: "snapshot", value: snapshot }) + "\n"); } });
+        io.stdout(parsed.stream ? JSON.stringify({ type: "summary", value: summary }) + "\n" : JSON.stringify(summary) + "\n");
+      } else {
+        const stop = new AbortController();
+        const abort = () => stop.abort();
+        process.once("SIGTERM", abort); process.once("SIGINT", abort);
+        try { await runtime.execute(runId, stop.signal); }
+        finally { process.off("SIGTERM", abort); process.off("SIGINT", abort); }
+      }
+      return 0;
     }
     throw new UsageError(`unknown command: ${parsed.command}`);
   } catch (error) {
@@ -161,6 +201,7 @@ interface ParsedArguments {
   databasePath?: string;
   json: boolean;
   stream: boolean;
+  detach: boolean;
   auth: boolean;
   help: boolean;
 }
@@ -171,6 +212,7 @@ function parse(argv: string[]): ParsedArguments {
   let databasePath: string | undefined;
   let json = false;
   let stream = false;
+  let detach = false;
   let auth = false;
   let helpRequested = false;
   for (let index = 0; index < argv.length; index += 1) {
@@ -181,6 +223,8 @@ function parse(argv: string[]): ParsedArguments {
       json = true;
     } else if (argument === "--stream") {
       stream = true;
+    } else if (argument === "--detach") {
+      detach = true;
     } else if (argument === "--auth") {
       auth = true;
     } else if (argument === "--config" || argument === "--database") {
@@ -202,6 +246,7 @@ function parse(argv: string[]): ParsedArguments {
     databasePath,
     json,
     stream,
+    detach,
     auth,
     help: helpRequested,
   };
@@ -358,54 +403,8 @@ function prepareBridgeEnvironment(): void {
   if (existsSync(adjacent)) process.env.RUSTRA_BUN_LIBRARY = adjacent;
 }
 
-export function formatSnapshot(command: string, snapshot: {
-  runId: string;
-  state: string;
-  tasks: Array<{ id: string; state: string }>;
-  activeWorkers: Array<{ id: string; taskId: string }>;
-  openAttentionIds: string[];
-}, limits: OutputLimits): string {
-  if (command === "graph") {
-    return `${compactLines(snapshot.tasks.map((task) => `${task.id} · ${task.state}`), {
-      lineLimit: limits.listLineLimit,
-      lineTextLimit: limits.lineTextLimit,
-      overflow: (omitted) => `… ${omitted} more tasks`,
-    }).join("\n")}\n`;
-  }
-  if (command === "workers") {
-    if (snapshot.activeWorkers.length === 0) return "No active workers\n";
-    return `${compactLines(
-      snapshot.activeWorkers.map((worker) => `${worker.id} · ${worker.taskId}`),
-      {
-        lineLimit: limits.listLineLimit,
-        lineTextLimit: limits.lineTextLimit,
-        overflow: (omitted) => `… ${omitted} more workers`,
-      },
-    ).join("\n")}\n`;
-  }
-  if (command === "attention") {
-    if (snapshot.openAttentionIds.length === 0) return "OK\n";
-    return `${compactLines(
-      [`Attention: ${snapshot.openAttentionIds.length} open`, ...snapshot.openAttentionIds],
-      {
-        lineLimit: limits.attentionLineLimit,
-        lineTextLimit: limits.lineTextLimit,
-        overflow: (omitted) => `… ${omitted} more attention items`,
-      },
-    ).join("\n")}\n`;
-  }
-  const done = snapshot.tasks.filter((task) => task.state === "done").length;
-  return `${compactLines([
-    `Run ${snapshot.runId}`,
-    `State: ${snapshot.state}`,
-    `Tasks: ${done}/${snapshot.tasks.length}`,
-    `Workers: ${snapshot.activeWorkers.length}`,
-    `Attention: ${snapshot.openAttentionIds.length}`,
-  ], {
-    lineLimit: limits.statusLineLimit,
-    lineTextLimit: limits.lineTextLimit,
-    overflow: (omitted) => `… ${omitted} more status lines`,
-  }).join("\n")}\n`;
+export function formatSnapshot(command: string, snapshot: SnapshotOutput, limits: OutputLimits): string {
+  return renderSnapshot(command, snapshot, limits).replace("Next: /loop", "Next: loop") + "\n";
 }
 
 export function formatModelList(
@@ -557,6 +556,7 @@ function offlineTask(
 }
 
 function parseExecutionPayload(value: string): {
+  intent?: string;
   runId: string;
   workingDirectory: string;
   tasks: TaskSpecInput[];
@@ -581,6 +581,7 @@ function parseExecutionPayload(value: string): {
     throw new UsageError("execution payload requires tasks");
   }
   return {
+    intent: typeof payload.intent === "string" ? payload.intent : undefined,
     runId: payload.runId,
     workingDirectory: payload.workingDirectory,
     tasks: payload.tasks as TaskSpecInput[],
@@ -609,13 +610,20 @@ function help(): string {
 Usage:
   loop                                Start the interactive Loop agent in this terminal
   loop doctor [--auth] [--json]
+  loop runs [--json]                Find persisted runs after reopening
   loop status <run-id> [--json]
   loop graph <run-id>
   loop workers <run-id>
   loop attention <run-id>
   loop models [--json]
   loop cancel <run-id>
-  loop resume <run-id>
+  loop pause <run-id>               Finish active tasks, stop scheduling
+  loop resume <run-id>              Continue the saved graph in the background
+  loop watch <run-id> [--json]
+  loop reconcile <run-id> <task-id> stopped  Confirm an orphaned task stopped before retrying
+  loop task <run-id> <task-id>       Show context, results and verification evidence
+  loop steer <run-id> <task-id|all> <message>
+  loop resolve <run-id> <attention-id> <approved|retry|cancel|answer>
   loop run <intent>                 Start the interactive Loop agent with an initial request
   loop verify-install [--json]      Run the offline fake-provider acceptance
 
@@ -635,7 +643,7 @@ function bounded(value: string): string {
 
 function redact(value: string): string {
   return bounded(
-    value.replace(
+    value.replace(/(?:authorization|proxy-authorization)\s*["']?\s*[:=]\s*["']?[^\r\n,"'}]+/gi, "[authorization]=[redacted]").replace(
       /(?:api[_-]?key|token|authorization|password)\s*[:=]\s*\S+/gi,
       "[credential]=[redacted]",
     ),
@@ -644,4 +652,10 @@ function redact(value: string): string {
 
 if (import.meta.main) {
   process.exitCode = await runCli(Bun.argv.slice(2));
+}
+
+function launchOwner(parsed: ParsedArguments, config: LoopConfig, runId: string, cwd: string, options: RunCliOptions) {
+  const executable = options.executablePath ?? process.execPath;
+  const sourceEntry = basename(executable).startsWith("bun") ? resolve(import.meta.dir, "main.ts") : undefined;
+  return spawnOwner({ executable, sourceEntry, runId, databasePath: resolve(config.databasePath), configDirectory: resolve(resolveConfigDirectory({ explicit: parsed.configDirectory })), cwd });
 }

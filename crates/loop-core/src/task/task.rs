@@ -92,6 +92,7 @@ impl Task {
                 | (TaskState::Attention, TaskState::Cancelled)
                 | (TaskState::Blocked, TaskState::Ready)
                 | (TaskState::Blocked, TaskState::Cancelled)
+                | (TaskState::Failed, TaskState::Ready)
         );
         if !allowed {
             return Err(TaskTransitionError::Invalid {
@@ -174,6 +175,11 @@ impl TaskBuilder {
         if self.task.max_attempts == 0 {
             return Err(TaskBuildError::ZeroAttempts);
         }
+        if self.task.kind.requires_explicit_write_scope()
+            && self.task.ownership.write_scope.is_empty()
+        {
+            return Err(TaskBuildError::MissingWriteScope);
+        }
         if self.task.completion_contract.checks.is_empty() {
             return Err(TaskBuildError::EmptyCompletionContract);
         }
@@ -181,6 +187,30 @@ impl TaskBuilder {
             || self.task.preferred_compute > self.task.maximum_compute
         {
             return Err(TaskBuildError::InvalidComputeRange);
+        }
+        if self
+            .task
+            .ownership
+            .read_scope
+            .iter()
+            .chain(&self.task.ownership.write_scope)
+            .any(|scope| {
+                scope.starts_with('/')
+                    || scope.contains('\\')
+                    || scope.contains(':')
+                    || scope.split('/').any(|part| part == "..")
+            })
+        {
+            return Err(TaskBuildError::InvalidScope);
+        }
+        let mut check_ids = std::collections::BTreeSet::new();
+        if self.task.completion_contract.checks.iter().any(|check| {
+            check.id.trim().is_empty()
+                || check.command.trim().is_empty()
+                || check.timeout_ms == 0
+                || !check_ids.insert(&check.id)
+        }) {
+            return Err(TaskBuildError::InvalidCompletionCheck);
         }
         self.task.dependencies.sort();
         self.task.dependencies.dedup();
@@ -190,6 +220,12 @@ impl TaskBuilder {
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum TaskBuildError {
+    #[error("completion checks need unique ids, commands and positive timeouts")]
+    InvalidCompletionCheck,
+    #[error("scopes must be project-relative and cannot contain parent traversal")]
+    InvalidScope,
+    #[error("this task kind requires an explicit write scope")]
+    MissingWriteScope,
     #[error("task id and title are required")]
     EmptyIdentity,
     #[error("max_attempts must be greater than zero")]

@@ -10,6 +10,7 @@ import type {
   WorkerStatus,
 } from "./types";
 import type { ProcessResult, ProcessRunner, RunningProcess } from "./process";
+import { redactProviderText } from "./redact";
 
 interface Session {
   process: RunningProcess;
@@ -51,6 +52,13 @@ export abstract class ProcessProvider implements AgentProvider {
 
   async result(workerId: string): Promise<WorkerResult> {
     return this.require(workerId).result;
+  }
+
+  async release(workerId: string): Promise<void> {
+    const session = this.require(workerId);
+    await session.result;
+    await session.process.cancel();
+    this.#sessions.delete(workerId);
   }
 
   subscribe(workerId: string, listener: (event: ProviderEvent) => void): () => void {
@@ -230,7 +238,5 @@ function isRetryableFailure(kind: ProviderFailureKind): boolean {
 }
 
 function redact(value: string): string {
-  return value
-    .replace(/(?:api[_-]?key|token|authorization)\s*[:=]\s*\S+/gi, "[credential]=[redacted]")
-    .slice(0, 4_000);
+  return redactProviderText(value);
 }

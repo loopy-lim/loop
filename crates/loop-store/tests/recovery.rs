@@ -12,6 +12,10 @@ fn task() -> Task {
         "implementation",
         TaskKind::Implementation,
     )
+    .ownership(loop_core::task::WorkOwnership::new(
+        std::iter::empty::<&str>(),
+        ["src/**"],
+    ))
     .compute(ComputeClass::Fast, ComputeClass::Tiny, ComputeClass::Strong)
     .completion_contract(CompletionContract::new([CompletionCheck::new("tests")]))
     .build()
@@ -166,4 +170,30 @@ fn query_indexes_follow_the_validated_event_projection() {
         .unwrap();
     assert_eq!(task_state, "attention");
     assert_eq!(attempt_state, "failed");
+}
+
+#[test]
+fn identifiers_are_scoped_by_run_and_cache_survives_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("scoped.db");
+    let mut store = SqliteStore::open(&path).unwrap();
+    for run in ["one", "two"] {
+        store
+            .append(&Event::new(run, EventKind::RunCreated))
+            .unwrap();
+        store
+            .append(&Event::new(
+                run,
+                EventKind::AttentionCreated(Attention::new(
+                    "same-id",
+                    AttentionKind::Approval,
+                    "confirm",
+                )),
+            ))
+            .unwrap();
+    }
+    drop(store);
+    let store = SqliteStore::open(&path).unwrap();
+    assert_eq!(store.projection("one").unwrap().attention.len(), 1);
+    assert_eq!(store.projection("two").unwrap().attention.len(), 1);
 }

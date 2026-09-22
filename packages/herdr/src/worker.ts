@@ -28,4 +28,4 @@ export interface HerdrWorkerHandle {
   agentName?: string;
 }
 
-export type HerdrWorkerState = "running" | "blocked" | "completed" | "failed" | "unknown";
+export type HerdrWorkerState = "idle" | "running" | "blocked" | "completed" | "failed" | "unknown";

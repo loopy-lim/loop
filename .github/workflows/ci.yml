@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  clean-clone:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.1
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88.0
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check generated contract, types, architecture, and tests
+        run: bun run check
+
+      - name: Build and verify the packaged fake-provider scenario
+        run: bun run test:packaged

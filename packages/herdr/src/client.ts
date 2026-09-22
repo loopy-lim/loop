@@ -23,6 +23,8 @@ export interface HerdrWorkerRuntimeOptions {
   runner?: HerdrRunner;
   command?: string;
   promptTimeoutMs?: number;
+  cancelGraceMs?: number;
+  cancelPollMs?: number;
 }
 
 export interface CloseWorkspaceResult {
@@ -70,14 +72,16 @@ export class NodeHerdrRunner implements HerdrRunner {
 export class HerdrWorkerRuntime {
   readonly #runner: HerdrRunner;
   readonly #command: string;
-  readonly #promptTimeoutMs: number;
+  readonly #cancelGraceMs: number;
+  readonly #cancelPollMs: number;
   readonly #workspaces = new Map<string, WorkspaceRef>();
   readonly #turns = new Map<string, Promise<void>>();
 
   constructor(options: HerdrWorkerRuntimeOptions = {}) {
     this.#runner = options.runner ?? new NodeHerdrRunner();
     this.#command = options.command ?? "herdr";
-    this.#promptTimeoutMs = options.promptTimeoutMs ?? 300_000;
+    this.#cancelGraceMs = options.cancelGraceMs ?? 2_000;
+    this.#cancelPollMs = options.cancelPollMs ?? 50;
   }
 
   async start(input: HerdrWorkerInput): Promise<HerdrWorkerHandle> {
@@ -173,11 +177,28 @@ export class HerdrWorkerRuntime {
 
   async cancel(handle: HerdrWorkerHandle): Promise<void> {
     validateHandle(handle);
-    if (handle.agentName) {
-      await this.#run(["agent", "send-keys", handle.agentName, "ctrl+c"]);
-      return;
+    try {
+      if (handle.agentName) {
+        await this.#run(["agent", "send-keys", handle.agentName, "ctrl+c"]);
+      } else {
+        await this.#run(["pane", "send-keys", handle.paneId, "ctrl+c"]);
+      }
+    } catch (error) {
+      if (isAlreadyGone(error)) return;
+      throw error;
     }
-    await this.#run(["pane", "send-keys", handle.paneId, "ctrl+c"]);
+    const deadline = Date.now() + this.#cancelGraceMs;
+    do {
+      const state = await this.#statusForCancel(handle);
+      if (state !== "running") return;
+      await delay(this.#cancelPollMs);
+    } while (Date.now() < deadline);
+
+    await this.cleanup(handle);
+    const state = await this.#statusForCancel(handle);
+    if (state === "running" || state === "unknown") {
+      throw new Error(`Herdr worker ${handle.workerId} stop could not be confirmed`);
+    }
   }
 
   async cleanup(handle: HerdrWorkerHandle): Promise<void> {
@@ -196,20 +217,20 @@ export class HerdrWorkerRuntime {
   async closeWorkspace(runId: string): Promise<CloseWorkspaceResult> {
     const workspace = this.#workspaces.get(runId);
     if (!workspace) {
-      try {
-        const listPayload = await this.#run(["workspace", "list"]);
-        const workspaces = optionalArray(listPayload, ["result", "workspaces"]) ?? [];
-        const found = workspaces.find((w) =>
-          typeof w === "object" && w !== null && "label" in w && (w as { label: unknown }).label === `loop-${runId}`
-        );
-        if (found && typeof found === "object" && "workspace_id" in found) {
-          const wsId = String((found as { workspace_id: unknown }).workspace_id);
-          return await this.#teardownWorkspace(runId, wsId, undefined, new Set());
+      const listPayload = await this.#run(["workspace", "list"]);
+      const workspaces = optionalArray(listPayload, ["result", "workspaces"]);
+      if (!workspaces) {
+        throw new Error("Herdr workspace list response is missing workspaces");
+      }
+      const found = workspaces.find((w) =>
+        typeof w === "object" && w !== null && "label" in w && (w as { label: unknown }).label === `loop-${runId}`
+      );
+      if (found) {
+        const wsId = optionalString(found, ["workspace_id"]);
+        if (!wsId) {
+          throw new Error("matching Herdr workspace is missing workspace_id");
         }
-      } catch (error) {
-        if (isAlreadyGone(error)) {
-          return { closed: true, reason: "already_gone" };
-        }
+        return await this.#teardownWorkspace(runId, wsId, undefined, new Set());
       }
       return { closed: true, reason: "already_gone" };
     }
@@ -236,12 +257,17 @@ export class HerdrWorkerRuntime {
       // Closing tabs in the workspace; closing the last tab cascades to workspace destruction.
       try {
         const tabListPayload = await this.#run(["tab", "list", "--workspace", workspaceId]);
-        const tabsFromList = optionalArray(tabListPayload, ["result", "tabs"]) ?? [];
+        const tabsFromList = optionalArray(tabListPayload, ["result", "tabs"]);
+        if (!tabsFromList) {
+          throw new Error("Herdr tab list response is missing tabs");
+        }
         const allTabIds = new Set<string>(tabIds);
         for (const t of tabsFromList) {
-          if (typeof t === "object" && t !== null && "tab_id" in t && typeof t.tab_id === "string") {
-            allTabIds.add(t.tab_id);
-          }
+          const tabId = optionalString(t, ["tab_id"]);
+          if (tabId) allTabIds.add(tabId);
+        }
+        if (allTabIds.size === 0 && !rootPaneId) {
+          throw new Error("Herdr tab list did not identify any tabs");
         }
 
         if (allTabIds.size === 0 && rootPaneId) {
@@ -262,7 +288,7 @@ export class HerdrWorkerRuntime {
           this.#workspaces.delete(runId);
           return { closed: true, reason: "already_gone" };
         }
-        throw wsError;
+        throw tabError;
       }
     }
   }
@@ -293,7 +319,7 @@ export class HerdrWorkerRuntime {
     handle: HerdrWorkerHandle,
     execution: HerdrExecution,
     prompt: string,
-    waitForPrompt: boolean,
+    _waitForPrompt: boolean,
   ): Promise<void> {
     if (execution.type === "agent") {
       const args = [
@@ -308,29 +334,9 @@ export class HerdrWorkerRuntime {
       if (execution.args.length > 0) args.push("--", ...execution.args);
       await this.#startAgentWithRetry(args);
       if (prompt.length > 0) {
-        if (waitForPrompt) {
-          // The turn must never reject: herdr may fail the wait CLI after a
-          // timeout or a pane close (agent_not_running), and an unhandled
-          // rejection kills the whole orchestrator process. Polling in the
-          // provider is the source of truth for worker state.
-          const turn = this.#run([
-            "agent",
-            "prompt",
-            handle.workerId,
-            prompt,
-            "--wait",
-            "--until",
-            "done",
-            "--timeout",
-            String(this.#promptTimeoutMs),
-          ]).then(
-            () => undefined,
-            () => undefined,
-          );
-          this.#turns.set(handle.workerId, turn);
-        } else {
-          await this.#run(["agent", "prompt", handle.workerId, prompt]);
-        }
+        // Submission acknowledgement and lifecycle observation are separate:
+        // a non-wait prompt proves delivery, then the provider polls status.
+        await this.#run(["agent", "prompt", handle.workerId, prompt]);
       }
       return;
     }
@@ -370,6 +376,15 @@ export class HerdrWorkerRuntime {
       return JSON.parse(result.stdout) as unknown;
     } catch {
       throw new Error("Herdr returned invalid JSON");
+    }
+  }
+
+  async #statusForCancel(handle: HerdrWorkerHandle): Promise<HerdrWorkerState> {
+    try {
+      return await this.status(handle);
+    } catch (error) {
+      if (isAlreadyGone(error)) return "completed";
+      throw error;
     }
   }
 }
@@ -416,10 +431,11 @@ function mapState(state: string | undefined): HerdrWorkerState {
     case "waiting":
       return "blocked";
     case "done":
-    case "idle":
     case "completed":
     case "exited":
       return "completed";
+    case "idle":
+      return "idle";
     case "failed":
     case "error":
       return "failed";
@@ -442,7 +458,11 @@ function formatHerdrError(result: HerdrResult): string {
 
 function redact(value: string): string {
   return value
-    .replace(/(?:api[_-]?key|token|authorization)\s*[:=]\s*[^\s,}"']+/gi, "[credential]=[redacted]")
+    .replace(
+      /(?:--)?(?:api[_-]?key|token|authorization|password)\s*["']?\s*(?:[:=]\s*["']?|\s+)(?:(?:basic|bearer)\s+)?[^\s,;}"']+/gi,
+      "[credential]=[redacted]",
+    )
+    .replace(/\bbearer\s+[^\s,;}"']+/gi, "[credential]=[redacted]")
     .slice(0, 2_000);
 }
 
@@ -464,4 +484,8 @@ function isAlreadyGone(error: unknown): boolean {
     message.includes("tab_not_found") ||
     message.includes("pane_not_found")
   );
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, milliseconds)));
 }

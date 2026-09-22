@@ -24,7 +24,7 @@ Herdr → loop → Pi Lead + Loop extension
 | `crates/loop-bridge` | High-level Rustra commands and generated contract source |
 | `packages/protocol` | Generated Rustra TypeScript contract and Bun host |
 | `packages/orchestrator` | Thin worker lifecycle coordinator |
-| `packages/providers` | Codex, Antigravity, Z.AI, Jev, and fake adapters |
+| `packages/providers` | Codex, Antigravity, Z.AI, Pi, and fake adapters |
 | `packages/pi-loop` | Pi Lead tool/command extension and compact output |
 | `packages/herdr` | Visible workspace/pane integration |
 | `packages/cli` | Standalone `loop` entry point and composition root |
@@ -32,7 +32,7 @@ Herdr → loop → Pi Lead + Loop extension
 
 ## Start in under five minutes
 
-Prerequisites: current stable Rust, Bun, Herdr 0.8+, Pi, and the sibling `../rustra-bridge` checkout. No Codex plugin or MCP server is used.
+Prerequisites: Rust 1.88+, Bun, Herdr 0.8+, and Pi. Rustra is pinned to published crates and npm packages, so a clean clone does not need a sibling checkout. No Codex plugin or MCP server is used.
 
 ```bash
 bun install
@@ -67,3 +67,5 @@ Configuration never contains secret values. Put credentials in environment varia
 - Persisted `Running` is never trusted without live worker reconciliation.
 
 See `docs/architecture.md`, `docs/model-routing.md`, and `docs/provider-support.md` for the three implementation seams.
+
+실행 관찰, 일시정지·재개, 지침 전달, 화면 종료 후 지속 실행은 [실행 제어 안내](docs/reliable-runs.md)를 참고하세요.

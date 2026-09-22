@@ -1,5 +1,6 @@
 import { NodeProcessRunner, type ProcessRunner } from "../process";
 import { ProcessProvider } from "../process-provider";
+import { buildWorkerPrompt } from "../prompt";
 import type { ProviderCapabilities, StartWorkerInput } from "../types";
 
 interface ZaiCliProviderOptions {
@@ -46,7 +47,7 @@ export class ZaiCliProvider extends ProcessProvider {
     const cwd = input.workingDirectory ?? this.#cwd;
     const args = ["--output-format", "json", "--cwd", cwd];
     if (this.#model) args.push("--model", this.#model);
-    args.push("--prompt", [input.title, ...input.requirements].join("\n"));
+    args.push("--prompt", buildWorkerPrompt(input));
     return { command: this.#command, args, cwd };
   }
 }

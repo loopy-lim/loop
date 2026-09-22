@@ -41,7 +41,7 @@ export type SkippedArtifactOutput = {
   reason: string;
 };
 
-export type RunState = 'active' | 'attention' | 'completed' | 'failed' | 'cancelled';
+export type RunState = 'active' | 'pausing' | 'paused' | 'cancelling' | 'attention' | 'completed' | 'failed' | 'cancelled';
 
 export type TaskSnapshotOutput = {
   id: string;
@@ -50,6 +50,13 @@ export type TaskSnapshotOutput = {
   state: TaskState;
   attempt: number;
   preferredCompute: ComputeClass;
+  dependencies: string[];
+  readScope: string[];
+  writeScope: string[];
+  blockedBy: string[];
+  lastFailure?: string | null;
+  activity?: string | null;
+  resultSummary?: string | null;
 };
 
 export type TaskState = 'pending' | 'ready' | 'running' | 'verifying' | 'attention' | 'blocked' | 'done' | 'failed' | 'cancelled';
@@ -59,12 +66,42 @@ export type ActiveWorkerOutput = {
   taskId: string;
 };
 
+export type AttentionSnapshotOutput = {
+  id: string;
+  kind: AttentionKind;
+  summary: string;
+  taskId?: string | null;
+};
+
+export type AttentionKind = 'question' | 'decision' | 'approval' | 'conflict' | 'failure';
+
+export type DependencyResultOutput = {
+  taskId: string;
+  title: string;
+  summary: string;
+};
+
+export type CheckReceipt = {
+  id: string;
+  command: string;
+  args: string[];
+  workingDirectory: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  durationMs: number | bigint;
+};
+
+export type RunListOutput = {
+  runId: string;
+  state: RunState;
+};
+
 export type CheckResultInput = {
   id: string;
   passed: boolean;
 };
-
-export type AttentionKind = 'question' | 'decision' | 'approval' | 'conflict' | 'failure';
 
 export type EventOutput = {
   sequence: number | bigint;
@@ -86,12 +123,21 @@ export type RunInput = {
   runId: string;
 };
 
+export type ExecutionLeaseInput = {
+  databasePath: string;
+  runId: string;
+  owner: string;
+  nowMs: number | bigint;
+  ttlMs: number | bigint;
+};
+
 export type ClaimRunnableTasksInput = {
   databasePath: string;
   runId: string;
   runningTaskIds: string[];
   maxWorkers: number;
   maxFrontierWorkers: number;
+  executionOwner?: string | null;
 };
 
 export type TaskIdsOutput = {
@@ -110,6 +156,13 @@ export type CleanupRunOutput = {
   skippedArtifacts: SkippedArtifactOutput[];
 };
 
+export type ConfigureRunInput = {
+  databasePath: string;
+  runId: string;
+  intent: string;
+  workingDirectory: string;
+};
+
 export type CreateRunInput = {
   databasePath: string;
   runId: string;
@@ -121,6 +174,13 @@ export type SnapshotOutput = {
   tasks: TaskSnapshotOutput[];
   activeWorkers: ActiveWorkerOutput[];
   openAttentionIds: string[];
+  attention: AttentionSnapshotOutput[];
+  intent: string;
+  workingDirectory: string;
+  guidance: string[];
+  lastSequence: number | bigint;
+  executionOwner?: string | null;
+  executionExpiresAt?: number | bigint | null;
 };
 
 export type EvaluateSurfaceRemovalInput = {
@@ -141,6 +201,67 @@ export type EvaluateWorktreeRemovalInput = {
   isClean: boolean;
 };
 
+export type RunPlanOutput = {
+  intent: string;
+  workingDirectory: string;
+  tasks: TaskSpecInput[];
+};
+
+export type TaskContextInput = {
+  databasePath: string;
+  runId: string;
+  taskId: string;
+};
+
+export type TaskContextOutput = {
+  intent: string;
+  workingDirectory: string;
+  task: TaskSpecInput;
+  attempt: number;
+  dependencyResults: DependencyResultOutput[];
+  resultSummary?: string | null;
+  previousFailure?: string | null;
+  previousChecks: CheckReceipt[];
+  guidance: string[];
+};
+
+export type ListRunsInput = {
+  databasePath: string;
+};
+
+export type Array_of_RunListOutput = RunListOutput[];
+
+export type PrepareRunInput = {
+  databasePath: string;
+  runId: string;
+  intent: string;
+  workingDirectory: string;
+  tasks: TaskSpecInput[];
+};
+
+export type ReconcileTaskInput = {
+  databasePath: string;
+  runId: string;
+  taskId: string;
+  confirmedStopped: boolean;
+};
+
+export type RecordActivityInput = {
+  databasePath: string;
+  runId: string;
+  taskId: string;
+  activity: string;
+  executionOwner?: string | null;
+};
+
+export type RecordCheckReceiptsInput = {
+  databasePath: string;
+  runId: string;
+  taskId: string;
+  checks: CheckReceipt[];
+  executionOwner?: string | null;
+};
+
 export type DecisionInput = {
   databasePath: string;
   runId: string;
@@ -156,6 +277,7 @@ export type VerificationInput = {
   passed: boolean;
   checks: CheckResultInput[];
   reason: string;
+  executionOwner?: string | null;
 };
 
 export type WorkerResultInput = {
@@ -165,6 +287,7 @@ export type WorkerResultInput = {
   workerId: string;
   success: boolean;
   summary: string;
+  executionOwner?: string | null;
 };
 
 export type WorkerInput = {
@@ -172,6 +295,13 @@ export type WorkerInput = {
   runId: string;
   taskId: string;
   workerId: string;
+  executionOwner?: string | null;
+};
+
+export type ReleaseExecutionInput = {
+  databasePath: string;
+  runId: string;
+  owner: string;
 };
 
 export type RequestAttentionInput = {
@@ -181,6 +311,7 @@ export type RequestAttentionInput = {
   kind: AttentionKind;
   summary: string;
   taskId?: string | null;
+  executionOwner?: string | null;
 };
 
 export type ResolveAttentionInput = {
@@ -188,6 +319,20 @@ export type ResolveAttentionInput = {
   runId: string;
   attentionId: string;
   resolution: string;
+};
+
+export type SteerRunInput = {
+  databasePath: string;
+  runId: string;
+  taskId?: string | null;
+  message: string;
+};
+
+export type StopVerificationInput = {
+  databasePath: string;
+  runId: string;
+  taskId: string;
+  executionOwner?: string | null;
 };
 
 export type SubmitPlanInput = {

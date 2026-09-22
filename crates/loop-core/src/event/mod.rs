@@ -1,6 +1,8 @@
 mod event;
 mod reducer;
 
-pub use event::{Artifact, Event, EventKind};
+pub use event::{
+    verification_recovery_attention, worker_recovery_attention, Artifact, CheckReceipt, Event,
+    EventKind, Guidance,
+};
 pub use reducer::{ArtifactRecord, ArtifactState, ProjectionError, RunProjection};
-

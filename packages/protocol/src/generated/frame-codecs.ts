@@ -162,7 +162,7 @@ function _pcDecodeF32(buf: Uint8Array, offset: number): { value: number; bytesRe
 
 import { createComplexCodec, createSchemaPostcardCodec } from '@rustra/types';
 import type { FrameCodec, RustraError, ComplexSchema } from '@rustra/types';
-import type { ActiveWorkerOutput, AddTaskInput, Array_of_EventOutput, AttentionKind, CheckResultInput, ClaimRunnableTasksInput, CleanupRunInput, CleanupRunOutput, CompletionCheckInput, ComputeClass, CreateRunInput, DecisionInput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, EventOutput, OperationOutput, PolicyEvaluationOutput, RequestAttentionInput, ResolveAttentionInput, RunInput, RunState, SkippedArtifactOutput, SnapshotOutput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskIdsOutput, TaskKind, TaskSnapshotOutput, TaskSpecInput, TaskState, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
+import type { ActiveWorkerOutput, AddTaskInput, Array_of_EventOutput, Array_of_RunListOutput, AttentionKind, AttentionSnapshotOutput, CheckReceipt, CheckResultInput, ClaimRunnableTasksInput, CleanupRunInput, CleanupRunOutput, CompletionCheckInput, ComputeClass, ConfigureRunInput, CreateRunInput, DecisionInput, DependencyResultOutput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, EventOutput, ExecutionLeaseInput, ListRunsInput, OperationOutput, PolicyEvaluationOutput, PrepareRunInput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RunInput, RunListOutput, RunPlanOutput, RunState, SkippedArtifactOutput, SnapshotOutput, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, TaskKind, TaskSnapshotOutput, TaskSpecInput, TaskState, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
 
 export const addTaskCodec: FrameCodec<AddTaskInput, OperationOutput> = {
   commandId: 4,
@@ -179,7 +179,7 @@ export const addTaskCodec: FrameCodec<AddTaskInput, OperationOutput> = {
     parts.push(_pcEncodeString(args.task.id));
     parts.push(_pcEncodeString(args.task.title));
     {
-      const _variants = ["research","decision","implementation","verification","integration"];
+      const _variants = ["research","decision","implementation","verification","integration"] as const;
       const _idx = _variants.indexOf(args.task.kind);
       if (_idx < 0) throw new Error('invalid enum value for kind: ' + args.task.kind);
       parts.push(_pcEncodeVarint(_idx));
@@ -216,17 +216,17 @@ export const addTaskCodec: FrameCodec<AddTaskInput, OperationOutput> = {
       const _arr = args.task.completionChecks;
       parts.push(_pcEncodeVarint(_arr.length));
       for (let _i = 0; _i < _arr.length; _i++) {
-        parts.push(_pcEncodeString(args.task.completionChecks[_i].id));
-        parts.push(_pcEncodeString(args.task.completionChecks[_i].command));
+        parts.push(_pcEncodeString(_arr[_i].id));
+        parts.push(_pcEncodeString(_arr[_i].command));
         {
-          const _arr = args.task.completionChecks[_i].args;
-          parts.push(_pcEncodeVarint(_arr.length));
-          for (let _ii = 0; _ii < _arr.length; _ii++) {
-            parts.push(_pcEncodeString(_arr[_ii]));
+          const _arri = _arr[_i].args;
+          parts.push(_pcEncodeVarint(_arri.length));
+          for (let _ii = 0; _ii < _arri.length; _ii++) {
+            parts.push(_pcEncodeString(_arri[_ii]));
           }
         }
         {
-          const _opt = args.task.completionChecks[_i].workingDirectory;
+          const _opt = _arr[_i].workingDirectory;
           if (_opt === null || _opt === undefined) {
             parts.push(new Uint8Array([0]));
           } else {
@@ -234,23 +234,23 @@ export const addTaskCodec: FrameCodec<AddTaskInput, OperationOutput> = {
             parts.push(_pcEncodeString(_opt));
           }
         }
-        parts.push(_pcEncodeVarint64(args.task.completionChecks[_i].timeoutMs));
+        parts.push(_pcEncodeVarint64(_arr[_i].timeoutMs));
       }
     }
     {
-      const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"];
+      const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
       const _idx = _variants.indexOf(args.task.preferredCompute);
       if (_idx < 0) throw new Error('invalid enum value for preferredCompute: ' + args.task.preferredCompute);
       parts.push(_pcEncodeVarint(_idx));
     }
     {
-      const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"];
+      const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
       const _idx = _variants.indexOf(args.task.minimumCompute);
       if (_idx < 0) throw new Error('invalid enum value for minimumCompute: ' + args.task.minimumCompute);
       parts.push(_pcEncodeVarint(_idx));
     }
     {
-      const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"];
+      const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
       const _idx = _variants.indexOf(args.task.maximumCompute);
       if (_idx < 0) throw new Error('invalid enum value for maximumCompute: ' + args.task.maximumCompute);
       parts.push(_pcEncodeVarint(_idx));
@@ -367,6 +367,81 @@ export const cancelRunCodec: FrameCodec<RunInput, OperationOutput> = {
   },
 };
 
+export const claimExecutionCodec: FrameCodec<ExecutionLeaseInput, OperationOutput> = {
+  commandId: 31,
+  execution: "sync",
+
+  encode(args: ExecutionLeaseInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(ExecutionLeaseInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 31, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    parts.push(_pcEncodeString(args.runId));
+    parts.push(_pcEncodeString(args.owner));
+    parts.push(_pcEncodeZigzag64(args.nowMs));
+    parts.push(_pcEncodeZigzag64(args.ttlMs));
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  encodeInto(args: ExecutionLeaseInput, reuse?: Uint8Array): Uint8Array {
+    let out = reuse ?? new Uint8Array(64);
+    let w = 0;
+    const ensure = (need: number) => {
+      if (w + need <= out.length) return;
+      const grown = new Uint8Array(Math.max(out.length * 2, w + need));
+      grown.set(out.subarray(0, w));
+      out = grown;
+    };
+    ensure(2);
+    out[w++] = 31; out[w++] = 0;
+    { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { const _s = args.owner; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { let _x = BigInt(args.nowMs); if (_x < _pcI64Min || _x > _pcI64Max) throw new Error('zigzag64 input outside i64 range: ' + _x.toString()); _x = (_x << 1n) ^ (_x >> 63n); do { ensure(1); out[w++] = Number(_x & 0x7fn) | 0x80; _x >>= 7n; } while (_x !== 0n); out[w - 1] &= 0x7f; }
+    { let _x = BigInt(args.ttlMs); if (_x < _pcI64Min || _x > _pcI64Max) throw new Error('zigzag64 input outside i64 range: ' + _x.toString()); _x = (_x << 1n) ^ (_x >> 63n); do { ensure(1); out[w++] = Number(_x & 0x7fn) | 0x80; _x >>= 7n; } while (_x !== 0n); out[w - 1] &= 0x7f; }
+    return out.subarray(0, w);
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: OperationOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<OperationOutput> = {};
+    {
+      result.accepted = u8[offset] === 1;
+      offset += 1;
+    }
+    return { ok: true, result: result as OperationOutput };
+  },
+};
+
 export const claimRunnableTasksCodec: FrameCodec<ClaimRunnableTasksInput, TaskIdsOutput> = {
   commandId: 6,
   execution: "sync",
@@ -388,6 +463,15 @@ export const claimRunnableTasksCodec: FrameCodec<ClaimRunnableTasksInput, TaskId
     }
     parts.push(_pcEncodeVarint(args.maxWorkers));
     parts.push(_pcEncodeVarint(args.maxFrontierWorkers));
+    {
+      const _opt = args.executionOwner;
+      if (_opt === null || _opt === undefined) {
+        parts.push(new Uint8Array([0]));
+      } else {
+        parts.push(new Uint8Array([1]));
+        parts.push(_pcEncodeString(_opt));
+      }
+    }
     return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
   },
 
@@ -437,14 +521,14 @@ export const claimRunnableTasksCodec: FrameCodec<ClaimRunnableTasksInput, TaskId
 };
 
 export const cleanupRunCodec: FrameCodec<CleanupRunInput, CleanupRunOutput> = {
-  commandId: 17,
+  commandId: 20,
   execution: "sync",
 
   encode(args: CleanupRunInput): ArrayBuffer {
     // [cmd_id: u16 LE][postcard(CleanupRunInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 17, true);
+    new DataView(cmdId.buffer).setUint16(0, 20, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -463,7 +547,7 @@ export const cleanupRunCodec: FrameCodec<CleanupRunInput, CleanupRunOutput> = {
       out = grown;
     };
     ensure(2);
-    out[w++] = 17; out[w++] = 0;
+    out[w++] = 20; out[w++] = 0;
     { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { let _v = args.keepRecent; do { ensure(1); out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; }
@@ -533,6 +617,149 @@ export const cleanupRunCodec: FrameCodec<CleanupRunInput, CleanupRunOutput> = {
       result.skippedArtifacts = _arr;
     }
     return { ok: true, result: result as CleanupRunOutput };
+  },
+};
+
+export const configureRunCodec: FrameCodec<ConfigureRunInput, OperationOutput> = {
+  commandId: 24,
+  execution: "sync",
+
+  encode(args: ConfigureRunInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(ConfigureRunInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 24, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    parts.push(_pcEncodeString(args.runId));
+    parts.push(_pcEncodeString(args.intent));
+    parts.push(_pcEncodeString(args.workingDirectory));
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  encodeInto(args: ConfigureRunInput, reuse?: Uint8Array): Uint8Array {
+    let out = reuse ?? new Uint8Array(64);
+    let w = 0;
+    const ensure = (need: number) => {
+      if (w + need <= out.length) return;
+      const grown = new Uint8Array(Math.max(out.length * 2, w + need));
+      grown.set(out.subarray(0, w));
+      out = grown;
+    };
+    ensure(2);
+    out[w++] = 24; out[w++] = 0;
+    { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { const _s = args.intent; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { const _s = args.workingDirectory; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    return out.subarray(0, w);
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: OperationOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<OperationOutput> = {};
+    {
+      result.accepted = u8[offset] === 1;
+      offset += 1;
+    }
+    return { ok: true, result: result as OperationOutput };
+  },
+};
+
+export const confirmPausedCodec: FrameCodec<RunInput, OperationOutput> = {
+  commandId: 15,
+  execution: "sync",
+  syncFields: ["databasePath","runId"],
+
+  encode(args: RunInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(RunInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 15, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    parts.push(_pcEncodeString(args.runId));
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  encodeInto(args: RunInput, reuse?: Uint8Array): Uint8Array {
+    let out = reuse ?? new Uint8Array(64);
+    let w = 0;
+    const ensure = (need: number) => {
+      if (w + need <= out.length) return;
+      const grown = new Uint8Array(Math.max(out.length * 2, w + need));
+      grown.set(out.subarray(0, w));
+      out = grown;
+    };
+    ensure(2);
+    out[w++] = 15; out[w++] = 0;
+    { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    return out.subarray(0, w);
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: OperationOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<OperationOutput> = {};
+    {
+      result.accepted = u8[offset] === 1;
+      offset += 1;
+    }
+    return { ok: true, result: result as OperationOutput };
   },
 };
 
@@ -606,7 +833,7 @@ export const createRunCodec: FrameCodec<CreateRunInput, SnapshotOutput> = {
     {
       const _v = _pcDecodeVarint(u8, offset);
       offset += _v.bytesRead;
-      const _variants = ["active","attention","completed","failed","cancelled"] as const;
+      const _variants = ["active","pausing","paused","cancelling","attention","completed","failed","cancelled"] as const;
       result.state = _variants[_v.value];
     }
     {
@@ -648,6 +875,89 @@ export const createRunCodec: FrameCodec<CreateRunInput, SnapshotOutput> = {
           const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
           _obj.preferredCompute = _variants[_v.value];
         }
+        {
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
+          }
+          _obj.dependencies = _arr;
+        }
+        {
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
+          }
+          _obj.readScope = _arr;
+        }
+        {
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
+          }
+          _obj.writeScope = _arr;
+        }
+        {
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
+          }
+          _obj.blockedBy = _arr;
+        }
+        {
+          const _tag = u8[offset];
+          offset += 1;
+          if (_tag === 0) {
+            _obj.lastFailure = null;
+          } else {
+            {
+              const _v = _pcDecodeString(u8, offset);
+              _obj.lastFailure = _v.value;
+              offset += _v.bytesRead;
+            }
+          }
+        }
+        {
+          const _tag = u8[offset];
+          offset += 1;
+          if (_tag === 0) {
+            _obj.activity = null;
+          } else {
+            {
+              const _v = _pcDecodeString(u8, offset);
+              _obj.activity = _v.value;
+              offset += _v.bytesRead;
+            }
+          }
+        }
+        {
+          const _tag = u8[offset];
+          offset += 1;
+          if (_tag === 0) {
+            _obj.resultSummary = null;
+          } else {
+            {
+              const _v = _pcDecodeString(u8, offset);
+              _obj.resultSummary = _v.value;
+              offset += _v.bytesRead;
+            }
+          }
+        }
         _arr[_i] = _obj;
       }
       result.tasks = _arr;
@@ -683,12 +993,103 @@ export const createRunCodec: FrameCodec<CreateRunInput, SnapshotOutput> = {
       }
       result.openAttentionIds = _arr;
     }
+    {
+      const _len = _pcDecodeVarint(u8, offset);
+      offset += _len.bytesRead;
+      const _arr: AttentionSnapshotOutput[] = new Array(_len.value);
+      for (let _i = 0; _i < _len.value; _i++) {
+        const _obj: AttentionSnapshotOutput = {} as AttentionSnapshotOutput;
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.id = _v.value;
+          offset += _v.bytesRead;
+        }
+        {
+          const _v = _pcDecodeVarint(u8, offset);
+          offset += _v.bytesRead;
+          const _variants = ["question","decision","approval","conflict","failure"] as const;
+          _obj.kind = _variants[_v.value];
+        }
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.summary = _v.value;
+          offset += _v.bytesRead;
+        }
+        {
+          const _tag = u8[offset];
+          offset += 1;
+          if (_tag === 0) {
+            _obj.taskId = null;
+          } else {
+            {
+              const _v = _pcDecodeString(u8, offset);
+              _obj.taskId = _v.value;
+              offset += _v.bytesRead;
+            }
+          }
+        }
+        _arr[_i] = _obj;
+      }
+      result.attention = _arr;
+    }
+    {
+      const _v = _pcDecodeString(u8, offset);
+      result.intent = _v.value;
+      offset += _v.bytesRead;
+    }
+    {
+      const _v = _pcDecodeString(u8, offset);
+      result.workingDirectory = _v.value;
+      offset += _v.bytesRead;
+    }
+    {
+      const _len = _pcDecodeVarint(u8, offset);
+      offset += _len.bytesRead;
+      const _arr: string[] = new Array(_len.value);
+      for (let _i = 0; _i < _len.value; _i++) {
+        const _v = _pcDecodeString(u8, offset);
+        _arr[_i] = _v.value;
+        offset += _v.bytesRead;
+      }
+      result.guidance = _arr;
+    }
+    {
+      const _v = _pcDecodeVarint64(u8, offset);
+      result.lastSequence = _pcDecodeZigzag64(_v.value);
+      offset += _v.bytesRead;
+    }
+    {
+      const _tag = u8[offset];
+      offset += 1;
+      if (_tag === 0) {
+        result.executionOwner = null;
+      } else {
+        {
+          const _v = _pcDecodeString(u8, offset);
+          result.executionOwner = _v.value;
+          offset += _v.bytesRead;
+        }
+      }
+    }
+    {
+      const _tag = u8[offset];
+      offset += 1;
+      if (_tag === 0) {
+        result.executionExpiresAt = null;
+      } else {
+        {
+          const _v = _pcDecodeVarint64(u8, offset);
+          result.executionExpiresAt = _pcDecodeZigzag64(_v.value);
+          offset += _v.bytesRead;
+        }
+      }
+    }
     return { ok: true, result: result as SnapshotOutput };
   },
 };
 
 export const evaluateSurfaceRemovalCodec: FrameCodec<EvaluateSurfaceRemovalInput, PolicyEvaluationOutput> = {
-  commandId: 19,
+  commandId: 22,
   execution: "sync",
   syncFields: ["surfaceId","isOwnedByLoop"],
 
@@ -696,7 +1097,7 @@ export const evaluateSurfaceRemovalCodec: FrameCodec<EvaluateSurfaceRemovalInput
     // [cmd_id: u16 LE][postcard(EvaluateSurfaceRemovalInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 19, true);
+    new DataView(cmdId.buffer).setUint16(0, 22, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.surfaceId));
     parts.push(new Uint8Array([args.isOwnedByLoop ? 1 : 0]));
@@ -713,7 +1114,7 @@ export const evaluateSurfaceRemovalCodec: FrameCodec<EvaluateSurfaceRemovalInput
       out = grown;
     };
     ensure(2);
-    out[w++] = 19; out[w++] = 0;
+    out[w++] = 22; out[w++] = 0;
     { const _s = args.surfaceId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { ensure(1); out[w++] = args.isOwnedByLoop ? 1 : 0; }
     return out.subarray(0, w);
@@ -784,14 +1185,14 @@ export const evaluateSurfaceRemovalCodec: FrameCodec<EvaluateSurfaceRemovalInput
 };
 
 export const evaluateWorktreeRemovalCodec: FrameCodec<EvaluateWorktreeRemovalInput, PolicyEvaluationOutput> = {
-  commandId: 18,
+  commandId: 21,
   execution: "sync",
 
   encode(args: EvaluateWorktreeRemovalInput): ArrayBuffer {
     // [cmd_id: u16 LE][postcard(EvaluateWorktreeRemovalInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 18, true);
+    new DataView(cmdId.buffer).setUint16(0, 21, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.projectRoot));
     parts.push(_pcEncodeString(args.worktreePath));
@@ -810,7 +1211,7 @@ export const evaluateWorktreeRemovalCodec: FrameCodec<EvaluateWorktreeRemovalInp
       out = grown;
     };
     ensure(2);
-    out[w++] = 18; out[w++] = 0;
+    out[w++] = 21; out[w++] = 0;
     { const _s = args.projectRoot; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.worktreePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { ensure(1); out[w++] = args.isMerged ? 1 : 0; }
@@ -952,7 +1353,7 @@ export const getRunCodec: FrameCodec<RunInput, SnapshotOutput> = {
     {
       const _v = _pcDecodeVarint(u8, offset);
       offset += _v.bytesRead;
-      const _variants = ["active","attention","completed","failed","cancelled"] as const;
+      const _variants = ["active","pausing","paused","cancelling","attention","completed","failed","cancelled"] as const;
       result.state = _variants[_v.value];
     }
     {
@@ -994,6 +1395,89 @@ export const getRunCodec: FrameCodec<RunInput, SnapshotOutput> = {
           const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
           _obj.preferredCompute = _variants[_v.value];
         }
+        {
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
+          }
+          _obj.dependencies = _arr;
+        }
+        {
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
+          }
+          _obj.readScope = _arr;
+        }
+        {
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
+          }
+          _obj.writeScope = _arr;
+        }
+        {
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
+          }
+          _obj.blockedBy = _arr;
+        }
+        {
+          const _tag = u8[offset];
+          offset += 1;
+          if (_tag === 0) {
+            _obj.lastFailure = null;
+          } else {
+            {
+              const _v = _pcDecodeString(u8, offset);
+              _obj.lastFailure = _v.value;
+              offset += _v.bytesRead;
+            }
+          }
+        }
+        {
+          const _tag = u8[offset];
+          offset += 1;
+          if (_tag === 0) {
+            _obj.activity = null;
+          } else {
+            {
+              const _v = _pcDecodeString(u8, offset);
+              _obj.activity = _v.value;
+              offset += _v.bytesRead;
+            }
+          }
+        }
+        {
+          const _tag = u8[offset];
+          offset += 1;
+          if (_tag === 0) {
+            _obj.resultSummary = null;
+          } else {
+            {
+              const _v = _pcDecodeString(u8, offset);
+              _obj.resultSummary = _v.value;
+              offset += _v.bytesRead;
+            }
+          }
+        }
         _arr[_i] = _obj;
       }
       result.tasks = _arr;
@@ -1029,12 +1513,103 @@ export const getRunCodec: FrameCodec<RunInput, SnapshotOutput> = {
       }
       result.openAttentionIds = _arr;
     }
+    {
+      const _len = _pcDecodeVarint(u8, offset);
+      offset += _len.bytesRead;
+      const _arr: AttentionSnapshotOutput[] = new Array(_len.value);
+      for (let _i = 0; _i < _len.value; _i++) {
+        const _obj: AttentionSnapshotOutput = {} as AttentionSnapshotOutput;
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.id = _v.value;
+          offset += _v.bytesRead;
+        }
+        {
+          const _v = _pcDecodeVarint(u8, offset);
+          offset += _v.bytesRead;
+          const _variants = ["question","decision","approval","conflict","failure"] as const;
+          _obj.kind = _variants[_v.value];
+        }
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.summary = _v.value;
+          offset += _v.bytesRead;
+        }
+        {
+          const _tag = u8[offset];
+          offset += 1;
+          if (_tag === 0) {
+            _obj.taskId = null;
+          } else {
+            {
+              const _v = _pcDecodeString(u8, offset);
+              _obj.taskId = _v.value;
+              offset += _v.bytesRead;
+            }
+          }
+        }
+        _arr[_i] = _obj;
+      }
+      result.attention = _arr;
+    }
+    {
+      const _v = _pcDecodeString(u8, offset);
+      result.intent = _v.value;
+      offset += _v.bytesRead;
+    }
+    {
+      const _v = _pcDecodeString(u8, offset);
+      result.workingDirectory = _v.value;
+      offset += _v.bytesRead;
+    }
+    {
+      const _len = _pcDecodeVarint(u8, offset);
+      offset += _len.bytesRead;
+      const _arr: string[] = new Array(_len.value);
+      for (let _i = 0; _i < _len.value; _i++) {
+        const _v = _pcDecodeString(u8, offset);
+        _arr[_i] = _v.value;
+        offset += _v.bytesRead;
+      }
+      result.guidance = _arr;
+    }
+    {
+      const _v = _pcDecodeVarint64(u8, offset);
+      result.lastSequence = _pcDecodeZigzag64(_v.value);
+      offset += _v.bytesRead;
+    }
+    {
+      const _tag = u8[offset];
+      offset += 1;
+      if (_tag === 0) {
+        result.executionOwner = null;
+      } else {
+        {
+          const _v = _pcDecodeString(u8, offset);
+          result.executionOwner = _v.value;
+          offset += _v.bytesRead;
+        }
+      }
+    }
+    {
+      const _tag = u8[offset];
+      offset += 1;
+      if (_tag === 0) {
+        result.executionExpiresAt = null;
+      } else {
+        {
+          const _v = _pcDecodeVarint64(u8, offset);
+          result.executionExpiresAt = _pcDecodeZigzag64(_v.value);
+          offset += _v.bytesRead;
+        }
+      }
+    }
     return { ok: true, result: result as SnapshotOutput };
   },
 };
 
-export const getSnapshotCodec: FrameCodec<RunInput, SnapshotOutput> = {
-  commandId: 15,
+export const getRunPlanCodec: FrameCodec<RunInput, RunPlanOutput> = {
+  commandId: 25,
   execution: "sync",
   syncFields: ["databasePath","runId"],
 
@@ -1042,7 +1617,7 @@ export const getSnapshotCodec: FrameCodec<RunInput, SnapshotOutput> = {
     // [cmd_id: u16 LE][postcard(RunInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 15, true);
+    new DataView(cmdId.buffer).setUint16(0, 25, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -1059,7 +1634,225 @@ export const getSnapshotCodec: FrameCodec<RunInput, SnapshotOutput> = {
       out = grown;
     };
     ensure(2);
-    out[w++] = 15; out[w++] = 0;
+    out[w++] = 25; out[w++] = 0;
+    { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    return out.subarray(0, w);
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: RunPlanOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<RunPlanOutput> = {};
+    {
+      const _v = _pcDecodeString(u8, offset);
+      result.intent = _v.value;
+      offset += _v.bytesRead;
+    }
+    {
+      const _v = _pcDecodeString(u8, offset);
+      result.workingDirectory = _v.value;
+      offset += _v.bytesRead;
+    }
+    {
+      const _len = _pcDecodeVarint(u8, offset);
+      offset += _len.bytesRead;
+      const _arr: TaskSpecInput[] = new Array(_len.value);
+      for (let _i = 0; _i < _len.value; _i++) {
+        const _obj: TaskSpecInput = {} as TaskSpecInput;
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.id = _v.value;
+          offset += _v.bytesRead;
+        }
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.title = _v.value;
+          offset += _v.bytesRead;
+        }
+        {
+          const _v = _pcDecodeVarint(u8, offset);
+          offset += _v.bytesRead;
+          const _variants = ["research","decision","implementation","verification","integration"] as const;
+          _obj.kind = _variants[_v.value];
+        }
+        {
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
+          }
+          _obj.dependencies = _arr;
+        }
+        {
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
+          }
+          _obj.readScope = _arr;
+        }
+        {
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
+          }
+          _obj.writeScope = _arr;
+        }
+        {
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
+          }
+          _obj.requirements = _arr;
+        }
+        {
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: CompletionCheckInput[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _obj: CompletionCheckInput = {} as CompletionCheckInput;
+            {
+              const _v = _pcDecodeString(u8, offset);
+              _obj.id = _v.value;
+              offset += _v.bytesRead;
+            }
+            {
+              const _v = _pcDecodeString(u8, offset);
+              _obj.command = _v.value;
+              offset += _v.bytesRead;
+            }
+            {
+              const _len = _pcDecodeVarint(u8, offset);
+              offset += _len.bytesRead;
+              const _arr: string[] = new Array(_len.value);
+              for (let _i = 0; _i < _len.value; _i++) {
+                const _v = _pcDecodeString(u8, offset);
+                _arr[_i] = _v.value;
+                offset += _v.bytesRead;
+              }
+              _obj.args = _arr;
+            }
+            {
+              const _tag = u8[offset];
+              offset += 1;
+              if (_tag === 0) {
+                _obj.workingDirectory = null;
+              } else {
+                {
+                  const _v = _pcDecodeString(u8, offset);
+                  _obj.workingDirectory = _v.value;
+                  offset += _v.bytesRead;
+                }
+              }
+            }
+            {
+              const _v = _pcDecodeVarint64(u8, offset);
+              _obj.timeoutMs = _v.value;
+              offset += _v.bytesRead;
+            }
+            _arr[_i] = _obj;
+          }
+          _obj.completionChecks = _arr;
+        }
+        {
+          const _v = _pcDecodeVarint(u8, offset);
+          offset += _v.bytesRead;
+          const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+          _obj.preferredCompute = _variants[_v.value];
+        }
+        {
+          const _v = _pcDecodeVarint(u8, offset);
+          offset += _v.bytesRead;
+          const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+          _obj.minimumCompute = _variants[_v.value];
+        }
+        {
+          const _v = _pcDecodeVarint(u8, offset);
+          offset += _v.bytesRead;
+          const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+          _obj.maximumCompute = _variants[_v.value];
+        }
+        {
+          const _v = _pcDecodeVarint(u8, offset);
+          _obj.maxAttempts = _v.value;
+          offset += _v.bytesRead;
+        }
+        _arr[_i] = _obj;
+      }
+      result.tasks = _arr;
+    }
+    return { ok: true, result: result as RunPlanOutput };
+  },
+};
+
+export const getSnapshotCodec: FrameCodec<RunInput, SnapshotOutput> = {
+  commandId: 18,
+  execution: "sync",
+  syncFields: ["databasePath","runId"],
+
+  encode(args: RunInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(RunInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 18, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    parts.push(_pcEncodeString(args.runId));
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  encodeInto(args: RunInput, reuse?: Uint8Array): Uint8Array {
+    let out = reuse ?? new Uint8Array(64);
+    let w = 0;
+    const ensure = (need: number) => {
+      if (w + need <= out.length) return;
+      const grown = new Uint8Array(Math.max(out.length * 2, w + need));
+      grown.set(out.subarray(0, w));
+      out = grown;
+    };
+    ensure(2);
+    out[w++] = 18; out[w++] = 0;
     { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     return out.subarray(0, w);
@@ -1103,7 +1896,7 @@ export const getSnapshotCodec: FrameCodec<RunInput, SnapshotOutput> = {
     {
       const _v = _pcDecodeVarint(u8, offset);
       offset += _v.bytesRead;
-      const _variants = ["active","attention","completed","failed","cancelled"] as const;
+      const _variants = ["active","pausing","paused","cancelling","attention","completed","failed","cancelled"] as const;
       result.state = _variants[_v.value];
     }
     {
@@ -1145,6 +1938,89 @@ export const getSnapshotCodec: FrameCodec<RunInput, SnapshotOutput> = {
           const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
           _obj.preferredCompute = _variants[_v.value];
         }
+        {
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
+          }
+          _obj.dependencies = _arr;
+        }
+        {
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
+          }
+          _obj.readScope = _arr;
+        }
+        {
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
+          }
+          _obj.writeScope = _arr;
+        }
+        {
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
+          }
+          _obj.blockedBy = _arr;
+        }
+        {
+          const _tag = u8[offset];
+          offset += 1;
+          if (_tag === 0) {
+            _obj.lastFailure = null;
+          } else {
+            {
+              const _v = _pcDecodeString(u8, offset);
+              _obj.lastFailure = _v.value;
+              offset += _v.bytesRead;
+            }
+          }
+        }
+        {
+          const _tag = u8[offset];
+          offset += 1;
+          if (_tag === 0) {
+            _obj.activity = null;
+          } else {
+            {
+              const _v = _pcDecodeString(u8, offset);
+              _obj.activity = _v.value;
+              offset += _v.bytesRead;
+            }
+          }
+        }
+        {
+          const _tag = u8[offset];
+          offset += 1;
+          if (_tag === 0) {
+            _obj.resultSummary = null;
+          } else {
+            {
+              const _v = _pcDecodeString(u8, offset);
+              _obj.resultSummary = _v.value;
+              offset += _v.bytesRead;
+            }
+          }
+        }
         _arr[_i] = _obj;
       }
       result.tasks = _arr;
@@ -1180,7 +2056,873 @@ export const getSnapshotCodec: FrameCodec<RunInput, SnapshotOutput> = {
       }
       result.openAttentionIds = _arr;
     }
+    {
+      const _len = _pcDecodeVarint(u8, offset);
+      offset += _len.bytesRead;
+      const _arr: AttentionSnapshotOutput[] = new Array(_len.value);
+      for (let _i = 0; _i < _len.value; _i++) {
+        const _obj: AttentionSnapshotOutput = {} as AttentionSnapshotOutput;
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.id = _v.value;
+          offset += _v.bytesRead;
+        }
+        {
+          const _v = _pcDecodeVarint(u8, offset);
+          offset += _v.bytesRead;
+          const _variants = ["question","decision","approval","conflict","failure"] as const;
+          _obj.kind = _variants[_v.value];
+        }
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.summary = _v.value;
+          offset += _v.bytesRead;
+        }
+        {
+          const _tag = u8[offset];
+          offset += 1;
+          if (_tag === 0) {
+            _obj.taskId = null;
+          } else {
+            {
+              const _v = _pcDecodeString(u8, offset);
+              _obj.taskId = _v.value;
+              offset += _v.bytesRead;
+            }
+          }
+        }
+        _arr[_i] = _obj;
+      }
+      result.attention = _arr;
+    }
+    {
+      const _v = _pcDecodeString(u8, offset);
+      result.intent = _v.value;
+      offset += _v.bytesRead;
+    }
+    {
+      const _v = _pcDecodeString(u8, offset);
+      result.workingDirectory = _v.value;
+      offset += _v.bytesRead;
+    }
+    {
+      const _len = _pcDecodeVarint(u8, offset);
+      offset += _len.bytesRead;
+      const _arr: string[] = new Array(_len.value);
+      for (let _i = 0; _i < _len.value; _i++) {
+        const _v = _pcDecodeString(u8, offset);
+        _arr[_i] = _v.value;
+        offset += _v.bytesRead;
+      }
+      result.guidance = _arr;
+    }
+    {
+      const _v = _pcDecodeVarint64(u8, offset);
+      result.lastSequence = _pcDecodeZigzag64(_v.value);
+      offset += _v.bytesRead;
+    }
+    {
+      const _tag = u8[offset];
+      offset += 1;
+      if (_tag === 0) {
+        result.executionOwner = null;
+      } else {
+        {
+          const _v = _pcDecodeString(u8, offset);
+          result.executionOwner = _v.value;
+          offset += _v.bytesRead;
+        }
+      }
+    }
+    {
+      const _tag = u8[offset];
+      offset += 1;
+      if (_tag === 0) {
+        result.executionExpiresAt = null;
+      } else {
+        {
+          const _v = _pcDecodeVarint64(u8, offset);
+          result.executionExpiresAt = _pcDecodeZigzag64(_v.value);
+          offset += _v.bytesRead;
+        }
+      }
+    }
     return { ok: true, result: result as SnapshotOutput };
+  },
+};
+
+export const getTaskContextCodec: FrameCodec<TaskContextInput, TaskContextOutput> = {
+  commandId: 26,
+  execution: "sync",
+  syncFields: ["databasePath","runId","taskId"],
+
+  encode(args: TaskContextInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(TaskContextInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 26, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    parts.push(_pcEncodeString(args.runId));
+    parts.push(_pcEncodeString(args.taskId));
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  encodeInto(args: TaskContextInput, reuse?: Uint8Array): Uint8Array {
+    let out = reuse ?? new Uint8Array(64);
+    let w = 0;
+    const ensure = (need: number) => {
+      if (w + need <= out.length) return;
+      const grown = new Uint8Array(Math.max(out.length * 2, w + need));
+      grown.set(out.subarray(0, w));
+      out = grown;
+    };
+    ensure(2);
+    out[w++] = 26; out[w++] = 0;
+    { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { const _s = args.taskId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    return out.subarray(0, w);
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: TaskContextOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<TaskContextOutput> = {};
+    {
+      const _v = _pcDecodeString(u8, offset);
+      result.intent = _v.value;
+      offset += _v.bytesRead;
+    }
+    {
+      const _v = _pcDecodeString(u8, offset);
+      result.workingDirectory = _v.value;
+      offset += _v.bytesRead;
+    }
+    {
+      const _obj: TaskSpecInput = {} as TaskSpecInput;
+      {
+        const _v = _pcDecodeString(u8, offset);
+        _obj.id = _v.value;
+        offset += _v.bytesRead;
+      }
+      {
+        const _v = _pcDecodeString(u8, offset);
+        _obj.title = _v.value;
+        offset += _v.bytesRead;
+      }
+      {
+        const _v = _pcDecodeVarint(u8, offset);
+        offset += _v.bytesRead;
+        const _variants = ["research","decision","implementation","verification","integration"] as const;
+        _obj.kind = _variants[_v.value];
+      }
+      {
+        const _len = _pcDecodeVarint(u8, offset);
+        offset += _len.bytesRead;
+        const _arr: string[] = new Array(_len.value);
+        for (let _i = 0; _i < _len.value; _i++) {
+          const _v = _pcDecodeString(u8, offset);
+          _arr[_i] = _v.value;
+          offset += _v.bytesRead;
+        }
+        _obj.dependencies = _arr;
+      }
+      {
+        const _len = _pcDecodeVarint(u8, offset);
+        offset += _len.bytesRead;
+        const _arr: string[] = new Array(_len.value);
+        for (let _i = 0; _i < _len.value; _i++) {
+          const _v = _pcDecodeString(u8, offset);
+          _arr[_i] = _v.value;
+          offset += _v.bytesRead;
+        }
+        _obj.readScope = _arr;
+      }
+      {
+        const _len = _pcDecodeVarint(u8, offset);
+        offset += _len.bytesRead;
+        const _arr: string[] = new Array(_len.value);
+        for (let _i = 0; _i < _len.value; _i++) {
+          const _v = _pcDecodeString(u8, offset);
+          _arr[_i] = _v.value;
+          offset += _v.bytesRead;
+        }
+        _obj.writeScope = _arr;
+      }
+      {
+        const _len = _pcDecodeVarint(u8, offset);
+        offset += _len.bytesRead;
+        const _arr: string[] = new Array(_len.value);
+        for (let _i = 0; _i < _len.value; _i++) {
+          const _v = _pcDecodeString(u8, offset);
+          _arr[_i] = _v.value;
+          offset += _v.bytesRead;
+        }
+        _obj.requirements = _arr;
+      }
+      {
+        const _len = _pcDecodeVarint(u8, offset);
+        offset += _len.bytesRead;
+        const _arr: CompletionCheckInput[] = new Array(_len.value);
+        for (let _i = 0; _i < _len.value; _i++) {
+          const _obj: CompletionCheckInput = {} as CompletionCheckInput;
+          {
+            const _v = _pcDecodeString(u8, offset);
+            _obj.id = _v.value;
+            offset += _v.bytesRead;
+          }
+          {
+            const _v = _pcDecodeString(u8, offset);
+            _obj.command = _v.value;
+            offset += _v.bytesRead;
+          }
+          {
+            const _len = _pcDecodeVarint(u8, offset);
+            offset += _len.bytesRead;
+            const _arr: string[] = new Array(_len.value);
+            for (let _i = 0; _i < _len.value; _i++) {
+              const _v = _pcDecodeString(u8, offset);
+              _arr[_i] = _v.value;
+              offset += _v.bytesRead;
+            }
+            _obj.args = _arr;
+          }
+          {
+            const _tag = u8[offset];
+            offset += 1;
+            if (_tag === 0) {
+              _obj.workingDirectory = null;
+            } else {
+              {
+                const _v = _pcDecodeString(u8, offset);
+                _obj.workingDirectory = _v.value;
+                offset += _v.bytesRead;
+              }
+            }
+          }
+          {
+            const _v = _pcDecodeVarint64(u8, offset);
+            _obj.timeoutMs = _v.value;
+            offset += _v.bytesRead;
+          }
+          _arr[_i] = _obj;
+        }
+        _obj.completionChecks = _arr;
+      }
+      {
+        const _v = _pcDecodeVarint(u8, offset);
+        offset += _v.bytesRead;
+        const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+        _obj.preferredCompute = _variants[_v.value];
+      }
+      {
+        const _v = _pcDecodeVarint(u8, offset);
+        offset += _v.bytesRead;
+        const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+        _obj.minimumCompute = _variants[_v.value];
+      }
+      {
+        const _v = _pcDecodeVarint(u8, offset);
+        offset += _v.bytesRead;
+        const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+        _obj.maximumCompute = _variants[_v.value];
+      }
+      {
+        const _v = _pcDecodeVarint(u8, offset);
+        _obj.maxAttempts = _v.value;
+        offset += _v.bytesRead;
+      }
+      result.task = _obj;
+    }
+    {
+      const _v = _pcDecodeVarint(u8, offset);
+      result.attempt = _v.value;
+      offset += _v.bytesRead;
+    }
+    {
+      const _len = _pcDecodeVarint(u8, offset);
+      offset += _len.bytesRead;
+      const _arr: DependencyResultOutput[] = new Array(_len.value);
+      for (let _i = 0; _i < _len.value; _i++) {
+        const _obj: DependencyResultOutput = {} as DependencyResultOutput;
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.taskId = _v.value;
+          offset += _v.bytesRead;
+        }
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.title = _v.value;
+          offset += _v.bytesRead;
+        }
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.summary = _v.value;
+          offset += _v.bytesRead;
+        }
+        _arr[_i] = _obj;
+      }
+      result.dependencyResults = _arr;
+    }
+    {
+      const _tag = u8[offset];
+      offset += 1;
+      if (_tag === 0) {
+        result.resultSummary = null;
+      } else {
+        {
+          const _v = _pcDecodeString(u8, offset);
+          result.resultSummary = _v.value;
+          offset += _v.bytesRead;
+        }
+      }
+    }
+    {
+      const _tag = u8[offset];
+      offset += 1;
+      if (_tag === 0) {
+        result.previousFailure = null;
+      } else {
+        {
+          const _v = _pcDecodeString(u8, offset);
+          result.previousFailure = _v.value;
+          offset += _v.bytesRead;
+        }
+      }
+    }
+    {
+      const _len = _pcDecodeVarint(u8, offset);
+      offset += _len.bytesRead;
+      const _arr: CheckReceipt[] = new Array(_len.value);
+      for (let _i = 0; _i < _len.value; _i++) {
+        const _obj: CheckReceipt = {} as CheckReceipt;
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.id = _v.value;
+          offset += _v.bytesRead;
+        }
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.command = _v.value;
+          offset += _v.bytesRead;
+        }
+        {
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
+          }
+          _obj.args = _arr;
+        }
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.workingDirectory = _v.value;
+          offset += _v.bytesRead;
+        }
+        {
+          const _v = _pcDecodeZigzagVarint(u8, offset);
+          _obj.exitCode = _v.value;
+          offset += _v.bytesRead;
+        }
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.stdout = _v.value;
+          offset += _v.bytesRead;
+        }
+        {
+          const _v = _pcDecodeString(u8, offset);
+          _obj.stderr = _v.value;
+          offset += _v.bytesRead;
+        }
+        {
+          _obj.timedOut = u8[offset] === 1;
+          offset += 1;
+        }
+        {
+          const _v = _pcDecodeVarint64(u8, offset);
+          _obj.durationMs = _v.value;
+          offset += _v.bytesRead;
+        }
+        _arr[_i] = _obj;
+      }
+      result.previousChecks = _arr;
+    }
+    {
+      const _len = _pcDecodeVarint(u8, offset);
+      offset += _len.bytesRead;
+      const _arr: string[] = new Array(_len.value);
+      for (let _i = 0; _i < _len.value; _i++) {
+        const _v = _pcDecodeString(u8, offset);
+        _arr[_i] = _v.value;
+        offset += _v.bytesRead;
+      }
+      result.guidance = _arr;
+    }
+    return { ok: true, result: result as TaskContextOutput };
+  },
+};
+
+export const listRunsCodec = createSchemaPostcardCodec(35, {"title":"ListRunsInput","type":"object","required":["databasePath"],"properties":{"databasePath":{"type":"string"}}} as ComplexSchema, {"title":"Array_of_RunListOutput","type":"array","items":{"$ref":"#/definitions/RunListOutput"}} as ComplexSchema, {"TaskSpecInput":{"type":"object","required":["completionChecks","dependencies","id","kind","maxAttempts","maximumCompute","minimumCompute","preferredCompute","readScope","requirements","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"requirements":{"type":"array","items":{"type":"string"}},"completionChecks":{"type":"array","items":{"$ref":"#/definitions/CompletionCheckInput"}},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"maxAttempts":{"type":"integer","format":"uint16","minimum":0}}},"TaskKind":{"type":"string","enum":["research","decision","implementation","verification","integration"]},"CompletionCheckInput":{"type":"object","required":["args","command","id","timeoutMs"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":["string","null"]},"timeoutMs":{"type":"integer","format":"uint64","minimum":0}}},"ComputeClass":{"type":"string","enum":["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"]},"SkippedArtifactOutput":{"type":"object","required":["artifact","reason"],"properties":{"artifact":{"type":"string"},"reason":{"type":"string"}}},"RunState":{"type":"string","enum":["active","pausing","paused","cancelling","attention","completed","failed","cancelled"]},"TaskSnapshotOutput":{"type":"object","required":["attempt","blockedBy","dependencies","id","kind","preferredCompute","readScope","state","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"state":{"$ref":"#/definitions/TaskState"},"attempt":{"type":"integer","format":"uint16","minimum":0},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"blockedBy":{"type":"array","items":{"type":"string"}},"lastFailure":{"type":["string","null"]},"activity":{"type":["string","null"]},"resultSummary":{"type":["string","null"]}}},"TaskState":{"type":"string","enum":["pending","ready","running","verifying","attention","blocked","done","failed","cancelled"]},"ActiveWorkerOutput":{"type":"object","required":["id","taskId"],"properties":{"id":{"type":"string"},"taskId":{"type":"string"}}},"AttentionSnapshotOutput":{"type":"object","required":["id","kind","summary"],"properties":{"id":{"type":"string"},"kind":{"$ref":"#/definitions/AttentionKind"},"summary":{"type":"string"},"taskId":{"type":["string","null"]}}},"AttentionKind":{"type":"string","enum":["question","decision","approval","conflict","failure"]},"DependencyResultOutput":{"type":"object","required":["summary","taskId","title"],"properties":{"taskId":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"}}},"CheckReceipt":{"type":"object","required":["args","command","durationMs","exitCode","id","stderr","stdout","timedOut","workingDirectory"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":"string"},"exitCode":{"type":"integer","format":"int32"},"stdout":{"type":"string"},"stderr":{"type":"string"},"timedOut":{"type":"boolean"},"durationMs":{"type":"integer","format":"uint64","minimum":0}}},"RunListOutput":{"type":"object","required":["runId","state"],"properties":{"runId":{"type":"string"},"state":{"$ref":"#/definitions/RunState"}}},"CheckResultInput":{"type":"object","required":["id","passed"],"properties":{"id":{"type":"string"},"passed":{"type":"boolean"}}},"EventOutput":{"type":"object","required":["payloadJson","sequence"],"properties":{"sequence":{"type":"integer","format":"int64"},"payloadJson":{"type":"string"}}}} as Record<string, ComplexSchema>, true)! as FrameCodec<ListRunsInput, Array_of_RunListOutput>;
+
+export const pauseRunCodec: FrameCodec<RunInput, OperationOutput> = {
+  commandId: 14,
+  execution: "sync",
+  syncFields: ["databasePath","runId"],
+
+  encode(args: RunInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(RunInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 14, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    parts.push(_pcEncodeString(args.runId));
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  encodeInto(args: RunInput, reuse?: Uint8Array): Uint8Array {
+    let out = reuse ?? new Uint8Array(64);
+    let w = 0;
+    const ensure = (need: number) => {
+      if (w + need <= out.length) return;
+      const grown = new Uint8Array(Math.max(out.length * 2, w + need));
+      grown.set(out.subarray(0, w));
+      out = grown;
+    };
+    ensure(2);
+    out[w++] = 14; out[w++] = 0;
+    { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    return out.subarray(0, w);
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: OperationOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<OperationOutput> = {};
+    {
+      result.accepted = u8[offset] === 1;
+      offset += 1;
+    }
+    return { ok: true, result: result as OperationOutput };
+  },
+};
+
+export const prepareRunCodec: FrameCodec<PrepareRunInput, OperationOutput> = {
+  commandId: 23,
+  execution: "sync",
+
+  encode(args: PrepareRunInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(PrepareRunInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 23, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    parts.push(_pcEncodeString(args.runId));
+    parts.push(_pcEncodeString(args.intent));
+    parts.push(_pcEncodeString(args.workingDirectory));
+    {
+      const _arr = args.tasks;
+      parts.push(_pcEncodeVarint(_arr.length));
+      for (let _i = 0; _i < _arr.length; _i++) {
+        parts.push(_pcEncodeString(_arr[_i].id));
+        parts.push(_pcEncodeString(_arr[_i].title));
+        {
+          const _variants = ["research","decision","implementation","verification","integration"] as const;
+          const _idx = _variants.indexOf(_arr[_i].kind);
+          if (_idx < 0) throw new Error('invalid enum value for kind: ' + _arr[_i].kind);
+          parts.push(_pcEncodeVarint(_idx));
+        }
+        {
+          const _arri = _arr[_i].dependencies;
+          parts.push(_pcEncodeVarint(_arri.length));
+          for (let _ii = 0; _ii < _arri.length; _ii++) {
+            parts.push(_pcEncodeString(_arri[_ii]));
+          }
+        }
+        {
+          const _arri = _arr[_i].readScope;
+          parts.push(_pcEncodeVarint(_arri.length));
+          for (let _ii = 0; _ii < _arri.length; _ii++) {
+            parts.push(_pcEncodeString(_arri[_ii]));
+          }
+        }
+        {
+          const _arri = _arr[_i].writeScope;
+          parts.push(_pcEncodeVarint(_arri.length));
+          for (let _ii = 0; _ii < _arri.length; _ii++) {
+            parts.push(_pcEncodeString(_arri[_ii]));
+          }
+        }
+        {
+          const _arri = _arr[_i].requirements;
+          parts.push(_pcEncodeVarint(_arri.length));
+          for (let _ii = 0; _ii < _arri.length; _ii++) {
+            parts.push(_pcEncodeString(_arri[_ii]));
+          }
+        }
+        {
+          const _arri = _arr[_i].completionChecks;
+          parts.push(_pcEncodeVarint(_arri.length));
+          for (let _ii = 0; _ii < _arri.length; _ii++) {
+            parts.push(_pcEncodeString(_arri[_ii].id));
+            parts.push(_pcEncodeString(_arri[_ii].command));
+            {
+              const _arrii = _arri[_ii].args;
+              parts.push(_pcEncodeVarint(_arrii.length));
+              for (let _iii = 0; _iii < _arrii.length; _iii++) {
+                parts.push(_pcEncodeString(_arrii[_iii]));
+              }
+            }
+            {
+              const _opt = _arri[_ii].workingDirectory;
+              if (_opt === null || _opt === undefined) {
+                parts.push(new Uint8Array([0]));
+              } else {
+                parts.push(new Uint8Array([1]));
+                parts.push(_pcEncodeString(_opt));
+              }
+            }
+            parts.push(_pcEncodeVarint64(_arri[_ii].timeoutMs));
+          }
+        }
+        {
+          const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+          const _idx = _variants.indexOf(_arr[_i].preferredCompute);
+          if (_idx < 0) throw new Error('invalid enum value for preferredCompute: ' + _arr[_i].preferredCompute);
+          parts.push(_pcEncodeVarint(_idx));
+        }
+        {
+          const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+          const _idx = _variants.indexOf(_arr[_i].minimumCompute);
+          if (_idx < 0) throw new Error('invalid enum value for minimumCompute: ' + _arr[_i].minimumCompute);
+          parts.push(_pcEncodeVarint(_idx));
+        }
+        {
+          const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+          const _idx = _variants.indexOf(_arr[_i].maximumCompute);
+          if (_idx < 0) throw new Error('invalid enum value for maximumCompute: ' + _arr[_i].maximumCompute);
+          parts.push(_pcEncodeVarint(_idx));
+        }
+        parts.push(_pcEncodeVarint(_arr[_i].maxAttempts));
+      }
+    }
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: OperationOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<OperationOutput> = {};
+    {
+      result.accepted = u8[offset] === 1;
+      offset += 1;
+    }
+    return { ok: true, result: result as OperationOutput };
+  },
+};
+
+export const reconcileTaskCodec: FrameCodec<ReconcileTaskInput, OperationOutput> = {
+  commandId: 34,
+  execution: "sync",
+
+  encode(args: ReconcileTaskInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(ReconcileTaskInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 34, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    parts.push(_pcEncodeString(args.runId));
+    parts.push(_pcEncodeString(args.taskId));
+    parts.push(new Uint8Array([args.confirmedStopped ? 1 : 0]));
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  encodeInto(args: ReconcileTaskInput, reuse?: Uint8Array): Uint8Array {
+    let out = reuse ?? new Uint8Array(64);
+    let w = 0;
+    const ensure = (need: number) => {
+      if (w + need <= out.length) return;
+      const grown = new Uint8Array(Math.max(out.length * 2, w + need));
+      grown.set(out.subarray(0, w));
+      out = grown;
+    };
+    ensure(2);
+    out[w++] = 34; out[w++] = 0;
+    { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { const _s = args.taskId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { ensure(1); out[w++] = args.confirmedStopped ? 1 : 0; }
+    return out.subarray(0, w);
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: OperationOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<OperationOutput> = {};
+    {
+      result.accepted = u8[offset] === 1;
+      offset += 1;
+    }
+    return { ok: true, result: result as OperationOutput };
+  },
+};
+
+export const recordActivityCodec: FrameCodec<RecordActivityInput, OperationOutput> = {
+  commandId: 29,
+  execution: "sync",
+
+  encode(args: RecordActivityInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(RecordActivityInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 29, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    parts.push(_pcEncodeString(args.runId));
+    parts.push(_pcEncodeString(args.taskId));
+    parts.push(_pcEncodeString(args.activity));
+    {
+      const _opt = args.executionOwner;
+      if (_opt === null || _opt === undefined) {
+        parts.push(new Uint8Array([0]));
+      } else {
+        parts.push(new Uint8Array([1]));
+        parts.push(_pcEncodeString(_opt));
+      }
+    }
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: OperationOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<OperationOutput> = {};
+    {
+      result.accepted = u8[offset] === 1;
+      offset += 1;
+    }
+    return { ok: true, result: result as OperationOutput };
+  },
+};
+
+export const recordCheckReceiptsCodec: FrameCodec<RecordCheckReceiptsInput, OperationOutput> = {
+  commandId: 27,
+  execution: "sync",
+
+  encode(args: RecordCheckReceiptsInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(RecordCheckReceiptsInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 27, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    parts.push(_pcEncodeString(args.runId));
+    parts.push(_pcEncodeString(args.taskId));
+    {
+      const _arr = args.checks;
+      parts.push(_pcEncodeVarint(_arr.length));
+      for (let _i = 0; _i < _arr.length; _i++) {
+        parts.push(_pcEncodeString(_arr[_i].id));
+        parts.push(_pcEncodeString(_arr[_i].command));
+        {
+          const _arri = _arr[_i].args;
+          parts.push(_pcEncodeVarint(_arri.length));
+          for (let _ii = 0; _ii < _arri.length; _ii++) {
+            parts.push(_pcEncodeString(_arri[_ii]));
+          }
+        }
+        parts.push(_pcEncodeString(_arr[_i].workingDirectory));
+        parts.push(_pcEncodeZigzagVarint(_arr[_i].exitCode));
+        parts.push(_pcEncodeString(_arr[_i].stdout));
+        parts.push(_pcEncodeString(_arr[_i].stderr));
+        parts.push(new Uint8Array([_arr[_i].timedOut ? 1 : 0]));
+        parts.push(_pcEncodeVarint64(_arr[_i].durationMs));
+      }
+    }
+    {
+      const _opt = args.executionOwner;
+      if (_opt === null || _opt === undefined) {
+        parts.push(new Uint8Array([0]));
+      } else {
+        parts.push(new Uint8Array([1]));
+        parts.push(_pcEncodeString(_opt));
+      }
+    }
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: OperationOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<OperationOutput> = {};
+    {
+      result.accepted = u8[offset] === 1;
+      offset += 1;
+    }
+    return { ok: true, result: result as OperationOutput };
   },
 };
 
@@ -1266,11 +3008,20 @@ export const recordVerificationCodec: FrameCodec<VerificationInput, OperationOut
       const _arr = args.checks;
       parts.push(_pcEncodeVarint(_arr.length));
       for (let _i = 0; _i < _arr.length; _i++) {
-        parts.push(_pcEncodeString(args.checks[_i].id));
-        parts.push(new Uint8Array([args.checks[_i].passed ? 1 : 0]));
+        parts.push(_pcEncodeString(_arr[_i].id));
+        parts.push(new Uint8Array([_arr[_i].passed ? 1 : 0]));
       }
     }
     parts.push(_pcEncodeString(args.reason));
+    {
+      const _opt = args.executionOwner;
+      if (_opt === null || _opt === undefined) {
+        parts.push(new Uint8Array([0]));
+      } else {
+        parts.push(new Uint8Array([1]));
+        parts.push(_pcEncodeString(_opt));
+      }
+    }
     return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
   },
 
@@ -1328,27 +3079,16 @@ export const recordWorkerResultCodec: FrameCodec<WorkerResultInput, OperationOut
     parts.push(_pcEncodeString(args.workerId));
     parts.push(new Uint8Array([args.success ? 1 : 0]));
     parts.push(_pcEncodeString(args.summary));
+    {
+      const _opt = args.executionOwner;
+      if (_opt === null || _opt === undefined) {
+        parts.push(new Uint8Array([0]));
+      } else {
+        parts.push(new Uint8Array([1]));
+        parts.push(_pcEncodeString(_opt));
+      }
+    }
     return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
-  },
-
-  encodeInto(args: WorkerResultInput, reuse?: Uint8Array): Uint8Array {
-    let out = reuse ?? new Uint8Array(64);
-    let w = 0;
-    const ensure = (need: number) => {
-      if (w + need <= out.length) return;
-      const grown = new Uint8Array(Math.max(out.length * 2, w + need));
-      grown.set(out.subarray(0, w));
-      out = grown;
-    };
-    ensure(2);
-    out[w++] = 8; out[w++] = 0;
-    { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
-    { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
-    { const _s = args.taskId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
-    { const _s = args.workerId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
-    { ensure(1); out[w++] = args.success ? 1 : 0; }
-    { const _s = args.summary; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
-    return out.subarray(0, w);
   },
 
   decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: OperationOutput; error?: RustraError } {
@@ -1403,10 +3143,138 @@ export const recordWorkerStartedCodec: FrameCodec<WorkerInput, OperationOutput> 
     parts.push(_pcEncodeString(args.runId));
     parts.push(_pcEncodeString(args.taskId));
     parts.push(_pcEncodeString(args.workerId));
+    {
+      const _opt = args.executionOwner;
+      if (_opt === null || _opt === undefined) {
+        parts.push(new Uint8Array([0]));
+      } else {
+        parts.push(new Uint8Array([1]));
+        parts.push(_pcEncodeString(_opt));
+      }
+    }
     return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
   },
 
-  encodeInto(args: WorkerInput, reuse?: Uint8Array): Uint8Array {
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: OperationOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<OperationOutput> = {};
+    {
+      result.accepted = u8[offset] === 1;
+      offset += 1;
+    }
+    return { ok: true, result: result as OperationOutput };
+  },
+};
+
+export const recordWorkerStoppedCodec: FrameCodec<WorkerInput, OperationOutput> = {
+  commandId: 16,
+  execution: "sync",
+
+  encode(args: WorkerInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(WorkerInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 16, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    parts.push(_pcEncodeString(args.runId));
+    parts.push(_pcEncodeString(args.taskId));
+    parts.push(_pcEncodeString(args.workerId));
+    {
+      const _opt = args.executionOwner;
+      if (_opt === null || _opt === undefined) {
+        parts.push(new Uint8Array([0]));
+      } else {
+        parts.push(new Uint8Array([1]));
+        parts.push(_pcEncodeString(_opt));
+      }
+    }
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: OperationOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<OperationOutput> = {};
+    {
+      result.accepted = u8[offset] === 1;
+      offset += 1;
+    }
+    return { ok: true, result: result as OperationOutput };
+  },
+};
+
+export const releaseExecutionCodec: FrameCodec<ReleaseExecutionInput, OperationOutput> = {
+  commandId: 33,
+  execution: "sync",
+  syncFields: ["databasePath","runId","owner"],
+
+  encode(args: ReleaseExecutionInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(ReleaseExecutionInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 33, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    parts.push(_pcEncodeString(args.runId));
+    parts.push(_pcEncodeString(args.owner));
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  encodeInto(args: ReleaseExecutionInput, reuse?: Uint8Array): Uint8Array {
     let out = reuse ?? new Uint8Array(64);
     let w = 0;
     const ensure = (need: number) => {
@@ -1416,11 +3284,85 @@ export const recordWorkerStartedCodec: FrameCodec<WorkerInput, OperationOutput> 
       out = grown;
     };
     ensure(2);
-    out[w++] = 7; out[w++] = 0;
+    out[w++] = 33; out[w++] = 0;
     { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
-    { const _s = args.taskId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
-    { const _s = args.workerId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { const _s = args.owner; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    return out.subarray(0, w);
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: OperationOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<OperationOutput> = {};
+    {
+      result.accepted = u8[offset] === 1;
+      offset += 1;
+    }
+    return { ok: true, result: result as OperationOutput };
+  },
+};
+
+export const renewExecutionCodec: FrameCodec<ExecutionLeaseInput, OperationOutput> = {
+  commandId: 32,
+  execution: "sync",
+
+  encode(args: ExecutionLeaseInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(ExecutionLeaseInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 32, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    parts.push(_pcEncodeString(args.runId));
+    parts.push(_pcEncodeString(args.owner));
+    parts.push(_pcEncodeZigzag64(args.nowMs));
+    parts.push(_pcEncodeZigzag64(args.ttlMs));
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  encodeInto(args: ExecutionLeaseInput, reuse?: Uint8Array): Uint8Array {
+    let out = reuse ?? new Uint8Array(64);
+    let w = 0;
+    const ensure = (need: number) => {
+      if (w + need <= out.length) return;
+      const grown = new Uint8Array(Math.max(out.length * 2, w + need));
+      grown.set(out.subarray(0, w));
+      out = grown;
+    };
+    ensure(2);
+    out[w++] = 32; out[w++] = 0;
+    { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { const _s = args.owner; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { let _x = BigInt(args.nowMs); if (_x < _pcI64Min || _x > _pcI64Max) throw new Error('zigzag64 input outside i64 range: ' + _x.toString()); _x = (_x << 1n) ^ (_x >> 63n); do { ensure(1); out[w++] = Number(_x & 0x7fn) | 0x80; _x >>= 7n; } while (_x !== 0n); out[w - 1] &= 0x7f; }
+    { let _x = BigInt(args.ttlMs); if (_x < _pcI64Min || _x > _pcI64Max) throw new Error('zigzag64 input outside i64 range: ' + _x.toString()); _x = (_x << 1n) ^ (_x >> 63n); do { ensure(1); out[w++] = Number(_x & 0x7fn) | 0x80; _x >>= 7n; } while (_x !== 0n); out[w - 1] &= 0x7f; }
     return out.subarray(0, w);
   },
 
@@ -1476,7 +3418,7 @@ export const requestAttentionCodec: FrameCodec<RequestAttentionInput, OperationO
     parts.push(_pcEncodeString(args.runId));
     parts.push(_pcEncodeString(args.attentionId));
     {
-      const _variants = ["question","decision","approval","conflict","failure"];
+      const _variants = ["question","decision","approval","conflict","failure"] as const;
       const _idx = _variants.indexOf(args.kind);
       if (_idx < 0) throw new Error('invalid enum value for kind: ' + args.kind);
       parts.push(_pcEncodeVarint(_idx));
@@ -1484,6 +3426,15 @@ export const requestAttentionCodec: FrameCodec<RequestAttentionInput, OperationO
     parts.push(_pcEncodeString(args.summary));
     {
       const _opt = args.taskId;
+      if (_opt === null || _opt === undefined) {
+        parts.push(new Uint8Array([0]));
+      } else {
+        parts.push(new Uint8Array([1]));
+        parts.push(_pcEncodeString(_opt));
+      }
+    }
+    {
+      const _opt = args.executionOwner;
       if (_opt === null || _opt === undefined) {
         parts.push(new Uint8Array([0]));
       } else {
@@ -1606,7 +3557,7 @@ export const resolveAttentionCodec: FrameCodec<ResolveAttentionInput, OperationO
 };
 
 export const resumeRunCodec: FrameCodec<RunInput, OperationOutput> = {
-  commandId: 14,
+  commandId: 17,
   execution: "sync",
   syncFields: ["databasePath","runId"],
 
@@ -1614,7 +3565,7 @@ export const resumeRunCodec: FrameCodec<RunInput, OperationOutput> = {
     // [cmd_id: u16 LE][postcard(RunInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 14, true);
+    new DataView(cmdId.buffer).setUint16(0, 17, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -1631,10 +3582,136 @@ export const resumeRunCodec: FrameCodec<RunInput, OperationOutput> = {
       out = grown;
     };
     ensure(2);
-    out[w++] = 14; out[w++] = 0;
+    out[w++] = 17; out[w++] = 0;
     { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
     return out.subarray(0, w);
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: OperationOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<OperationOutput> = {};
+    {
+      result.accepted = u8[offset] === 1;
+      offset += 1;
+    }
+    return { ok: true, result: result as OperationOutput };
+  },
+};
+
+export const steerRunCodec: FrameCodec<SteerRunInput, OperationOutput> = {
+  commandId: 30,
+  execution: "sync",
+
+  encode(args: SteerRunInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(SteerRunInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 30, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    parts.push(_pcEncodeString(args.runId));
+    {
+      const _opt = args.taskId;
+      if (_opt === null || _opt === undefined) {
+        parts.push(new Uint8Array([0]));
+      } else {
+        parts.push(new Uint8Array([1]));
+        parts.push(_pcEncodeString(_opt));
+      }
+    }
+    parts.push(_pcEncodeString(args.message));
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: OperationOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<OperationOutput> = {};
+    {
+      result.accepted = u8[offset] === 1;
+      offset += 1;
+    }
+    return { ok: true, result: result as OperationOutput };
+  },
+};
+
+export const stopVerificationCodec: FrameCodec<StopVerificationInput, OperationOutput> = {
+  commandId: 28,
+  execution: "sync",
+
+  encode(args: StopVerificationInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(StopVerificationInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 28, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    parts.push(_pcEncodeString(args.runId));
+    parts.push(_pcEncodeString(args.taskId));
+    {
+      const _opt = args.executionOwner;
+      if (_opt === null || _opt === undefined) {
+        parts.push(new Uint8Array([0]));
+      } else {
+        parts.push(new Uint8Array([1]));
+        parts.push(_pcEncodeString(_opt));
+      }
+    }
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
   },
 
   decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: OperationOutput; error?: RustraError } {
@@ -1691,57 +3768,57 @@ export const submitPlanCodec: FrameCodec<SubmitPlanInput, SubmitPlanOutput> = {
       const _arr = args.tasks;
       parts.push(_pcEncodeVarint(_arr.length));
       for (let _i = 0; _i < _arr.length; _i++) {
-        parts.push(_pcEncodeString(args.tasks[_i].id));
-        parts.push(_pcEncodeString(args.tasks[_i].title));
+        parts.push(_pcEncodeString(_arr[_i].id));
+        parts.push(_pcEncodeString(_arr[_i].title));
         {
-          const _variants = ["research","decision","implementation","verification","integration"];
-          const _idx = _variants.indexOf(args.tasks[_i].kind);
-          if (_idx < 0) throw new Error('invalid enum value for kind: ' + args.tasks[_i].kind);
+          const _variants = ["research","decision","implementation","verification","integration"] as const;
+          const _idx = _variants.indexOf(_arr[_i].kind);
+          if (_idx < 0) throw new Error('invalid enum value for kind: ' + _arr[_i].kind);
           parts.push(_pcEncodeVarint(_idx));
         }
         {
-          const _arr = args.tasks[_i].dependencies;
-          parts.push(_pcEncodeVarint(_arr.length));
-          for (let _ii = 0; _ii < _arr.length; _ii++) {
-            parts.push(_pcEncodeString(_arr[_ii]));
+          const _arri = _arr[_i].dependencies;
+          parts.push(_pcEncodeVarint(_arri.length));
+          for (let _ii = 0; _ii < _arri.length; _ii++) {
+            parts.push(_pcEncodeString(_arri[_ii]));
           }
         }
         {
-          const _arr = args.tasks[_i].readScope;
-          parts.push(_pcEncodeVarint(_arr.length));
-          for (let _ii = 0; _ii < _arr.length; _ii++) {
-            parts.push(_pcEncodeString(_arr[_ii]));
+          const _arri = _arr[_i].readScope;
+          parts.push(_pcEncodeVarint(_arri.length));
+          for (let _ii = 0; _ii < _arri.length; _ii++) {
+            parts.push(_pcEncodeString(_arri[_ii]));
           }
         }
         {
-          const _arr = args.tasks[_i].writeScope;
-          parts.push(_pcEncodeVarint(_arr.length));
-          for (let _ii = 0; _ii < _arr.length; _ii++) {
-            parts.push(_pcEncodeString(_arr[_ii]));
+          const _arri = _arr[_i].writeScope;
+          parts.push(_pcEncodeVarint(_arri.length));
+          for (let _ii = 0; _ii < _arri.length; _ii++) {
+            parts.push(_pcEncodeString(_arri[_ii]));
           }
         }
         {
-          const _arr = args.tasks[_i].requirements;
-          parts.push(_pcEncodeVarint(_arr.length));
-          for (let _ii = 0; _ii < _arr.length; _ii++) {
-            parts.push(_pcEncodeString(_arr[_ii]));
+          const _arri = _arr[_i].requirements;
+          parts.push(_pcEncodeVarint(_arri.length));
+          for (let _ii = 0; _ii < _arri.length; _ii++) {
+            parts.push(_pcEncodeString(_arri[_ii]));
           }
         }
         {
-          const _arr = args.tasks[_i].completionChecks;
-          parts.push(_pcEncodeVarint(_arr.length));
-          for (let _ii = 0; _ii < _arr.length; _ii++) {
-            parts.push(_pcEncodeString(args.tasks[_i].completionChecks[_ii].id));
-            parts.push(_pcEncodeString(args.tasks[_i].completionChecks[_ii].command));
+          const _arri = _arr[_i].completionChecks;
+          parts.push(_pcEncodeVarint(_arri.length));
+          for (let _ii = 0; _ii < _arri.length; _ii++) {
+            parts.push(_pcEncodeString(_arri[_ii].id));
+            parts.push(_pcEncodeString(_arri[_ii].command));
             {
-              const _arr = args.tasks[_i].completionChecks[_ii].args;
-              parts.push(_pcEncodeVarint(_arr.length));
-              for (let _iii = 0; _iii < _arr.length; _iii++) {
-                parts.push(_pcEncodeString(_arr[_iii]));
+              const _arrii = _arri[_ii].args;
+              parts.push(_pcEncodeVarint(_arrii.length));
+              for (let _iii = 0; _iii < _arrii.length; _iii++) {
+                parts.push(_pcEncodeString(_arrii[_iii]));
               }
             }
             {
-              const _opt = args.tasks[_i].completionChecks[_ii].workingDirectory;
+              const _opt = _arri[_ii].workingDirectory;
               if (_opt === null || _opt === undefined) {
                 parts.push(new Uint8Array([0]));
               } else {
@@ -1749,28 +3826,28 @@ export const submitPlanCodec: FrameCodec<SubmitPlanInput, SubmitPlanOutput> = {
                 parts.push(_pcEncodeString(_opt));
               }
             }
-            parts.push(_pcEncodeVarint64(args.tasks[_i].completionChecks[_ii].timeoutMs));
+            parts.push(_pcEncodeVarint64(_arri[_ii].timeoutMs));
           }
         }
         {
-          const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"];
-          const _idx = _variants.indexOf(args.tasks[_i].preferredCompute);
-          if (_idx < 0) throw new Error('invalid enum value for preferredCompute: ' + args.tasks[_i].preferredCompute);
+          const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+          const _idx = _variants.indexOf(_arr[_i].preferredCompute);
+          if (_idx < 0) throw new Error('invalid enum value for preferredCompute: ' + _arr[_i].preferredCompute);
           parts.push(_pcEncodeVarint(_idx));
         }
         {
-          const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"];
-          const _idx = _variants.indexOf(args.tasks[_i].minimumCompute);
-          if (_idx < 0) throw new Error('invalid enum value for minimumCompute: ' + args.tasks[_i].minimumCompute);
+          const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+          const _idx = _variants.indexOf(_arr[_i].minimumCompute);
+          if (_idx < 0) throw new Error('invalid enum value for minimumCompute: ' + _arr[_i].minimumCompute);
           parts.push(_pcEncodeVarint(_idx));
         }
         {
-          const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"];
-          const _idx = _variants.indexOf(args.tasks[_i].maximumCompute);
-          if (_idx < 0) throw new Error('invalid enum value for maximumCompute: ' + args.tasks[_i].maximumCompute);
+          const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+          const _idx = _variants.indexOf(_arr[_i].maximumCompute);
+          if (_idx < 0) throw new Error('invalid enum value for maximumCompute: ' + _arr[_i].maximumCompute);
           parts.push(_pcEncodeVarint(_idx));
         }
-        parts.push(_pcEncodeVarint(args.tasks[_i].maxAttempts));
+        parts.push(_pcEncodeVarint(_arr[_i].maxAttempts));
       }
     }
     return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
@@ -1815,7 +3892,7 @@ export const submitPlanCodec: FrameCodec<SubmitPlanInput, SubmitPlanOutput> = {
   },
 };
 
-export const subscribeEventsCodec = createSchemaPostcardCodec(16, {"title":"SubscribeEventsInput","type":"object","required":["afterSequence","databasePath","limit","runId"],"properties":{"databasePath":{"type":"string"},"runId":{"type":"string"},"afterSequence":{"type":"integer","format":"int64"},"limit":{"type":"integer","format":"uint16","minimum":0}}} as ComplexSchema, {"title":"Array_of_EventOutput","type":"array","items":{"$ref":"#/definitions/EventOutput"}} as ComplexSchema, {"TaskSpecInput":{"type":"object","required":["completionChecks","dependencies","id","kind","maxAttempts","maximumCompute","minimumCompute","preferredCompute","readScope","requirements","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"requirements":{"type":"array","items":{"type":"string"}},"completionChecks":{"type":"array","items":{"$ref":"#/definitions/CompletionCheckInput"}},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"maxAttempts":{"type":"integer","format":"uint16","minimum":0}}},"TaskKind":{"type":"string","enum":["research","decision","implementation","verification","integration"]},"CompletionCheckInput":{"type":"object","required":["args","command","id","timeoutMs"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":["string","null"]},"timeoutMs":{"type":"integer","format":"uint64","minimum":0}}},"ComputeClass":{"type":"string","enum":["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"]},"SkippedArtifactOutput":{"type":"object","required":["artifact","reason"],"properties":{"artifact":{"type":"string"},"reason":{"type":"string"}}},"RunState":{"type":"string","enum":["active","attention","completed","failed","cancelled"]},"TaskSnapshotOutput":{"type":"object","required":["attempt","id","kind","preferredCompute","state","title"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"state":{"$ref":"#/definitions/TaskState"},"attempt":{"type":"integer","format":"uint16","minimum":0},"preferredCompute":{"$ref":"#/definitions/ComputeClass"}}},"TaskState":{"type":"string","enum":["pending","ready","running","verifying","attention","blocked","done","failed","cancelled"]},"ActiveWorkerOutput":{"type":"object","required":["id","taskId"],"properties":{"id":{"type":"string"},"taskId":{"type":"string"}}},"CheckResultInput":{"type":"object","required":["id","passed"],"properties":{"id":{"type":"string"},"passed":{"type":"boolean"}}},"AttentionKind":{"type":"string","enum":["question","decision","approval","conflict","failure"]},"EventOutput":{"type":"object","required":["payloadJson","sequence"],"properties":{"sequence":{"type":"integer","format":"int64"},"payloadJson":{"type":"string"}}}} as Record<string, ComplexSchema>, true)! as FrameCodec<SubscribeEventsInput, Array_of_EventOutput>;
+export const subscribeEventsCodec = createSchemaPostcardCodec(19, {"title":"SubscribeEventsInput","type":"object","required":["afterSequence","databasePath","limit","runId"],"properties":{"databasePath":{"type":"string"},"runId":{"type":"string"},"afterSequence":{"type":"integer","format":"int64"},"limit":{"type":"integer","format":"uint16","minimum":0}}} as ComplexSchema, {"title":"Array_of_EventOutput","type":"array","items":{"$ref":"#/definitions/EventOutput"}} as ComplexSchema, {"TaskSpecInput":{"type":"object","required":["completionChecks","dependencies","id","kind","maxAttempts","maximumCompute","minimumCompute","preferredCompute","readScope","requirements","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"requirements":{"type":"array","items":{"type":"string"}},"completionChecks":{"type":"array","items":{"$ref":"#/definitions/CompletionCheckInput"}},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"maxAttempts":{"type":"integer","format":"uint16","minimum":0}}},"TaskKind":{"type":"string","enum":["research","decision","implementation","verification","integration"]},"CompletionCheckInput":{"type":"object","required":["args","command","id","timeoutMs"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":["string","null"]},"timeoutMs":{"type":"integer","format":"uint64","minimum":0}}},"ComputeClass":{"type":"string","enum":["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"]},"SkippedArtifactOutput":{"type":"object","required":["artifact","reason"],"properties":{"artifact":{"type":"string"},"reason":{"type":"string"}}},"RunState":{"type":"string","enum":["active","pausing","paused","cancelling","attention","completed","failed","cancelled"]},"TaskSnapshotOutput":{"type":"object","required":["attempt","blockedBy","dependencies","id","kind","preferredCompute","readScope","state","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"state":{"$ref":"#/definitions/TaskState"},"attempt":{"type":"integer","format":"uint16","minimum":0},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"blockedBy":{"type":"array","items":{"type":"string"}},"lastFailure":{"type":["string","null"]},"activity":{"type":["string","null"]},"resultSummary":{"type":["string","null"]}}},"TaskState":{"type":"string","enum":["pending","ready","running","verifying","attention","blocked","done","failed","cancelled"]},"ActiveWorkerOutput":{"type":"object","required":["id","taskId"],"properties":{"id":{"type":"string"},"taskId":{"type":"string"}}},"AttentionSnapshotOutput":{"type":"object","required":["id","kind","summary"],"properties":{"id":{"type":"string"},"kind":{"$ref":"#/definitions/AttentionKind"},"summary":{"type":"string"},"taskId":{"type":["string","null"]}}},"AttentionKind":{"type":"string","enum":["question","decision","approval","conflict","failure"]},"DependencyResultOutput":{"type":"object","required":["summary","taskId","title"],"properties":{"taskId":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"}}},"CheckReceipt":{"type":"object","required":["args","command","durationMs","exitCode","id","stderr","stdout","timedOut","workingDirectory"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":"string"},"exitCode":{"type":"integer","format":"int32"},"stdout":{"type":"string"},"stderr":{"type":"string"},"timedOut":{"type":"boolean"},"durationMs":{"type":"integer","format":"uint64","minimum":0}}},"RunListOutput":{"type":"object","required":["runId","state"],"properties":{"runId":{"type":"string"},"state":{"$ref":"#/definitions/RunState"}}},"CheckResultInput":{"type":"object","required":["id","passed"],"properties":{"id":{"type":"string"},"passed":{"type":"boolean"}}},"EventOutput":{"type":"object","required":["payloadJson","sequence"],"properties":{"sequence":{"type":"integer","format":"int64"},"payloadJson":{"type":"string"}}}} as Record<string, ComplexSchema>, true)! as FrameCodec<SubscribeEventsInput, Array_of_EventOutput>;
 
 export const updateTaskCodec: FrameCodec<UpdateTaskInput, OperationOutput> = {
   commandId: 5,
@@ -1831,7 +3908,7 @@ export const updateTaskCodec: FrameCodec<UpdateTaskInput, OperationOutput> = {
     parts.push(_pcEncodeString(args.runId));
     parts.push(_pcEncodeString(args.taskId));
     {
-      const _variants = ["pending","ready","running","verifying","attention","blocked","done","failed","cancelled"];
+      const _variants = ["pending","ready","running","verifying","attention","blocked","done","failed","cancelled"] as const;
       const _idx = _variants.indexOf(args.state);
       if (_idx < 0) throw new Error('invalid enum value for state: ' + args.state);
       parts.push(_pcEncodeVarint(_idx));

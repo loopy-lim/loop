@@ -1,18 +1,15 @@
 use loop_core::event::{Artifact, Event, EventKind};
 use loop_core::policy::{ArtifactKind, RefusalCode, RetentionPolicy};
 use loop_core::run::RunState;
-use loop_core::task::{CompletionCheck, CompletionContract, Task, TaskId, TaskKind};
+use loop_core::task::{CompletionCheck, CompletionContract, Task, TaskId, TaskKind, WorkOwnership};
 use loop_store::{SqliteStore, StoreError};
 
 fn sample_task(id: &str) -> Task {
-    Task::builder(
-        TaskId::from(id),
-        "task title",
-        TaskKind::Implementation,
-    )
-    .completion_contract(CompletionContract::new([CompletionCheck::new("check")]))
-    .build()
-    .unwrap()
+    Task::builder(TaskId::from(id), "task title", TaskKind::Implementation)
+        .ownership(WorkOwnership::new(std::iter::empty::<&str>(), ["src/**"]))
+        .completion_contract(CompletionContract::new([CompletionCheck::new("check")]))
+        .build()
+        .unwrap()
 }
 
 #[test]
@@ -51,7 +48,10 @@ fn purge_run_deletes_terminal_run_and_cascades_to_artifacts_and_tasks() {
         .append(&Event::new("run-1", EventKind::RunCreated))
         .unwrap();
     store
-        .append(&Event::new("run-1", EventKind::TaskCreated(sample_task("task-1"))))
+        .append(&Event::new(
+            "run-1",
+            EventKind::TaskCreated(sample_task("task-1")),
+        ))
         .unwrap();
     store
         .record_artifact(
@@ -176,7 +176,12 @@ fn store_purge_honors_retention_policy_and_keeps_recent_terminal_runs() {
     assert_eq!(plan.refusals[0].code, RefusalCode::RunNotTerminal);
 
     // Verify remaining runs in store: run-active, run-5, run-4
-    let remaining_runs: Vec<String> = store.runs().unwrap().into_iter().map(|(id, _)| id).collect();
+    let remaining_runs: Vec<String> = store
+        .runs()
+        .unwrap()
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
     assert!(remaining_runs.contains(&"run-active".to_string()));
     assert!(remaining_runs.contains(&"run-5".to_string()));
     assert!(remaining_runs.contains(&"run-4".to_string()));

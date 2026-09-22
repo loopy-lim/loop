@@ -1,12 +1,16 @@
-import { rmSync } from "node:fs";
-
-import { assertWorktreeInsideProject, type HerdrCaller, type HerdrWorkerRuntime } from "@loop/herdr";
-import type { SkippedArtifactOutput, TaskSpecInput } from "@loop/protocol";
-import type { AgentProvider, ProviderRegistry, WorkerResult } from "@loop/providers";
-
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import type { HerdrWorkerRuntime } from "@loop/herdr";
+import type { TaskSpecInput } from "@loop/protocol";
+import type { AgentProvider, ProviderRegistry } from "@loop/providers";
 import { CompletionVerifier, NodeCompletionRunner } from "./completion";
+import { cleanupRun, type CleanupRunReport, type CleanupRunRequest } from "./cleanup";
 import type { OrchestrationControl } from "./control";
+import { executeTask, type TaskExecution } from "./task-execution";
+import { redact } from "./redact";
 
+export type { CleanupRunReport, CleanupRunRequest } from "./cleanup";
 interface OrchestratorOptions {
   control: OrchestrationControl;
   providers: ProviderRegistry;
@@ -15,50 +19,22 @@ interface OrchestratorOptions {
   completionVerifier?: CompletionVerifier;
   herdr?: HerdrWorkerRuntime;
 }
-
-export interface CleanupRunRequest {
-  databasePath: string;
-  runId: string;
-  keepRecent?: number;
-  dryRun?: boolean;
-  projectRoot?: string;
-  worktrees?: string[];
-  worktree?: string;
-  caller?: HerdrCaller;
-  isLeadPane?: boolean;
-  isMerged?: boolean;
-  isClean?: boolean;
-  herdr?: HerdrWorkerRuntime;
-}
-
-export interface CleanupRunReport {
-  removedArtifacts: string[];
-  skippedArtifacts: SkippedArtifactOutput[];
-  reasons: Record<string, string>;
-}
-
 export interface RunRequest {
   databasePath: string;
   runId: string;
   tasks: TaskSpecInput[];
+  intent?: string;
   workingDirectory?: string;
   signal?: AbortSignal;
 }
-
+export interface ExistingRunRequest { databasePath: string; runId: string; signal?: AbortSignal }
 export interface RunSummary {
-  status: "completed" | "cancelled" | "attention";
+  status: "completed" | "cancelled" | "attention" | "paused" | "running";
   tasks: number;
   escalations: Array<{ taskId: string; from: string; to: string }>;
   providersByTask: Record<string, string[]>;
   startedAt: Record<string, number>;
   finishedAt: Record<string, number>;
-}
-
-interface ActiveWorker {
-  taskId: string;
-  workerId: string;
-  provider: AgentProvider;
-  result: Promise<WorkerResult>;
 }
 
 export class Orchestrator {
@@ -68,366 +44,176 @@ export class Orchestrator {
   readonly #maxFrontierWorkers: number;
   readonly #completionVerifier: CompletionVerifier;
   readonly #herdr?: HerdrWorkerRuntime;
-
   constructor(options: OrchestratorOptions) {
     this.#control = options.control;
     this.#providers = options.providers;
     this.#maxWorkers = Math.max(1, options.maxWorkers);
     this.#maxFrontierWorkers = Math.max(1, options.maxFrontierWorkers ?? 1);
-    this.#completionVerifier =
-      options.completionVerifier ?? new CompletionVerifier(new NodeCompletionRunner());
+    this.#completionVerifier = options.completionVerifier ?? new CompletionVerifier(new NodeCompletionRunner());
     this.#herdr = options.herdr;
   }
-
-  async cleanupRun(request: CleanupRunRequest): Promise<CleanupRunReport> {
-    const dryRun = request.dryRun ?? true;
-    const removedArtifacts: string[] = [];
-    const skippedArtifacts: SkippedArtifactOutput[] = [];
-    const reasons: Record<string, string> = {};
-
-    // 1. Consult core policy and purge store records via the bridge
-    const storeCleanup = await this.#control.cleanupRun({
-      databasePath: request.databasePath,
-      runId: request.runId,
-      keepRecent: request.keepRecent ?? 0,
-      dryRun,
-    });
-    removedArtifacts.push(...storeCleanup.removedArtifacts);
-    skippedArtifacts.push(...storeCleanup.skippedArtifacts);
-
-    // 2. Herdr surface teardown
-    // ADR safety rule: never close caller-provided surfaces or the lead pane
-    if (request.caller || request.isLeadPane) {
-      const surfaceId = request.caller?.paneId ?? (request.caller?.workspaceId ? `caller:${request.caller.workspaceId}` : "lead-pane");
-      const surfaceEval = await this.#control.evaluateSurfaceRemoval({
-        surfaceId,
-        isOwnedByLoop: false,
-      });
-      skippedArtifacts.push({
-        artifact: surfaceId,
-        reason: surfaceEval.reason ?? "caller-owned surface cannot be removed",
-      });
-    } else {
-      const herdr = request.herdr ?? this.#herdr;
-      if (herdr) {
-        const surfaceId = `loop-${request.runId}`;
-        const surfaceEval = await this.#control.evaluateSurfaceRemoval({
-          surfaceId,
-          isOwnedByLoop: true,
-        });
-        if (surfaceEval.allowed) {
-          try {
-            const closeResult = await herdr.closeWorkspace(request.runId);
-            if (closeResult.closed) {
-              removedArtifacts.push(surfaceId);
-              if (closeResult.reason) {
-                reasons[surfaceId] = closeResult.reason;
-              }
-            }
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            skippedArtifacts.push({
-              artifact: surfaceId,
-              reason: `failed to close surface: ${message}`,
-            });
-          }
-        } else {
-          skippedArtifacts.push({
-            artifact: surfaceId,
-            reason: surfaceEval.reason ?? "surface removal refused",
-          });
-        }
-      }
-    }
-
-    // 3. Worktree directory removal
-    // Only after assertWorktreeInsideProject validation and ADR safety rules
-    const worktreeList = [
-      ...(request.worktrees ?? []),
-      ...(request.worktree ? [request.worktree] : []),
-    ];
-    const projectRoot = request.projectRoot ?? process.cwd();
-
-    for (const worktreePath of worktreeList) {
-      // Validation 1: assertWorktreeInsideProject invariant
-      try {
-        assertWorktreeInsideProject(projectRoot, worktreePath);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        skippedArtifacts.push({
-          artifact: worktreePath,
-          reason: message,
-        });
-        continue;
-      }
-
-      // Validation 2: Consult core policy via the bridge (ADR safety rules: root match, clean, merged)
-      const evaluation = await this.#control.evaluateWorktreeRemoval({
-        projectRoot,
-        worktreePath,
-        isMerged: request.isMerged ?? true,
-        isClean: request.isClean ?? true,
-      });
-
-      if (!evaluation.allowed) {
-        skippedArtifacts.push({
-          artifact: worktreePath,
-          reason: evaluation.reason ?? "worktree removal refused",
-        });
-        continue;
-      }
-
-      // ADR safety rule: dry-run default for lossy records
-      if (dryRun) {
-        removedArtifacts.push(worktreePath);
-        reasons[worktreePath] = "dry_run";
-      } else {
-        try {
-          rmSync(worktreePath, { recursive: true, force: true });
-          removedArtifacts.push(worktreePath);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          skippedArtifacts.push({
-            artifact: worktreePath,
-            reason: `failed to remove directory: ${message}`,
-          });
-        }
-      }
-    }
-
-    return {
-      removedArtifacts,
-      skippedArtifacts,
-      reasons,
-    };
+  cleanupRun(request: CleanupRunRequest): Promise<CleanupRunReport> {
+    return cleanupRun(this.#control, { ...request, herdr: request.herdr ?? this.#herdr });
   }
-
+  async prepare(request: RunRequest): Promise<void> {
+    const input = runInput(request);
+    await this.#control.prepareRun({ ...input, intent: redact(request.intent ?? ""), workingDirectory: realpathSync(resolve(request.workingDirectory ?? process.cwd())), tasks: request.tasks });
+  }
   async run(request: RunRequest): Promise<RunSummary> {
-    await this.#control.createRun(runInput(request));
-    await this.#control.submitPlan({
-      ...runInput(request),
-      tasks: request.tasks,
-    });
-    const active = new Map<string, ActiveWorker>();
-    const summary: RunSummary = {
-      status: "completed",
-      tasks: request.tasks.length,
-      escalations: [],
-      providersByTask: {},
-      startedAt: {},
-      finishedAt: {},
-    };
-    const missingRoute = await this.#missingRoute(request.tasks);
-    if (missingRoute) {
-      await this.#control.requestAttention({
-        ...runInput(request),
-        // Attention ids are globally unique in the store; scope by runId.
-        attentionId: `provider-${request.runId}-${missingRoute.taskId}-${missingRoute.computeClass}`,
-        kind: "failure",
-        summary: `No available provider supports ${missingRoute.computeClass}`,
-        taskId: missingRoute.taskId,
-      });
-      summary.status = "attention";
-      return summary;
+    await this.prepare(request);
+    return this.execute(request);
+  }
+  async resume(request: ExistingRunRequest): Promise<RunSummary> {
+    await this.#control.resumeRun(runInput(request));
+    return this.execute(request);
+  }
+  async execute(request: ExistingRunRequest): Promise<RunSummary> {
+    const input = runInput(request);
+    const plan = await this.#control.getRunPlan(input);
+    const summary: RunSummary = { status: "running", tasks: plan.tasks.length, escalations: [], providersByTask: {}, startedAt: {}, finishedAt: {} };
+    const owner = `${process.pid}:${randomUUID()}`;
+    const lease = () => this.#control.claimExecution({ ...input, owner, nowMs: Date.now(), ttlMs: 5000 });
+    if (!(await lease()).accepted) {
+      const initial = await this.#control.getSnapshot(input);
+      const expires = Number(initial.executionExpiresAt ?? Date.now());
+      // A lease can outlive a crashed process. Wait for expiry unless renewal
+      // proves that another owner is still making progress.
+      while (Date.now() <= expires + 250) {
+        await delay(100);
+        const current = await this.#control.getSnapshot(input);
+        if (["completed", "cancelled", "paused", "attention"].includes(current.state)) {
+          summary.status = current.state as RunSummary["status"];
+          return summary;
+        }
+        if (Number(current.executionExpiresAt ?? 0) > expires) return summary;
+        if ((await lease()).accepted) break;
+      }
+      if (!(await lease()).accepted) return summary;
     }
-
-    while (true) {
-      if (request.signal?.aborted) return this.#cancel(request, active, summary);
-      const snapshot = await this.#control.getSnapshot(runInput(request));
-      if (snapshot.state === "completed") return summary;
-      if (snapshot.state === "attention") {
+    const executionInput = { ...input, executionOwner: owner };
+    const active = new Map<string, TaskExecution>();
+    let leaseLost = false;
+    let heartbeatRunning = false;
+    let heartbeatPending: Promise<void> = Promise.resolve();
+    const heartbeat = setInterval(() => {
+      if (!heartbeatRunning) heartbeatPending = renew();
+    }, 1000);
+    const renew = async () => {
+      if (heartbeatRunning) return;
+      heartbeatRunning = true;
+      try { if (!(await this.#control.renewExecution({ ...input, owner, nowMs: Date.now(), ttlMs: 5000 })).accepted) leaseLost = true; }
+      catch { leaseLost = true; }
+      finally { heartbeatRunning = false; }
+    };
+    heartbeat.unref();
+    try {
+      // A fresh process never guesses that old OS work has disappeared.
+      const previous = await this.#control.getSnapshot(input);
+      if (previous.activeWorkers.length > 0 || previous.tasks.some(task => task.state === "verifying")) {
+        for (const task of previous.tasks.filter(task => task.state === "verifying")) {
+          await this.#control.requestAttention({ ...executionInput, attentionId: `recovery-${request.runId}-${task.id}-verification`, kind: "failure", taskId: task.id, summary: `Verification was interrupted. Confirm its process stopped, then run: loop reconcile ${request.runId} ${task.id} stopped; loop resume ${request.runId}.` });
+        }
+        for (const worker of previous.activeWorkers) {
+          const id = `recovery-${request.runId}-${worker.id}`;
+          if (!previous.openAttentionIds.includes(id)) await this.#control.requestAttention({ ...executionInput, attentionId: id, kind: "failure", taskId: worker.taskId, summary: `Execution owner restarted. Confirm worker ${worker.id} has stopped, then run: loop reconcile ${request.runId} ${worker.taskId} stopped; loop resume ${request.runId}.` });
+        }
         summary.status = "attention";
         return summary;
       }
-
-      const claims = await this.#control.claimRunnableTasks({
-        ...runInput(request),
-        runningTaskIds: [...active.keys()],
-        maxWorkers: this.#maxWorkers,
-        maxFrontierWorkers: this.#maxFrontierWorkers,
-      });
-      let recordedStartFailure = false;
-      for (const taskId of claims.taskIds) {
-        const task = snapshot.tasks.find((candidate) => candidate.id === taskId);
-        const spec = request.tasks.find((candidate) => candidate.id === taskId);
-        if (!task || !spec) throw new Error(`claimed task is absent from snapshot: ${taskId}`);
-        const provider = await this.#providers.select(task.preferredCompute);
-        const history = (summary.providersByTask[taskId] ??= []);
-        const previous = history.at(-1);
-        if (previous && previous !== provider.id) {
-          summary.escalations.push({ taskId, from: previous, to: provider.id });
+      while (true) {
+        if (leaseLost) throw new Error("execution ownership was lost; stopped local workers");
+        if (request.signal?.aborted) await this.#control.cancelRun(input);
+        let snapshot = await this.#control.getSnapshot(input);
+        if (snapshot.state === "cancelling" || snapshot.state === "cancelled") {
+          for (const task of active.values()) task.abort();
+          await Promise.all([...active.values()].map(task => task.done));
+          for (const task of active.values()) if (task.error) throw task.error;
+          active.clear();
+          await this.#control.cancelRun(input);
+          summary.status = (await this.#control.getSnapshot(input)).state === "cancelled" ? "cancelled" : "attention";
+          return summary;
         }
-        history.push(provider.id);
-        let handle;
-        try {
-          handle = await provider.start({
-            runId: request.runId,
-            taskId,
-            title: task.title,
-            kind: task.kind,
-            computeClass: task.preferredCompute,
-            attempt: task.attempt,
-            requirements: spec.requirements,
-            workingDirectory: request.workingDirectory,
-          });
-        } catch (error) {
-          // Worker ids are globally unique in the store, so the synthetic
-          // start-failure id must carry the runId to survive re-runs of the
-          // same task graph in a different run.
-          const workerId = `start-failure-${request.runId}-${taskId}-${task.attempt}`;
-          await this.#control.recordWorkerStarted({
-            ...runInput(request),
-            taskId,
-            workerId,
-          });
-          await this.#control.recordWorkerResult({
-            ...runInput(request),
-            taskId,
-            workerId,
-            success: false,
-            summary: `worker start failed: ${redactError(error)}`,
-          });
-          recordedStartFailure = true;
+        for (const [id, task] of active) {
+          if (!task.settled) continue;
+          active.delete(id);
+          if (task.error) throw task.error;
+          summary.finishedAt[id] = Date.now();
+        }
+        if (snapshot.state === "completed") { summary.status = "completed"; return summary; }
+        if (active.size === 0 && ["attention", "pausing", "paused"].includes(snapshot.state)) {
+          if (snapshot.state === "pausing") await this.#control.confirmPaused(input);
+          summary.status = snapshot.state === "attention" ? "attention" : "paused";
+          return summary;
+        }
+        const claims = await this.#control.claimRunnableTasks({ ...executionInput, runningTaskIds: [...active.keys()], maxWorkers: this.#maxWorkers, maxFrontierWorkers: this.#maxFrontierWorkers });
+        for (const taskId of claims.taskIds) {
+          // Controls can arrive while earlier workers are being prepared.
+          snapshot = await this.#control.getSnapshot(input);
+          if (snapshot.state !== "active") break;
+          const context = await this.#control.getTaskContext({ ...input, taskId });
+          let provider: AgentProvider | undefined;
+          try {
+            const selection = this.#providers.select(context.task.preferredCompute);
+            provider = await selectWhileActive(selection, async () => {
+              if (request.signal?.aborted) await this.#control.cancelRun(input);
+              return !leaseLost && (await this.#control.getSnapshot(input)).state === "active";
+            });
+            if (!provider) break;
+          }
+          catch (error) {
+            await this.#control.requestAttention({ ...executionInput, attentionId: `provider-${request.runId}-${taskId}-${context.attempt}`, kind: "failure", taskId, summary: redact(error) });
+            break;
+          }
+          const history = summary.providersByTask[taskId] ??= [];
+          const previousProvider = history.at(-1);
+          if (previousProvider && previousProvider !== provider.id) summary.escalations.push({ taskId, from: previousProvider, to: provider.id });
+          history.push(provider.id);
+          const workerId = `${request.runId}:${taskId}:${context.attempt}:${randomUUID()}`;
+          // Reserve durable ownership BEFORE the OS side effect.
+          try { await this.#control.recordWorkerStarted({ ...executionInput, taskId, workerId }); }
+          catch (error) {
+            if ((await this.#control.getSnapshot(input)).state !== "active") break;
+            throw error;
+          }
+          summary.startedAt[taskId] = Date.now();
+          active.set(taskId, executeTask({ input: executionInput, context, workerId, provider, control: this.#control, verifier: this.#completionVerifier }));
+        }
+        if (leaseLost) throw new Error("execution ownership was lost");
+        if (active.size === 0) {
+          snapshot = await this.#control.getSnapshot(input);
+          if (snapshot.state !== "active") continue;
+          await this.#control.requestAttention({ ...executionInput, attentionId: `blocked-${request.runId}-${snapshot.lastSequence}`, kind: "failure", taskId: null, summary: "No runnable task remains. Inspect dependencies and reconcile interrupted verification before retrying." });
           continue;
         }
-        summary.startedAt[taskId] = Date.now();
-        await this.#control.recordWorkerStarted({
-          ...runInput(request),
-          taskId,
-          workerId: handle.id,
-        });
-        active.set(taskId, {
-          taskId,
-          workerId: handle.id,
-          provider,
-          result: provider.result(handle.id),
-        });
+        // Poll the durable control channel even when no worker has finished.
+        await Promise.race([delay(50), ...[...active.values()].map(task => task.done)]);
       }
-
-      if (active.size === 0) {
-        if (recordedStartFailure) continue;
-        throw new Error("run is blocked with no active or runnable task");
+    } catch (error) {
+      for (const task of active.values()) task.abort();
+      await Promise.allSettled([...active.values()].map(task => task.done));
+      const snapshot = await this.#control.getSnapshot(input);
+      if (!leaseLost && snapshot.executionOwner === owner && Number(snapshot.executionExpiresAt ?? 0) > Date.now() && !["completed", "cancelled"].includes(snapshot.state)) {
+        await this.#control.requestAttention({ ...executionInput, attentionId: `dispatcher-${owner}`, kind: "failure", taskId: null, summary: redact(error) });
       }
-      const completed = await waitForOne(active, request.signal);
-      if (!completed) return this.#cancel(request, active, summary);
-      active.delete(completed.taskId);
-      summary.finishedAt[completed.taskId] = Date.now();
-      await this.#control.recordWorkerResult({
-        ...runInput(request),
-        taskId: completed.taskId,
-        workerId: completed.workerId,
-        success: completed.value.success,
-        summary: completed.value.summary,
-      });
-      if (completed.value.success) {
-        const spec = request.tasks.find((task) => task.id === completed.taskId)!;
-        const evidence = await this.#completionVerifier.verify(
-          spec.completionChecks,
-          request.workingDirectory ?? process.cwd(),
-        );
-        const checks = evidence.map(({ id, passed }) => ({ id, passed }));
-        const passed = checks.every((check) => check.passed);
-        await this.#control.recordVerification({
-          ...runInput(request),
-          taskId: completed.taskId,
-          passed,
-          checks,
-          reason: passed
-            ? ""
-            : `completion contract failed: ${checks
-                .filter((check) => !check.passed)
-                .map((check) => check.id)
-                .join(", ")}`,
-        });
-      }
+      summary.status = "attention";
+      return summary;
+    } finally {
+      clearInterval(heartbeat);
+      await heartbeatPending;
+      await this.#control.releaseExecution({ ...input, owner });
     }
   }
+}
+function runInput(request: ExistingRunRequest) { return { databasePath: request.databasePath, runId: request.runId }; }
+function delay(milliseconds: number) { return new Promise<void>(resolve => setTimeout(resolve, milliseconds)); }
 
-  async #missingRoute(
-    tasks: TaskSpecInput[],
-  ): Promise<{ taskId: string; computeClass: string } | undefined> {
-    for (const task of tasks) {
-      const requiredClasses = escalationRange(task.preferredCompute, task.maximumCompute)
-        .slice(0, Math.max(1, task.maxAttempts));
-      for (const computeClass of requiredClasses) {
-        try {
-          await this.#providers.select(computeClass);
-        } catch {
-          return { taskId: task.id, computeClass };
-        }
-      }
-    }
-    return undefined;
+async function selectWhileActive(selection: Promise<AgentProvider>, stillActive: () => Promise<boolean>): Promise<AgentProvider | undefined> {
+  const pending = selection.then(provider => ({ provider }), error => ({ error }));
+  const deadline = Date.now() + 30000;
+  while (await stillActive()) {
+    const result = await Promise.race([pending, delay(50).then(() => undefined)]);
+    if (result) { if ("error" in result) throw result.error; return result.provider; }
+    if (Date.now() > deadline) throw new Error("Provider capability lookup timed out; retry after checking the provider.");
   }
-
-  async #cancel(
-    request: RunRequest,
-    active: Map<string, ActiveWorker>,
-    summary: RunSummary,
-  ): Promise<RunSummary> {
-    await Promise.all(
-      [...active.values()].map((worker) => worker.provider.cancel(worker.workerId)),
-    );
-    await this.#control.cancelRun(runInput(request));
-    summary.status = "cancelled";
-    return summary;
-  }
-}
-
-function redactError(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error))
-    .replace(/(?:api[_-]?key|token|authorization|password)\s*[:=]\s*\S+/gi, "[credential]=[redacted]")
-    .slice(0, 2_000);
-}
-
-const computeLadder = [
-  "deterministic",
-  "typed_decision",
-  "tiny",
-  "fast",
-  "balanced",
-  "strong",
-  "frontier",
-];
-
-function escalationRange(preferred: string, maximum: string): string[] {
-  const aliases: Record<string, string> = {
-    d0: "deterministic",
-    d1: "typed_decision",
-    s1: "tiny",
-    s2: "fast",
-    s3: "balanced",
-    s4: "strong",
-    s5: "frontier",
-  };
-  const start = computeLadder.indexOf(aliases[preferred] ?? preferred);
-  const end = computeLadder.indexOf(aliases[maximum] ?? maximum);
-  if (start < 0 || end < start) return [preferred];
-  return computeLadder.slice(start, end + 1);
-}
-
-function runInput(request: RunRequest) {
-  return { databasePath: request.databasePath, runId: request.runId };
-}
-
-async function waitForOne(
-  active: Map<string, ActiveWorker>,
-  signal?: AbortSignal,
-): Promise<(ActiveWorker & { value: WorkerResult }) | undefined> {
-  const workers = [...active.values()].map(async (worker) => ({
-    ...worker,
-    value: await worker.result,
-  }));
-  if (!signal) return Promise.race(workers);
-  if (signal.aborted) return undefined;
-  let onAbort!: () => void;
-  const aborted = new Promise<undefined>((resolve) => {
-    onAbort = () => resolve(undefined);
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-  try {
-    return await Promise.race([...workers, aborted]);
-  } finally {
-    signal.removeEventListener("abort", onAbort);
-  }
+  return undefined;
 }

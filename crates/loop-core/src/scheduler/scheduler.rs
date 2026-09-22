@@ -39,14 +39,14 @@ impl Scheduler {
             if task.kind.is_serial() {
                 if running.is_empty() && claimed.is_empty() {
                     claimed.push(task);
+                    break;
                 }
-                break;
+                continue;
             }
             if task.preferred_compute == ComputeClass::Frontier {
                 if frontier >= self.capacity.max_frontier_workers {
                     continue;
                 }
-                frontier += 1;
             }
             if running_tasks
                 .iter()
@@ -56,6 +56,9 @@ impl Scheduler {
                 continue;
             }
             claimed.push(task);
+            if task.preferred_compute == ComputeClass::Frontier {
+                frontier += 1;
+            }
         }
         claimed.into_iter().map(|task| task.id.clone()).collect()
     }
@@ -68,4 +71,6 @@ fn tasks_conflict(left: &Task, right: &Task) -> bool {
         return true;
     }
     write_scopes_overlap(&left.ownership.write_scope, &right.ownership.write_scope)
+        || write_scopes_overlap(&left.ownership.read_scope, &right.ownership.write_scope)
+        || write_scopes_overlap(&left.ownership.write_scope, &right.ownership.read_scope)
 }

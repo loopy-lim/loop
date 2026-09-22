@@ -1,5 +1,6 @@
 import { NodeProcessRunner, type ProcessRunner } from "../process";
 import { ProcessProvider } from "../process-provider";
+import { buildWorkerPrompt } from "../prompt";
 import type {
   ProviderCapabilities,
   ResumeWorkerInput,
@@ -62,27 +63,18 @@ export class CodexProvider extends ProcessProvider {
     if (this.#approveForMe) args.push("--approve-for-me");
     else args.push("--sandbox", this.#sandbox);
     if (this.#model) args.push("--model", this.#model);
-    args.push(prompt(input));
+    args.push(buildWorkerPrompt(input));
     return { command: this.#command, args, cwd };
   }
 
   async resume(sessionId: string, input: ResumeWorkerInput): Promise<WorkerHandle> {
     const args = ["exec", "resume", sessionId, "--json"];
     if (this.#model) args.push("--model", this.#model);
-    args.push(prompt(input));
+    args.push(buildWorkerPrompt(input));
     return this.startProcess({
       command: this.#command,
       args,
       cwd: input.workingDirectory ?? this.#cwd,
     });
   }
-}
-
-function prompt(input: StartWorkerInput): string {
-  return [
-    input.title,
-    `kind=${input.kind}`,
-    `attempt=${input.attempt}`,
-    ...input.requirements,
-  ].join("\n");
 }

@@ -44,6 +44,8 @@ interface PendingTurn {
 }
 
 const DEFAULT_TURN_TIMEOUT_MS = 600_000;
+const DEFAULT_CANCEL_GRACE_MS = 2_000;
+const KILL_WAIT_MS = 1_000;
 
 export class AgyStreamDriver {
   readonly #child: ChildProcess;
@@ -53,19 +55,31 @@ export class AgyStreamDriver {
   #stdoutBuffer = "";
   #pending: PendingTurn | undefined;
   #closed = false;
+  #cancelling = false;
   #queue: Promise<unknown> = Promise.resolve();
+  readonly #closedPromise: Promise<void>;
+  readonly #resolveClosed: () => void;
 
   private constructor(child: ChildProcess, options: AgyStreamDriverOptions) {
     this.#child = child;
     this.#options = options;
     this.#conversationId = options.conversationId;
     this.#onLog = options.onLog ?? (() => undefined);
+    let resolveClosed!: () => void;
+    this.#closedPromise = new Promise<void>((resolve) => {
+      resolveClosed = resolve;
+    });
+    this.#resolveClosed = resolveClosed;
 
     child.stdout?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => this.#onStdout(chunk));
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk: string) => this.#onLog(`stderr: ${chunk.slice(0, 200)}`));
-    child.on("error", (error: Error) => this.#failAll(`agy driver process error: ${error.message}`));
+    child.on("error", (error: Error) => {
+      this.#closed = true;
+      this.#failAll(`agy driver process error: ${error.message}`);
+      this.#resolveClosed();
+    });
     child.on("close", (code, signal) => {
       this.#closed = true;
       this.#failAll(
@@ -73,6 +87,7 @@ export class AgyStreamDriver {
           ? `agy driver terminated by signal ${signal}`
           : `agy driver exited with code ${code ?? "unknown"}`,
       );
+      this.#resolveClosed();
     });
   }
 
@@ -119,6 +134,15 @@ export class AgyStreamDriver {
   }
 
   #runTurn(prompt: string): Promise<AgyTurnResult> {
+    if (this.#cancelling) {
+      return Promise.resolve({
+        ok: false,
+        response: "",
+        error: "agy turn cancelled.",
+        conversationId: this.#conversationId,
+        failure: { kind: "cancelled", retryable: false },
+      });
+    }
     if (this.#closed) {
       return Promise.resolve({
         ok: false,
@@ -136,7 +160,9 @@ export class AgyStreamDriver {
         timer: setTimeout(() => {
           if (this.#pending !== pending) return;
           this.#pending = undefined;
-          this.cancel();
+          void this.cancel().catch((error: unknown) => {
+            this.#onLog(`failed to stop timed-out agy driver: ${error instanceof Error ? error.message : String(error)}`);
+          });
           resolve({
             ok: false,
             response: "",
@@ -247,27 +273,81 @@ export class AgyStreamDriver {
   }
 
   /** Kill the whole agy process group (spawned detached with its own group). */
-  cancel(): void {
+  async cancel(graceMs = DEFAULT_CANCEL_GRACE_MS): Promise<void> {
     if (this.#closed) return;
-    if (this.#child.pid !== undefined) {
-      try {
-        process.kill(-this.#child.pid, "SIGKILL");
-        return;
-      } catch {
-        // fall through to child.kill
+    this.#cancelling = true;
+    this.#cancelPending();
+    const groupPid = process.platform === "win32" ? undefined : this.#child.pid;
+    this.#signal(groupPid, "SIGTERM");
+    if (groupPid !== undefined) {
+      const stoppedGracefully = await waitForGroupExit(groupPid, graceMs);
+      if (!stoppedGracefully) {
+        this.#signal(groupPid, "SIGKILL");
+        if (!(await waitForGroupExit(groupPid, KILL_WAIT_MS))) {
+          throw new Error(`agy process group ${groupPid} did not stop after SIGKILL`);
+        }
       }
+      await this.#closedPromise;
+      return;
     }
-    this.#child.kill("SIGKILL");
+    await Promise.race([this.#closedPromise, delay(graceMs)]);
+    if (!this.#closed) this.#child.kill("SIGKILL");
+    await this.#closedPromise;
   }
 
   /** End stdin gracefully, then force-kill if agy does not exit in time. */
-  dispose(graceMs = 2000): void {
+  async dispose(graceMs = DEFAULT_CANCEL_GRACE_MS): Promise<void> {
     if (this.#closed) return;
-    const child = this.#child;
-    const force = setTimeout(() => {
-      if (child.exitCode === null) this.cancel();
-    }, graceMs);
-    child.once("close", () => clearTimeout(force));
-    child.stdin?.end();
+    this.#child.stdin?.end();
+    await Promise.race([this.#closedPromise, delay(graceMs)]);
+    if (!this.#closed) await this.cancel(0);
   }
+
+  #cancelPending(): void {
+    if (!this.#pending) return;
+    const pending = this.#pending;
+    clearTimeout(pending.timer);
+    this.#pending = undefined;
+    pending.resolve({
+      ok: false,
+      response: "",
+      error: "agy turn cancelled.",
+      conversationId: this.#conversationId,
+      failure: { kind: "cancelled", retryable: false },
+    });
+  }
+
+  #signal(groupPid: number | undefined, signalName: NodeJS.Signals): void {
+    if (groupPid !== undefined) {
+      try {
+        process.kill(-groupPid, signalName);
+        return;
+      } catch {
+        // A test double or already-detached child may not expose a live group.
+      }
+    }
+    this.#child.kill(signalName);
+  }
+}
+
+async function waitForGroupExit(groupPid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    if (!groupExists(groupPid)) return true;
+    await delay(10);
+  } while (Date.now() < deadline);
+  return !groupExists(groupPid);
+}
+
+function groupExists(groupPid: number): boolean {
+  try {
+    process.kill(-groupPid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

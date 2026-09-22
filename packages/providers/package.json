@@ -5,6 +5,7 @@
   "type": "module",
   "exports": "./src/index.ts",
   "dependencies": {
-    "@loop/herdr": "workspace:*"
+    "@loop/herdr": "workspace:*",
+    "@loop/protocol": "workspace:*"
   }
 }

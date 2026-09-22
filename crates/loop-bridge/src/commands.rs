@@ -80,6 +80,7 @@ pub struct ClaimRunnableTasksInput {
     pub running_task_ids: Vec<String>,
     pub max_workers: u16,
     pub max_frontier_workers: u16,
+    pub execution_owner: Option<String>,
 }
 
 #[bridge_type]
@@ -88,6 +89,7 @@ pub struct WorkerInput {
     pub run_id: String,
     pub task_id: String,
     pub worker_id: String,
+    pub execution_owner: Option<String>,
 }
 
 #[bridge_type]
@@ -98,6 +100,7 @@ pub struct WorkerResultInput {
     pub worker_id: String,
     pub success: bool,
     pub summary: String,
+    pub execution_owner: Option<String>,
 }
 
 #[bridge_type]
@@ -114,6 +117,7 @@ pub struct VerificationInput {
     pub passed: bool,
     pub checks: Vec<CheckResultInput>,
     pub reason: String,
+    pub execution_owner: Option<String>,
 }
 
 #[bridge_type]
@@ -141,6 +145,7 @@ pub struct RequestAttentionInput {
     pub kind: AttentionKind,
     pub summary: String,
     pub task_id: Option<String>,
+    pub execution_owner: Option<String>,
 }
 
 #[bridge_type]
@@ -174,6 +179,13 @@ pub struct TaskSnapshotOutput {
     pub state: TaskState,
     pub attempt: u16,
     pub preferred_compute: ComputeClass,
+    pub dependencies: Vec<String>,
+    pub read_scope: Vec<String>,
+    pub write_scope: Vec<String>,
+    pub blocked_by: Vec<String>,
+    pub last_failure: Option<String>,
+    pub activity: Option<String>,
+    pub result_summary: Option<String>,
 }
 
 #[bridge_type]
@@ -189,6 +201,21 @@ pub struct SnapshotOutput {
     pub tasks: Vec<TaskSnapshotOutput>,
     pub active_workers: Vec<ActiveWorkerOutput>,
     pub open_attention_ids: Vec<String>,
+    pub attention: Vec<AttentionSnapshotOutput>,
+    pub intent: String,
+    pub working_directory: String,
+    pub guidance: Vec<String>,
+    pub last_sequence: i64,
+    pub execution_owner: Option<String>,
+    pub execution_expires_at: Option<i64>,
+}
+
+#[bridge_type]
+pub struct AttentionSnapshotOutput {
+    pub id: String,
+    pub kind: AttentionKind,
+    pub summary: String,
+    pub task_id: Option<String>,
 }
 
 #[bridge_type]
@@ -232,11 +259,11 @@ pub struct EvaluateSurfaceRemovalInput {
     pub is_owned_by_loop: bool,
 }
 
-fn bridge_error(code: &'static str, error: impl std::fmt::Display) -> RustraError {
+pub(crate) fn bridge_error(code: &'static str, error: impl std::fmt::Display) -> RustraError {
     RustraError::custom(code, error.to_string())
 }
 
-fn store(path: &str) -> Result<SqliteStore> {
+pub(crate) fn store(path: &str) -> Result<SqliteStore> {
     SqliteStore::open(path).map_err(|error| bridge_error("store_error", error))
 }
 
@@ -299,10 +326,28 @@ pub fn update_task(input: UpdateTaskInput) -> Result<OperationOutput> {
         ));
     }
     let mut store = store(&input.database_path)?;
-    let event = Event::new(
-        &input.run_id,
-        EventKind::TaskReady(TaskId::from(input.task_id)),
-    );
+    let projection = store
+        .projection(&input.run_id)
+        .map_err(|error| bridge_error("run_not_found", error))?;
+    let task_id = TaskId::from(input.task_id);
+    let current = projection
+        .tasks
+        .get(&task_id)
+        .ok_or_else(|| bridge_error("task_not_found", &task_id))?
+        .state;
+    if current == TaskState::Ready {
+        return Ok(OperationOutput { accepted: true });
+    }
+    if matches!(
+        current,
+        TaskState::Running | TaskState::Verifying | TaskState::Cancelled | TaskState::Done
+    ) {
+        return Err(bridge_error(
+            "reconciliation_required",
+            "running, verifying, cancelled, or completed work cannot be reset with updateTask",
+        ));
+    }
+    let event = Event::new(&input.run_id, EventKind::TaskReady(task_id));
     append_and_notify(&mut store, &event, "update_task_failed")?;
     Ok(OperationOutput { accepted: true })
 }
@@ -310,19 +355,26 @@ pub fn update_task(input: UpdateTaskInput) -> Result<OperationOutput> {
 #[command]
 pub fn claim_runnable_tasks(input: ClaimRunnableTasksInput) -> Result<TaskIdsOutput> {
     let mut store = store(&input.database_path)?;
+    store
+        .require_execution_owner(&input.run_id, input.execution_owner.as_deref())
+        .map_err(|error| bridge_error("execution_owner_required", error))?;
     let projection = store
         .projection(&input.run_id)
         .map_err(|error| bridge_error("run_not_found", error))?;
-    if projection.run_state == Some(RunState::Attention) {
+    if projection.run_state != Some(RunState::Active) || projection.has_open_attention() {
         return Ok(TaskIdsOutput { task_ids: vec![] });
     }
+    let mut running: Vec<_> = projection
+        .tasks
+        .values()
+        .filter(|task| matches!(task.state, TaskState::Running | TaskState::Verifying))
+        .map(|task| task.id.clone())
+        .chain(input.running_task_ids.into_iter().map(TaskId::from))
+        .collect();
+    running.sort();
+    running.dedup();
     let graph = TaskGraph::new(projection.tasks.into_values())
         .map_err(|error| bridge_error("invalid_graph", error))?;
-    let running: Vec<_> = input
-        .running_task_ids
-        .into_iter()
-        .map(TaskId::from)
-        .collect();
     let claimed = Scheduler::new(Capacity::new(
         usize::from(input.max_workers.max(1)),
         usize::from(input.max_frontier_workers.max(1)),
@@ -339,7 +391,12 @@ pub fn claim_runnable_tasks(input: ClaimRunnableTasksInput) -> Result<TaskIdsOut
         .map(|task_id| Event::new(&input.run_id, EventKind::TaskReady(task_id)))
         .collect();
     if !ready_events.is_empty() {
-        append_batch_and_notify(&mut store, &ready_events, "claim_failed")?;
+        append_batch_and_notify_owned(
+            &mut store,
+            &ready_events,
+            input.execution_owner.as_deref(),
+            "claim_failed",
+        )?;
     }
     Ok(TaskIdsOutput {
         task_ids: claimed.into_iter().map(|id| id.to_string()).collect(),
@@ -348,7 +405,7 @@ pub fn claim_runnable_tasks(input: ClaimRunnableTasksInput) -> Result<TaskIdsOut
 
 #[command]
 pub fn record_worker_started(input: WorkerInput) -> Result<OperationOutput> {
-    append(
+    append_owned(
         &input.database_path,
         Event::new(
             input.run_id,
@@ -357,6 +414,7 @@ pub fn record_worker_started(input: WorkerInput) -> Result<OperationOutput> {
                 worker_id: input.worker_id,
             },
         ),
+        input.execution_owner.as_deref(),
     )
 }
 
@@ -374,7 +432,19 @@ pub fn record_worker_result(input: WorkerResultInput) -> Result<OperationOutput>
     );
     let mut store = store(&input.database_path)?;
     if input.success {
-        append_and_notify(&mut store, &finished, "worker_result_failed")?;
+        let output = Event::new(
+            &run_id,
+            EventKind::TaskOutputRecorded {
+                task_id: failed_task_id.clone(),
+                summary: input.summary,
+            },
+        );
+        append_batch_and_notify_owned(
+            &mut store,
+            &[finished, output],
+            input.execution_owner.as_deref(),
+            "worker_result_failed",
+        )?;
     } else {
         let failure = Event::new(
             &input.run_id,
@@ -383,14 +453,26 @@ pub fn record_worker_result(input: WorkerResultInput) -> Result<OperationOutput>
                 reason: input.summary,
             },
         );
-        append_batch_and_notify(&mut store, &[finished, failure], "worker_result_failed")?;
-        ensure_failure_attention(&mut store, &run_id, &failed_task_id, &failure_summary)?;
+        append_batch_and_notify_owned(
+            &mut store,
+            &[finished, failure],
+            input.execution_owner.as_deref(),
+            "worker_result_failed",
+        )?;
+        ensure_failure_attention(
+            &mut store,
+            &run_id,
+            &failed_task_id,
+            &failure_summary,
+            input.execution_owner.as_deref(),
+        )?;
     }
     Ok(OperationOutput { accepted: true })
 }
 
 #[command]
 pub fn record_verification(input: VerificationInput) -> Result<OperationOutput> {
+    let execution_owner = input.execution_owner.clone();
     let task_id = TaskId::from(input.task_id);
     let failed_task_id = task_id.clone();
     let failure_reason = input.reason.clone();
@@ -413,21 +495,39 @@ pub fn record_verification(input: VerificationInput) -> Result<OperationOutput> 
     };
     let mut store = store(&input.database_path)?;
     let event = Event::new(&input.run_id, kind);
-    append_and_notify(&mut store, &event, "verification_failed")?;
+    append_and_notify_owned(
+        &mut store,
+        &event,
+        execution_owner.as_deref(),
+        "verification_failed",
+    )?;
     if !passed {
-        ensure_failure_attention(&mut store, &input.run_id, &failed_task_id, &failure_reason)?;
+        ensure_failure_attention(
+            &mut store,
+            &input.run_id,
+            &failed_task_id,
+            &failure_reason,
+            execution_owner.as_deref(),
+        )?;
     }
     let projection = store
         .projection(&input.run_id)
         .map_err(|error| bridge_error("snapshot_failed", error))?;
-    if !projection.tasks.is_empty()
+    if projection.run_state == Some(RunState::Active)
+        && !projection.has_open_attention()
+        && !projection.tasks.is_empty()
         && projection
             .tasks
             .values()
             .all(|task| task.state == loop_core::task::TaskState::Done)
     {
         let event = Event::new(&input.run_id, EventKind::RunCompleted);
-        append_and_notify(&mut store, &event, "complete_run_failed")?;
+        append_and_notify_owned(
+            &mut store,
+            &event,
+            execution_owner.as_deref(),
+            "complete_run_failed",
+        )?;
     }
     Ok(OperationOutput { accepted: true })
 }
@@ -453,6 +553,10 @@ pub fn resolve_attention(input: ResolveAttentionInput) -> Result<OperationOutput
         "approved" => AttentionResolution::Approved,
         "retry" => AttentionResolution::Retry,
         "cancel" => AttentionResolution::Cancel,
+        "rejected" => AttentionResolution::Rejected("rejected".into()),
+        value if value.starts_with("rejected:") => {
+            AttentionResolution::Rejected(value.trim_start_matches("rejected:").trim().to_string())
+        }
         value if !value.trim().is_empty() => AttentionResolution::Answer(value.to_string()),
         _ => return Err(bridge_error("invalid_resolution", "resolution is required")),
     };
@@ -474,7 +578,51 @@ pub fn resolve_attention(input: ResolveAttentionInput) -> Result<OperationOutput
     if resolution == AttentionResolution::Retry
         && let Some(task_id) = attention.task_id.clone()
     {
-        events.push(Event::new(&input.run_id, EventKind::TaskReady(task_id)));
+        let state = projection
+            .tasks
+            .get(&task_id)
+            .ok_or_else(|| bridge_error("task_not_found", &task_id))?
+            .state;
+        match state {
+            TaskState::Pending | TaskState::Ready => {}
+            TaskState::Attention | TaskState::Blocked | TaskState::Failed => {
+                events.push(Event::new(&input.run_id, EventKind::TaskReady(task_id)));
+            }
+            TaskState::Running | TaskState::Verifying | TaskState::Cancelled => {
+                return Err(bridge_error(
+                    "reconciliation_required",
+                    "running, verifying, or stopped work must be explicitly reconciled before retry",
+                ));
+            }
+            TaskState::Done => {
+                return Err(bridge_error(
+                    "invalid_retry",
+                    "completed work cannot be retried",
+                ));
+            }
+        }
+    }
+    if let AttentionResolution::Answer(message) = &resolution {
+        events.push(Event::new(
+            &input.run_id,
+            EventKind::GuidanceAdded {
+                task_id: attention.task_id.clone(),
+                message: message.clone(),
+            },
+        ));
+    }
+    if matches!(
+        resolution,
+        AttentionResolution::Cancel | AttentionResolution::Rejected(_)
+    ) {
+        events.push(Event::new(
+            &input.run_id,
+            if projection.has_in_flight_work() {
+                EventKind::RunCancellationRequested
+            } else {
+                EventKind::RunCancelled
+            },
+        ));
     }
     append_batch_and_notify(&mut store, &events, "attention_resolution_failed")?;
     Ok(OperationOutput { accepted: true })
@@ -494,17 +642,57 @@ pub fn request_attention(input: RequestAttentionInput) -> Result<OperationOutput
         ),
         None => Attention::new(input.attention_id, input.kind, input.summary),
     };
-    append(
-        &input.database_path,
-        Event::new(input.run_id, EventKind::AttentionCreated(attention)),
-    )
+    let event = Event::new(input.run_id, EventKind::AttentionCreated(attention));
+    match input.execution_owner.as_deref() {
+        Some(owner) => append_owned(&input.database_path, event, Some(owner)),
+        None => append(&input.database_path, event),
+    }
 }
 
 #[command]
 pub fn cancel_run(input: RunInput) -> Result<OperationOutput> {
+    let current = store(&input.database_path)?
+        .projection(&input.run_id)
+        .map_err(|error| bridge_error("run_not_found", error))?;
+    if current.run_state.is_some_and(RunState::is_terminal) {
+        return Ok(OperationOutput { accepted: true });
+    }
+    let kind = if current.has_in_flight_work() {
+        EventKind::RunCancellationRequested
+    } else {
+        EventKind::RunCancelled
+    };
+    append(&input.database_path, Event::new(input.run_id, kind))
+}
+
+#[command]
+pub fn pause_run(input: RunInput) -> Result<OperationOutput> {
     append(
         &input.database_path,
-        Event::new(input.run_id, EventKind::RunCancelled),
+        Event::new(input.run_id, EventKind::RunPauseRequested),
+    )
+}
+
+#[command]
+pub fn confirm_paused(input: RunInput) -> Result<OperationOutput> {
+    append(
+        &input.database_path,
+        Event::new(input.run_id, EventKind::RunPaused),
+    )
+}
+
+#[command]
+pub fn record_worker_stopped(input: WorkerInput) -> Result<OperationOutput> {
+    append_owned(
+        &input.database_path,
+        Event::new(
+            input.run_id,
+            EventKind::WorkerStopped {
+                task_id: TaskId::from(input.task_id),
+                worker_id: input.worker_id,
+            },
+        ),
+        input.execution_owner.as_deref(),
     )
 }
 
@@ -571,7 +759,8 @@ pub fn cleanup_run(input: CleanupRunInput) -> Result<CleanupRunOutput> {
             });
         }
 
-        let removable = policy.select_removable_runs(runs.iter().map(|(id, state)| (id.as_str(), *state)));
+        let removable =
+            policy.select_removable_runs(runs.iter().map(|(id, state)| (id.as_str(), *state)));
         if input.keep_recent > 0 && !removable.contains(&run_id.as_str()) {
             return Ok(CleanupRunOutput {
                 removed_artifacts: vec![],
@@ -657,10 +846,7 @@ pub fn evaluate_worktree_removal(
 pub fn evaluate_surface_removal(
     input: EvaluateSurfaceRemovalInput,
 ) -> Result<PolicyEvaluationOutput> {
-    match loop_core::policy::evaluate_surface_removal(
-        &input.surface_id,
-        input.is_owned_by_loop,
-    ) {
+    match loop_core::policy::evaluate_surface_removal(&input.surface_id, input.is_owned_by_loop) {
         Ok(()) => Ok(PolicyEvaluationOutput {
             allowed: true,
             refusal_code: None,
@@ -679,9 +865,19 @@ pub fn evaluate_surface_removal(
     }
 }
 
-fn append(path: &str, event: Event) -> Result<OperationOutput> {
+pub(crate) fn append(path: &str, event: Event) -> Result<OperationOutput> {
     let mut store = store(path)?;
     append_and_notify(&mut store, &event, "event_append_failed")?;
+    Ok(OperationOutput { accepted: true })
+}
+
+pub(crate) fn append_owned(
+    path: &str,
+    event: Event,
+    owner: Option<&str>,
+) -> Result<OperationOutput> {
+    let mut store = store(path)?;
+    append_and_notify_owned(&mut store, &event, owner, "event_append_failed")?;
     Ok(OperationOutput { accepted: true })
 }
 
@@ -697,13 +893,37 @@ fn append_and_notify(
     Ok(sequence)
 }
 
-fn append_batch_and_notify(
+fn append_and_notify_owned(
+    store: &mut SqliteStore,
+    event: &Event,
+    owner: Option<&str>,
+    error_code: &'static str,
+) -> Result<i64> {
+    append_batch_and_notify_owned(store, std::slice::from_ref(event), owner, error_code)
+}
+
+pub(crate) fn append_batch_and_notify(
     store: &mut SqliteStore,
     events: &[Event],
     error_code: &'static str,
 ) -> Result<i64> {
     let sequence = store
         .append_batch(events)
+        .map_err(|error| bridge_error(error_code, error))?;
+    if let Some(event) = events.last() {
+        notify_run_changed(&event.run_id, sequence);
+    }
+    Ok(sequence)
+}
+
+pub(crate) fn append_batch_and_notify_owned(
+    store: &mut SqliteStore,
+    events: &[Event],
+    owner: Option<&str>,
+    error_code: &'static str,
+) -> Result<i64> {
+    let sequence = store
+        .append_batch_owned(events, owner)
         .map_err(|error| bridge_error(error_code, error))?;
     if let Some(event) = events.last() {
         notify_run_changed(&event.run_id, sequence);
@@ -726,6 +946,7 @@ fn ensure_failure_attention(
     run_id: &str,
     task_id: &TaskId,
     summary: &str,
+    execution_owner: Option<&str>,
 ) -> Result<()> {
     let projection = store
         .projection(run_id)
@@ -751,7 +972,7 @@ fn ensure_failure_attention(
             task_id.clone(),
         )),
     );
-    append_and_notify(store, &event, "attention_failed")?;
+    append_and_notify_owned(store, &event, execution_owner, "attention_failed")?;
     Ok(())
 }
 
@@ -769,40 +990,79 @@ fn snapshot(store: &SqliteStore, run_id: &str) -> Result<SnapshotOutput> {
     let state = projection
         .run_state
         .ok_or_else(|| bridge_error("run_not_found", run_id))?;
+    let attention: Vec<_> = projection
+        .attention
+        .values()
+        .filter(|item| item.state == loop_core::attention::AttentionState::Open)
+        .map(|item| AttentionSnapshotOutput {
+            id: item.id.clone(),
+            kind: item.kind,
+            summary: item.summary.clone(),
+            task_id: item.task_id.as_ref().map(ToString::to_string),
+        })
+        .collect();
+    let tasks = projection
+        .tasks
+        .values()
+        .map(|task| TaskSnapshotOutput {
+            id: task.id.to_string(),
+            title: task.title.clone(),
+            kind: task.kind,
+            state: task.state,
+            attempt: task.attempt,
+            preferred_compute: task.preferred_compute,
+            dependencies: task.dependencies.iter().map(ToString::to_string).collect(),
+            read_scope: task.ownership.read_scope.clone(),
+            write_scope: task.ownership.write_scope.clone(),
+            blocked_by: task
+                .dependencies
+                .iter()
+                .filter(|id| {
+                    projection
+                        .tasks
+                        .get(*id)
+                        .is_none_or(|dependency| dependency.state != TaskState::Done)
+                })
+                .map(ToString::to_string)
+                .collect(),
+            last_failure: projection.failures.get(&task.id).cloned(),
+            activity: projection.activities.get(&task.id).cloned(),
+            result_summary: projection.outputs.get(&task.id).cloned(),
+        })
+        .collect();
+    let lease = store
+        .execution_lease(run_id)
+        .map_err(|error| bridge_error("lease_failed", error))?;
     Ok(SnapshotOutput {
+        execution_owner: lease.as_ref().map(|(owner, _)| owner.clone()),
+        execution_expires_at: lease.map(|(_, expires)| expires),
         run_id: run_id.to_string(),
         state,
-        tasks: projection
-            .tasks
-            .into_values()
-            .map(|task| TaskSnapshotOutput {
-                id: task.id.to_string(),
-                title: task.title,
-                kind: task.kind,
-                state: task.state,
-                attempt: task.attempt,
-                preferred_compute: task.preferred_compute,
-            })
-            .collect(),
+        tasks,
         active_workers: projection
             .active_workers
-            .into_iter()
+            .iter()
             .map(|(id, task_id)| ActiveWorkerOutput {
-                id,
+                id: id.clone(),
                 task_id: task_id.to_string(),
             })
             .collect(),
-        open_attention_ids: projection
-            .attention
-            .into_iter()
-            .filter_map(|(id, attention)| {
-                (attention.state == loop_core::attention::AttentionState::Open).then_some(id)
-            })
+        open_attention_ids: attention.iter().map(|item| item.id.clone()).collect(),
+        attention,
+        intent: projection.intent,
+        working_directory: projection.working_directory,
+        guidance: projection
+            .guidance
+            .iter()
+            .map(|item| item.message.clone())
             .collect(),
+        last_sequence: store
+            .last_sequence(run_id)
+            .map_err(|error| bridge_error("sequence_failed", error))?,
     })
 }
 
-fn task_from_input(input: TaskSpecInput) -> Result<Task> {
+pub(crate) fn task_from_input(input: TaskSpecInput) -> Result<Task> {
     Task::builder(TaskId::from(input.id), input.title, input.kind)
         .dependencies(input.dependencies.into_iter().map(TaskId::from))
         .ownership(WorkOwnership::new(input.read_scope, input.write_scope))
@@ -831,7 +1091,7 @@ fn task_from_input(input: TaskSpecInput) -> Result<Task> {
 pub fn loop_package() -> &'static Package {
     static PACKAGE: OnceLock<Package> = OnceLock::new();
     PACKAGE.get_or_init(|| {
-        let package = register!(
+        let package = crate::execution::register_execution(register!(
             Package::builder("loop.orchestration"),
             create_run,
             get_run,
@@ -846,13 +1106,16 @@ pub fn loop_package() -> &'static Package {
             request_attention,
             resolve_attention,
             cancel_run,
+            pause_run,
+            confirm_paused,
+            record_worker_stopped,
             resume_run,
             get_snapshot,
             subscribe_events,
             cleanup_run,
             evaluate_worktree_removal,
             evaluate_surface_removal
-        )
+        ))
         .event::<RunChangedEvent>("loop.run_changed")
         .build();
         package.register_ffi_with_default(FfiFormat::Json);

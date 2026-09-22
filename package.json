@@ -1,27 +1,30 @@
 {
   "name": "loop",
   "private": true,
+  "packageManager": "bun@1.4.1",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "test": "cargo test --workspace && cargo build -p loop-bridge && bun test packages tests",
+    "test": "cargo test --workspace && cargo build -p loop-bridge && bun test packages tests plugins scripts/rustra-codegen.test.ts",
     "typecheck": "tsc -p tsconfig.json",
-    "codegen": "bun ../rustra-bridge/packages/cli/src/index.ts codegen --config rustra.json",
-    "codegen:check": "bun ../rustra-bridge/packages/cli/src/index.ts codegen --config rustra.json --check",
+    "codegen": "bun scripts/rustra-codegen.ts",
+    "codegen:check": "bun scripts/rustra-codegen.ts --check",
     "test:architecture": "bun test tests/architecture-boundaries.test.ts",
     "test:milestone": "bun test packages/orchestrator/test/milestone.test.ts",
     "build:pi": "bun build packages/pi-loop/src/extension.ts --target=node --outfile dist/loop-pi-extension.js",
     "build:cli": "cargo build -p loop-bridge && bun run build:pi && bun build --compile packages/cli/src/main.ts --outfile dist/loop && bun scripts/stage-native.ts",
+    "test:packaged": "bun run build:cli && ./dist/loop verify-install --json",
     "build": "cargo build --workspace && bun run build:cli",
     "check": "bun run codegen:check && bun run typecheck && bun run test:architecture && bun run test"
   },
   "devDependencies": {
+    "@rustra/cli": "0.11.3",
     "@types/bun": "^1.4.2",
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@rustra/bun": "^0.10.0",
-    "@rustra/types": "^0.12.0"
+    "@rustra/bun": "0.10.2",
+    "@rustra/types": "0.12.0"
   }
 }

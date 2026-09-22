@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { buildWorkerPrompt } from "../prompt";
+import { redactProviderText } from "../redact";
 
 import type {
   AgentProvider,
@@ -107,6 +109,12 @@ export class ZaiApiProvider implements AgentProvider {
     return this.require(workerId).result;
   }
 
+  async release(workerId: string): Promise<void> {
+    const session = this.require(workerId);
+    await session.result;
+    this.#sessions.delete(workerId);
+  }
+
   async #request(input: StartWorkerInput, signal: AbortSignal): Promise<WorkerResult> {
     const path = this.#options.mode === "general"
       ? (this.#options.generalPath ?? "/chat/completions")
@@ -125,7 +133,7 @@ export class ZaiApiProvider implements AgentProvider {
           messages: [
             {
               role: "user",
-              content: [input.title, ...input.requirements].join("\n"),
+              content: buildWorkerPrompt(input),
             },
           ],
         }),
@@ -161,7 +169,5 @@ export class ZaiApiProvider implements AgentProvider {
 }
 
 function redact(value: string): string {
-  return value
-    .replace(/(?:api[_-]?key|token|authorization)\s*[:=]\s*\S+/gi, "[credential]=[redacted]")
-    .slice(0, 4_000);
+  return redactProviderText(value);
 }

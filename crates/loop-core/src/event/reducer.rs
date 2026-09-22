@@ -4,12 +4,15 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::attention::Attention;
+use crate::attention::{Attention, AttentionState};
 use crate::policy::{next_compute_class, ArtifactKind};
 use crate::run::RunState;
 use crate::task::{Task, TaskId, TaskState, TaskTransitionError};
 
-use super::{Event, EventKind};
+use super::{
+    verification_recovery_attention, worker_recovery_attention, CheckReceipt, Event, EventKind,
+    Guidance,
+};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -41,7 +44,8 @@ impl ArtifactRecord {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
 pub struct RunProjection {
     pub run_id: Option<String>,
     pub run_state: Option<RunState>,
@@ -50,8 +54,13 @@ pub struct RunProjection {
     pub attention: BTreeMap<String, Attention>,
     pub failures: BTreeMap<TaskId, String>,
     pub artifacts: BTreeMap<String, ArtifactRecord>,
+    pub intent: String,
+    pub working_directory: String,
+    pub guidance: Vec<Guidance>,
+    pub outputs: BTreeMap<TaskId, String>,
+    pub checks: BTreeMap<TaskId, Vec<CheckReceipt>>,
+    pub activities: BTreeMap<TaskId, String>,
 }
-
 
 impl RunProjection {
     pub fn apply(&mut self, event: &Event) -> Result<(), ProjectionError> {
@@ -63,6 +72,41 @@ impl RunProjection {
             return Err(ProjectionError::RunMismatch);
         }
         match &event.kind {
+            EventKind::RunConfigured {
+                intent,
+                working_directory,
+            } => {
+                self.require_controllable()?;
+                if !self.working_directory.is_empty()
+                    && self.working_directory != *working_directory
+                {
+                    return Err(ProjectionError::ContextMismatch);
+                }
+                self.intent = intent.clone();
+                self.working_directory = working_directory.clone();
+            }
+            EventKind::GuidanceAdded { task_id, message } => {
+                self.require_controllable()?;
+                if let Some(id) = task_id {
+                    self.task_mut(id)?;
+                }
+                self.guidance.push(Guidance {
+                    task_id: task_id.clone(),
+                    message: message.clone(),
+                });
+            }
+            EventKind::TaskOutputRecorded { task_id, summary } => {
+                self.task_mut(task_id)?;
+                self.outputs.insert(task_id.clone(), summary.clone());
+            }
+            EventKind::CheckReceiptsRecorded { task_id, checks } => {
+                self.task_mut(task_id)?;
+                self.checks.insert(task_id.clone(), checks.clone());
+            }
+            EventKind::TaskActivityRecorded { task_id, activity } => {
+                self.task_mut(task_id)?;
+                self.activities.insert(task_id.clone(), activity.clone());
+            }
             EventKind::RunCreated => {
                 if self.run_id.is_some() {
                     return Err(ProjectionError::RunAlreadyCreated);
@@ -71,15 +115,31 @@ impl RunProjection {
                 self.run_state = Some(RunState::Active);
             }
             EventKind::TaskCreated(task) => {
-                require_run(self)?;
+                self.require_controllable()?;
                 if self.tasks.insert(task.id.clone(), task.clone()).is_some() {
                     return Err(ProjectionError::TaskAlreadyCreated(task.id.clone()));
                 }
             }
             EventKind::TaskReady(task_id) => {
-                self.task_mut(task_id)?.transition(TaskState::Ready, None)?;
+                let task = self.task_mut(task_id)?;
+                match task.state {
+                    TaskState::Ready => {}
+                    TaskState::Pending
+                    | TaskState::Blocked
+                    | TaskState::Attention
+                    | TaskState::Failed => task.transition(TaskState::Ready, None)?,
+                    TaskState::Running
+                    | TaskState::Verifying
+                    | TaskState::Cancelled
+                    | TaskState::Done => {
+                        return Err(ProjectionError::UnsafeReadyTransition(task_id.clone()));
+                    }
+                }
             }
             EventKind::WorkerStarted { task_id, worker_id } => {
+                if self.run_state != Some(RunState::Active) || self.has_open_attention() {
+                    return Err(ProjectionError::ActiveWorkers);
+                }
                 self.task_mut(task_id)?
                     .transition(TaskState::Running, None)?;
                 self.active_workers
@@ -125,7 +185,13 @@ impl RunProjection {
                 self.failures.insert(task_id.clone(), reason.clone());
             }
             EventKind::AttentionCreated(attention) => {
-                self.run_state = Some(RunState::Attention);
+                self.require_controllable()?;
+                if !matches!(
+                    self.run_state,
+                    Some(RunState::Cancelling | RunState::Paused | RunState::Pausing)
+                ) {
+                    self.run_state = Some(RunState::Attention);
+                }
                 self.attention
                     .insert(attention.id.clone(), attention.clone());
             }
@@ -133,11 +199,21 @@ impl RunProjection {
                 attention_id,
                 resolution,
             } => {
+                self.require_controllable()?;
                 self.attention
                     .get_mut(attention_id)
                     .ok_or_else(|| ProjectionError::AttentionNotFound(attention_id.clone()))?
                     .resolve(resolution.clone())?;
-                self.run_state = Some(RunState::Active);
+                if !matches!(
+                    self.run_state,
+                    Some(RunState::Cancelling | RunState::Paused | RunState::Pausing)
+                ) {
+                    self.run_state = Some(if self.has_open_attention() {
+                        RunState::Attention
+                    } else {
+                        RunState::Active
+                    });
+                }
             }
             EventKind::DecisionRecorded { .. } => {}
             EventKind::TaskCompleted(task_id) => {
@@ -146,6 +222,9 @@ impl RunProjection {
                 }
             }
             EventKind::RunCompleted => {
+                if self.run_state != Some(RunState::Active) || self.has_open_attention() {
+                    return Err(ProjectionError::ActiveWorkers);
+                }
                 if self
                     .tasks
                     .values()
@@ -155,12 +234,106 @@ impl RunProjection {
                 }
                 self.run_state = Some(RunState::Completed);
             }
+            EventKind::RunPauseRequested => {
+                self.require_controllable()?;
+                if self.run_state == Some(RunState::Cancelling) {
+                    return Err(ProjectionError::ActiveWorkers);
+                }
+                self.run_state = Some(if self.has_in_flight_work() {
+                    RunState::Pausing
+                } else {
+                    RunState::Paused
+                });
+            }
+            EventKind::RunPaused => {
+                if self.has_in_flight_work() {
+                    return Err(ProjectionError::ActiveWorkers);
+                }
+                self.require_controllable()?;
+                self.run_state = Some(RunState::Paused);
+            }
+            EventKind::RunCancellationRequested => {
+                self.require_controllable()?;
+                self.run_state = Some(RunState::Cancelling);
+            }
+            EventKind::TaskExecutionReconciled { task_id } => {
+                self.require_controllable()?;
+                let cancelling = self.run_state == Some(RunState::Cancelling);
+                let task = self.task_mut(task_id)?;
+                if !matches!(
+                    task.state,
+                    TaskState::Running
+                        | TaskState::Verifying
+                        | TaskState::Attention
+                        | TaskState::Cancelled
+                ) {
+                    return Err(ProjectionError::InvalidVerificationState(task_id.clone()));
+                }
+                task.state = if cancelling {
+                    TaskState::Cancelled
+                } else {
+                    TaskState::Ready
+                };
+                self.active_workers.retain(|_, id| id != task_id);
+            }
+            EventKind::VerificationStopped { task_id } => {
+                let cancelling = self.run_state == Some(RunState::Cancelling);
+                let task = self.task_mut(task_id)?;
+                if task.state != TaskState::Verifying {
+                    return Err(ProjectionError::InvalidVerificationState(task_id.clone()));
+                }
+                task.state = if cancelling {
+                    TaskState::Cancelled
+                } else {
+                    TaskState::Attention
+                };
+                if !cancelling {
+                    self.run_state = Some(RunState::Attention);
+                    let attention = verification_recovery_attention(&event.run_id, task_id);
+                    self.attention.insert(attention.id.clone(), attention);
+                }
+            }
+            EventKind::WorkerStopped { task_id, worker_id } => {
+                let cancelling = self.run_state == Some(RunState::Cancelling);
+                if self.active_workers.remove(worker_id).as_ref() != Some(task_id) {
+                    return Err(ProjectionError::WorkerMismatch(worker_id.clone()));
+                }
+                self.task_mut(task_id)?.state = if cancelling {
+                    TaskState::Cancelled
+                } else {
+                    TaskState::Attention
+                };
+                if !cancelling {
+                    self.run_state = Some(RunState::Attention);
+                    let attention = worker_recovery_attention(&event.run_id, task_id, worker_id);
+                    self.attention.insert(attention.id.clone(), attention);
+                }
+            }
             EventKind::RunCancelled => {
+                if self.has_in_flight_work() {
+                    return Err(ProjectionError::ActiveWorkers);
+                }
                 self.run_state = Some(RunState::Cancelled);
-                self.active_workers.clear();
+                for task in self.tasks.values_mut() {
+                    if task.state != TaskState::Done {
+                        task.state = TaskState::Cancelled;
+                    }
+                }
             }
             EventKind::RunResumed => {
-                self.run_state = Some(RunState::Active);
+                self.require_controllable()?;
+                if self.run_state == Some(RunState::Cancelling) {
+                    return Err(ProjectionError::ActiveWorkers);
+                }
+                self.run_state = Some(if self.has_open_attention() {
+                    RunState::Attention
+                } else if !self.tasks.is_empty()
+                    && self.tasks.values().all(|t| t.state == TaskState::Done)
+                {
+                    RunState::Completed
+                } else {
+                    RunState::Active
+                });
             }
             EventKind::ArtifactCreated(artifact) => {
                 require_run(self)?;
@@ -201,6 +374,25 @@ impl RunProjection {
         self.artifacts.values().filter(|a| a.is_active())
     }
 
+    pub fn has_in_flight_work(&self) -> bool {
+        !self.active_workers.is_empty()
+            || self.tasks.values().any(|t| t.state == TaskState::Verifying)
+    }
+
+    pub fn has_open_attention(&self) -> bool {
+        self.attention
+            .values()
+            .any(|item| item.state == AttentionState::Open)
+    }
+
+    fn require_controllable(&self) -> Result<(), ProjectionError> {
+        require_run(self)?;
+        if self.run_state.is_some_and(RunState::is_terminal) {
+            return Err(ProjectionError::TerminalRun);
+        }
+        Ok(())
+    }
+
     pub fn is_artifact_removed(&self, id: &str) -> bool {
         self.artifacts.get(id).is_some_and(|a| a.is_removed())
     }
@@ -230,6 +422,12 @@ fn require_run(projection: &RunProjection) -> Result<(), ProjectionError> {
 
 #[derive(Debug, Error)]
 pub enum ProjectionError {
+    #[error("run working directory cannot change after configuration")]
+    ContextMismatch,
+    #[error("terminal runs cannot be resumed or paused")]
+    TerminalRun,
+    #[error("active workers must be stopped or drained before confirming this operation")]
+    ActiveWorkers,
     #[error("run has not been created")]
     RunNotCreated,
     #[error("run has already been created")]
@@ -244,6 +442,8 @@ pub enum ProjectionError {
     WorkerMismatch(String),
     #[error("verification occurred outside the verifying state: {0}")]
     InvalidVerificationState(TaskId),
+    #[error("task requires lifecycle reconciliation before becoming ready: {0}")]
+    UnsafeReadyTransition(TaskId),
     #[error("task has not passed its completion contract: {0}")]
     TaskNotVerified(TaskId),
     #[error("run still contains incomplete tasks")]
@@ -259,4 +459,3 @@ pub enum ProjectionError {
     #[error(transparent)]
     Attention(#[from] crate::attention::AttentionError),
 }
-

@@ -41,10 +41,3 @@ command = "zai"
 enabled = false
 auth = "native"
 mode = "interactive"
-
-[providers.jev]
-endpoint = "http://127.0.0.1:8089"
-enabled = false
-fallback = "deterministic"
-auth = "none"
-mode = "api"

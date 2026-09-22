@@ -3,7 +3,6 @@ name = "loop-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-autotests = false
 
 [lib]
 name = "loop_core"
@@ -13,6 +12,9 @@ path = "src/lib.rs"
 schemars = "0.8"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
+
+[dev-dependencies]
+serde_json = "1"
 
 [[test]]
 name = "scheduler_domain"
@@ -25,4 +27,3 @@ path = "tests/event_reducer.rs"
 [[test]]
 name = "cleanup_policy"
 path = "tests/cleanup_policy.rs"
-

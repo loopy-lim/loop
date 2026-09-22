@@ -9,6 +9,7 @@ import type {
   WorkerResult,
   WorkerStatus,
 } from "../types";
+import { buildWorkerPrompt } from "../prompt";
 import { AgyStreamDriver } from "./driver";
 
 interface AgyPersistentProviderOptions {
@@ -113,7 +114,7 @@ export class AgyPersistentProvider implements AgentProvider {
   }
 
   #runTurn(driver: AgyStreamDriver, input: StartWorkerInput): Promise<WorkerResult> {
-    const prompt = [input.title, ...input.requirements].filter(Boolean).join("\n");
+    const prompt = buildWorkerPrompt(input);
     return driver
       .turn(prompt)
       .then((turn): WorkerResult => ({
@@ -142,7 +143,11 @@ export class AgyPersistentProvider implements AgentProvider {
   }
 
   async cancel(workerId: string): Promise<void> {
-    this.#session(workerId)?.driver.cancel();
+    const session = this.#session(workerId);
+    if (!session) throw new Error(`unknown worker: ${workerId}`);
+    await session.driver.cancel();
+    await session.result;
+    session.status = "cancelled";
   }
 
   async status(workerId: string): Promise<WorkerStatus> {
@@ -161,8 +166,18 @@ export class AgyPersistentProvider implements AgentProvider {
       };
     }
     const result = await session.result;
-    session.status = result.success ? "completed" : "failed";
+    if (session.status !== "cancelled") {
+      session.status = result.success ? "completed" : "failed";
+    }
     return result;
+  }
+
+  async release(workerId: string): Promise<void> {
+    const session = this.#session(workerId);
+    if (!session) throw new Error(`unknown worker: ${workerId}`);
+    await session.result;
+    await session.driver.dispose();
+    this.#sessions.delete(workerId);
   }
 
   subscribe(workerId: string, listener: (event: ProviderEvent) => void): () => void {
@@ -174,8 +189,8 @@ export class AgyPersistentProvider implements AgentProvider {
   }
 
   /** Gracefully end every live agy process owned by this provider. */
-  disposeAll(): void {
-    for (const session of this.#sessions.values()) session.driver.dispose();
+  async disposeAll(): Promise<void> {
+    await Promise.all([...this.#sessions.values()].map((session) => session.driver.dispose()));
     this.#sessions.clear();
   }
 }

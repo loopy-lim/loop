@@ -78,7 +78,7 @@ fn scheduler_claims_only_ready_non_conflicting_tasks_within_capacity() {
 #[test]
 fn decision_and_integration_tasks_are_serialized() {
     let graph = TaskGraph::new([
-        task("decision", TaskKind::Decision, &[], &[]),
+        task("decision", TaskKind::Decision, &[], &["decisions/**"]),
         task("research", TaskKind::Research, &[], &[]),
     ])
     .unwrap();
@@ -155,4 +155,74 @@ fn attention_lifecycle_is_explicit_and_idempotent() {
     assert!(attention
         .resolve(AttentionResolution::Answer("memory".into()))
         .is_err());
+}
+
+#[test]
+fn approval_attention_only_accepts_approval_outcomes() {
+    let mut approval = Attention::new("approval", AttentionKind::Approval, "ship it");
+    assert!(approval
+        .resolve(AttentionResolution::Answer("yes".into()))
+        .is_err());
+    assert_eq!(approval.state, AttentionState::Open);
+    approval.resolve(AttentionResolution::Approved).unwrap();
+}
+
+#[test]
+fn readers_do_not_race_writers_and_root_scopes_overlap_everything() {
+    let writer = task("a-writer", TaskKind::Implementation, &[], &["src/**"]);
+    let mut reader = task("b-reader", TaskKind::Research, &[], &[]);
+    reader.ownership = WorkOwnership::new(["src/a.rs"], std::iter::empty::<&str>());
+    let graph = TaskGraph::new([writer, reader]).unwrap();
+    assert_eq!(
+        Scheduler::new(Capacity::new(2, 1)).claim_runnable(&graph, &[]),
+        vec![TaskId::from("a-writer")]
+    );
+    let graph = TaskGraph::new([
+        task("all", TaskKind::Implementation, &[], &["."]),
+        task("other", TaskKind::Implementation, &[], &["docs/a.md"]),
+    ])
+    .unwrap();
+    assert_eq!(
+        Scheduler::new(Capacity::new(2, 1)).claim_runnable(&graph, &[]),
+        vec![TaskId::from("all")]
+    );
+}
+
+#[test]
+fn glob_ownership_is_conservative_and_parent_traversal_is_rejected() {
+    let graph = TaskGraph::new([
+        task("a", TaskKind::Implementation, &[], &["src/*/shared.rs"]),
+        task(
+            "b",
+            TaskKind::Implementation,
+            &[],
+            &["src/module/shared.rs"],
+        ),
+    ])
+    .unwrap();
+    assert_eq!(
+        Scheduler::new(Capacity::new(2, 1)).claim_runnable(&graph, &[]),
+        vec![TaskId::from("a")]
+    );
+    let ownership = WorkOwnership::new(["./"], ["../outside"]);
+    assert_eq!(ownership.read_scope, vec!["."]);
+    assert!(
+        Task::builder(TaskId::from("unsafe"), "unsafe", TaskKind::Implementation)
+            .ownership(ownership)
+            .completion_contract(CompletionContract::new([CompletionCheck::new("check")]))
+            .build()
+            .is_err()
+    );
+}
+
+#[test]
+fn write_capable_tasks_require_an_explicit_write_scope() {
+    let result = Task::builder(
+        TaskId::from("unscoped"),
+        "unscoped",
+        TaskKind::Implementation,
+    )
+    .completion_contract(CompletionContract::new([CompletionCheck::new("check")]))
+    .build();
+    assert!(result.is_err());
 }

@@ -1,0 +1,450 @@
+use crate::commands::{
+    append, append_batch_and_notify, append_owned, bridge_error, store, task_from_input,
+};
+use crate::{CompletionCheckInput, OperationOutput, RunInput, TaskSpecInput};
+use loop_core::attention::{AttentionKind, AttentionResolution, AttentionState};
+use loop_core::event::{CheckReceipt, Event, EventKind};
+use loop_core::task::{Task, TaskId, TaskState};
+use rustra::prelude::*;
+
+#[bridge_type]
+pub struct PrepareRunInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub intent: String,
+    pub working_directory: String,
+    pub tasks: Vec<TaskSpecInput>,
+}
+
+#[bridge_type]
+pub struct ConfigureRunInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub intent: String,
+    pub working_directory: String,
+}
+
+#[bridge_type]
+pub struct ReconcileTaskInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub task_id: String,
+    pub confirmed_stopped: bool,
+}
+
+#[bridge_type]
+pub struct SteerRunInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub task_id: Option<String>,
+    pub message: String,
+}
+
+#[bridge_type]
+pub struct TaskContextInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub task_id: String,
+}
+
+#[bridge_type]
+pub struct DependencyResultOutput {
+    pub task_id: String,
+    pub title: String,
+    pub summary: String,
+}
+
+#[bridge_type]
+pub struct TaskContextOutput {
+    pub intent: String,
+    pub working_directory: String,
+    pub task: TaskSpecInput,
+    pub attempt: u16,
+    pub dependency_results: Vec<DependencyResultOutput>,
+    pub result_summary: Option<String>,
+    pub previous_failure: Option<String>,
+    pub previous_checks: Vec<CheckReceipt>,
+    pub guidance: Vec<String>,
+}
+
+#[bridge_type]
+pub struct RunPlanOutput {
+    pub intent: String,
+    pub working_directory: String,
+    pub tasks: Vec<TaskSpecInput>,
+}
+
+#[bridge_type]
+pub struct RecordCheckReceiptsInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub task_id: String,
+    pub checks: Vec<CheckReceipt>,
+    pub execution_owner: Option<String>,
+}
+
+#[bridge_type]
+pub struct StopVerificationInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub task_id: String,
+    pub execution_owner: Option<String>,
+}
+
+#[bridge_type]
+pub struct RecordActivityInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub task_id: String,
+    pub activity: String,
+    pub execution_owner: Option<String>,
+}
+
+#[bridge_type]
+pub struct ExecutionLeaseInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub owner: String,
+    pub now_ms: i64,
+    pub ttl_ms: i64,
+}
+
+#[bridge_type]
+pub struct ReleaseExecutionInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub owner: String,
+}
+
+#[bridge_type]
+pub struct RunListOutput {
+    pub run_id: String,
+    pub state: loop_core::run::RunState,
+}
+
+#[bridge_type]
+pub struct ListRunsInput {
+    pub database_path: String,
+}
+
+#[command]
+pub fn prepare_run(input: PrepareRunInput) -> Result<OperationOutput> {
+    if !std::path::Path::new(&input.working_directory).is_absolute() {
+        return Err(bridge_error(
+            "invalid_context",
+            "working directory must be absolute",
+        ));
+    }
+    let tasks = input
+        .tasks
+        .into_iter()
+        .map(task_from_input)
+        .collect::<Result<Vec<_>>>()?;
+    if tasks.is_empty() {
+        return Err(bridge_error("invalid_graph", "plan must contain tasks"));
+    }
+    loop_core::graph::TaskGraph::new(tasks.clone())
+        .map_err(|e| bridge_error("invalid_graph", e))?;
+    let mut events = vec![
+        Event::new(&input.run_id, EventKind::RunCreated),
+        Event::new(
+            &input.run_id,
+            EventKind::RunConfigured {
+                intent: input.intent,
+                working_directory: input.working_directory,
+            },
+        ),
+    ];
+    events.extend(
+        tasks
+            .into_iter()
+            .map(|task| Event::new(&input.run_id, EventKind::TaskCreated(task))),
+    );
+    append_batch_and_notify(
+        &mut store(&input.database_path)?,
+        &events,
+        "prepare_run_failed",
+    )?;
+    Ok(OperationOutput { accepted: true })
+}
+
+#[command]
+pub fn configure_run(input: ConfigureRunInput) -> Result<OperationOutput> {
+    if input.working_directory.trim().is_empty() {
+        return Err(bridge_error(
+            "invalid_context",
+            "working directory is required",
+        ));
+    }
+    append(
+        &input.database_path,
+        Event::new(
+            input.run_id,
+            EventKind::RunConfigured {
+                intent: input.intent,
+                working_directory: input.working_directory,
+            },
+        ),
+    )
+}
+
+#[command]
+pub fn steer_run(input: SteerRunInput) -> Result<OperationOutput> {
+    if input.message.trim().is_empty() || input.message.len() > 16_000 {
+        return Err(bridge_error(
+            "invalid_guidance",
+            "guidance must contain 1 to 16000 bytes",
+        ));
+    }
+    append(
+        &input.database_path,
+        Event::new(
+            input.run_id,
+            EventKind::GuidanceAdded {
+                task_id: input.task_id.map(TaskId::from),
+                message: input.message,
+            },
+        ),
+    )
+}
+
+#[command]
+pub fn get_run_plan(input: RunInput) -> Result<RunPlanOutput> {
+    let projection = store(&input.database_path)?
+        .projection(&input.run_id)
+        .map_err(|e| bridge_error("run_not_found", e))?;
+    Ok(RunPlanOutput {
+        intent: projection.intent,
+        working_directory: projection.working_directory,
+        tasks: projection.tasks.values().map(task_spec).collect(),
+    })
+}
+
+#[command]
+pub fn get_task_context(input: TaskContextInput) -> Result<TaskContextOutput> {
+    let projection = store(&input.database_path)?
+        .projection(&input.run_id)
+        .map_err(|e| bridge_error("run_not_found", e))?;
+    let id = TaskId::from(input.task_id);
+    let task = projection
+        .tasks
+        .get(&id)
+        .ok_or_else(|| bridge_error("task_not_found", &id))?;
+    let dependency_results = task
+        .dependencies
+        .iter()
+        .filter_map(|id| {
+            let dependency = projection.tasks.get(id)?;
+            if dependency.state != TaskState::Done {
+                return None;
+            }
+            Some(DependencyResultOutput {
+                task_id: id.to_string(),
+                title: dependency.title.clone(),
+                summary: projection.outputs.get(id).cloned().unwrap_or_default(),
+            })
+        })
+        .collect();
+    let guidance = projection
+        .guidance
+        .iter()
+        .filter(|item| item.task_id.as_ref().is_none_or(|target| target == &id))
+        .map(|item| item.message.clone())
+        .collect();
+    Ok(TaskContextOutput {
+        intent: projection.intent.clone(),
+        working_directory: projection.working_directory.clone(),
+        task: task_spec(task),
+        attempt: task.attempt,
+        dependency_results,
+        result_summary: projection.outputs.get(&id).cloned(),
+        previous_failure: projection.failures.get(&id).cloned(),
+        previous_checks: projection.checks.get(&id).cloned().unwrap_or_default(),
+        guidance,
+    })
+}
+
+#[command]
+pub fn record_check_receipts(input: RecordCheckReceiptsInput) -> Result<OperationOutput> {
+    append_owned(
+        &input.database_path,
+        Event::new(
+            input.run_id,
+            EventKind::CheckReceiptsRecorded {
+                task_id: TaskId::from(input.task_id),
+                checks: input.checks,
+            },
+        ),
+        input.execution_owner.as_deref(),
+    )
+}
+
+#[command]
+pub fn stop_verification(input: StopVerificationInput) -> Result<OperationOutput> {
+    append_owned(
+        &input.database_path,
+        Event::new(
+            input.run_id,
+            EventKind::VerificationStopped {
+                task_id: TaskId::from(input.task_id),
+            },
+        ),
+        input.execution_owner.as_deref(),
+    )
+}
+
+#[command]
+pub fn record_activity(input: RecordActivityInput) -> Result<OperationOutput> {
+    append_owned(
+        &input.database_path,
+        Event::new(
+            input.run_id,
+            EventKind::TaskActivityRecorded {
+                task_id: TaskId::from(input.task_id),
+                activity: input.activity,
+            },
+        ),
+        input.execution_owner.as_deref(),
+    )
+}
+
+#[command]
+pub fn claim_execution(input: ExecutionLeaseInput) -> Result<OperationOutput> {
+    let _ignored_client_clock = input.now_ms;
+    let accepted = store(&input.database_path)?
+        .claim_execution(&input.run_id, &input.owner, input.ttl_ms)
+        .map_err(|e| bridge_error("execution_lease_failed", e))?;
+    Ok(OperationOutput { accepted })
+}
+
+#[command]
+pub fn renew_execution(input: ExecutionLeaseInput) -> Result<OperationOutput> {
+    let _ignored_client_clock = input.now_ms;
+    let accepted = store(&input.database_path)?
+        .renew_execution(&input.run_id, &input.owner, input.ttl_ms)
+        .map_err(|e| bridge_error("execution_lease_failed", e))?;
+    Ok(OperationOutput { accepted })
+}
+
+#[command]
+pub fn release_execution(input: ReleaseExecutionInput) -> Result<OperationOutput> {
+    store(&input.database_path)?
+        .release_execution(&input.run_id, &input.owner)
+        .map_err(|e| bridge_error("execution_release_failed", e))?;
+    Ok(OperationOutput { accepted: true })
+}
+
+#[command]
+pub fn reconcile_task(input: ReconcileTaskInput) -> Result<OperationOutput> {
+    if !input.confirmed_stopped {
+        return Err(bridge_error(
+            "confirmation_required",
+            "Confirm the previous worker and verification processes have stopped before retrying",
+        ));
+    }
+    let mut store = store(&input.database_path)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| bridge_error("clock_failed", e))?
+        .as_millis() as i64;
+    let owner = format!("reconcile-{}-{now}", std::process::id());
+    if !store
+        .claim_execution(&input.run_id, &owner, 5000)
+        .map_err(|e| bridge_error("lease_failed", e))?
+    {
+        return Err(bridge_error(
+            "owner_active",
+            "The execution owner is still active; pause or cancel it first",
+        ));
+    }
+    let result = (|| {
+        let projection = store
+            .projection(&input.run_id)
+            .map_err(|e| bridge_error("run_not_found", e))?;
+        let task_id = TaskId::from(input.task_id);
+        let mut events = vec![Event::new(
+            &input.run_id,
+            EventKind::TaskExecutionReconciled {
+                task_id: task_id.clone(),
+            },
+        )];
+        for attention in projection.attention.values().filter(|a| {
+            a.state == AttentionState::Open
+                && a.kind == AttentionKind::Failure
+                && a.task_id.as_ref() == Some(&task_id)
+        }) {
+            events.push(Event::new(
+                &input.run_id,
+                EventKind::AttentionResolved {
+                    attention_id: attention.id.clone(),
+                    resolution: AttentionResolution::Retry,
+                },
+            ));
+        }
+        store
+            .append_batch_owned(&events, Some(&owner))
+            .map_err(|e| bridge_error("reconcile_failed", e))?;
+        Ok(OperationOutput { accepted: true })
+    })();
+    store
+        .release_execution(&input.run_id, &owner)
+        .map_err(|e| bridge_error("lease_failed", e))?;
+    result
+}
+
+#[command]
+pub fn list_runs(input: ListRunsInput) -> Result<Vec<RunListOutput>> {
+    Ok(store(&input.database_path)?
+        .runs()
+        .map_err(|e| bridge_error("runs_failed", e))?
+        .into_iter()
+        .map(|(run_id, state)| RunListOutput { run_id, state })
+        .collect())
+}
+
+pub(crate) fn task_spec(task: &Task) -> TaskSpecInput {
+    TaskSpecInput {
+        id: task.id.to_string(),
+        title: task.title.clone(),
+        kind: task.kind,
+        dependencies: task.dependencies.iter().map(ToString::to_string).collect(),
+        read_scope: task.ownership.read_scope.clone(),
+        write_scope: task.ownership.write_scope.clone(),
+        requirements: task.requirements.clone(),
+        completion_checks: task
+            .completion_contract
+            .checks
+            .iter()
+            .map(|check| CompletionCheckInput {
+                id: check.id.clone(),
+                command: check.command.clone(),
+                args: check.args.clone(),
+                working_directory: check.working_directory.clone(),
+                timeout_ms: check.timeout_ms,
+            })
+            .collect(),
+        preferred_compute: task.preferred_compute,
+        minimum_compute: task.minimum_compute,
+        maximum_compute: task.maximum_compute,
+        max_attempts: task.max_attempts,
+    }
+}
+
+pub(crate) fn register_execution(builder: rustra::PackageBuilder) -> rustra::PackageBuilder {
+    register!(
+        builder,
+        prepare_run,
+        configure_run,
+        get_run_plan,
+        get_task_context,
+        record_check_receipts,
+        stop_verification,
+        record_activity,
+        steer_run,
+        claim_execution,
+        renew_execution,
+        release_execution,
+        reconcile_task,
+        list_runs
+    )
+}

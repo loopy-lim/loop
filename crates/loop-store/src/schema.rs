@@ -37,13 +37,14 @@ CREATE TABLE IF NOT EXISTS attempts (
 );
 
 CREATE TABLE IF NOT EXISTS workers (
-    id TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
     run_id TEXT NOT NULL,
     task_id TEXT NOT NULL,
     provider TEXT,
     session_id TEXT,
     state TEXT NOT NULL,
     updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (run_id, id),
     FOREIGN KEY (run_id, task_id) REFERENCES tasks(run_id, id) ON DELETE CASCADE
 );
 
@@ -56,29 +57,43 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_run_seq ON events(run_id, seq);
 
 CREATE TABLE IF NOT EXISTS decisions (
-    id TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
     run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
     task_id TEXT,
     value_json TEXT NOT NULL,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (run_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS attention (
-    id TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
     run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
     kind TEXT NOT NULL,
     state TEXT NOT NULL,
     data_json TEXT NOT NULL,
-    updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (run_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS artifacts (
-    id TEXT PRIMARY KEY,
+    id TEXT NOT NULL,
     run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
     task_id TEXT,
     kind TEXT NOT NULL,
     content_ref TEXT NOT NULL,
     metadata_json TEXT NOT NULL,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (run_id, id)
+);
+CREATE TABLE IF NOT EXISTS projection_cache (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL,
+    version INTEGER NOT NULL,
+    data_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS execution_leases (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+    owner TEXT NOT NULL,
+    expires_at INTEGER NOT NULL
 );
 "#;

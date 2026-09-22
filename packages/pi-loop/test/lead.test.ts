@@ -1,10 +1,13 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { SnapshotOutput, TaskContextOutput, TaskSpecInput } from "@loop/protocol";
+
 import {
   registerLoopExtension,
+  runLoopPlan,
   type LoopLeadBackend,
   type PiExtensionApi,
 } from "../src/extension";
@@ -29,7 +32,15 @@ test("natural-language Pi turns receive the Loop Lead contract", async () => {
 
   expect(result.systemPrompt).toContain("interactive Lead for Loop");
   expect(result.systemPrompt).toContain("call loop_run exactly once");
+  expect(result.systemPrompt).toContain("dependency result summaries");
+  expect(result.systemPrompt).toContain("exact read and write ownership");
   expect(result.systemPrompt).toContain("Implement feature X");
+
+  const tool = host.tools.get("loop_run")!;
+  const tasksDescription = tool.parameters.properties.tasksJson.description as string;
+  expect(tasksDescription).toContain("TaskSpecInput[]");
+  expect(tasksDescription).toContain('"completionChecks"');
+  expect(tasksDescription).toContain('"preferredCompute"');
 });
 
 test("loop_run validates the DAG and delegates execution to Loop", async () => {
@@ -40,11 +51,8 @@ test("loop_run validates the DAG and delegates execution to Loop", async () => {
     async run(input) {
       calls.push(input);
       input.onProgress?.({
-        runId: input.runId,
+        ...snapshot(input.runId),
         state: "active",
-        tasks: [],
-        activeWorkers: [],
-        openAttentionIds: [],
       });
       return {
         status: "completed",
@@ -92,21 +100,20 @@ test("Pi updates, notify, tool result, and commands share injected output limits
     listLineLimit: 3,
   };
   const snapshot = {
-    runId: "run-limited",
-    state: "active" as const,
+    ...emptySnapshot("run-limited"),
     tasks: Array.from({ length: 6 }, (_, index) => ({
       id: `task-${index + 1}`,
       title: `Task ${index + 1}`,
       kind: "implementation" as const,
       state: "ready" as const,
       preferredCompute: "fast" as const,
-      workerId: null,
       attempt: 0,
-      selectedCompute: null,
+      dependencies: [],
+      readScope: [],
+      writeScope: ["src/**"],
+      blockedBy: [],
     })),
-    activeWorkers: [],
-    openAttentionIds: [],
-  };
+  } satisfies SnapshotOutput;
   const backend = fakeBackend({
     async run(input) {
       input.onProgress?.(snapshot);
@@ -153,6 +160,116 @@ test("Pi updates, notify, tool result, and commands share injected output limits
   expect(notifications.at(-1)?.split("\n").at(-1)).toBe("… 4 more models");
 });
 
+test("loop control commands preserve free-form messages and render discovery and task detail", async () => {
+  const host = fakePi();
+  const calls: string[] = [];
+  const notifications: string[] = [];
+  const backend = fakeBackend({
+    async pause(runId) {
+      calls.push(`pause:${runId}`);
+      return { ...snapshot(runId), state: "paused" };
+    },
+    async steer(runId, taskId, message) {
+      calls.push(`steer:${runId}:${taskId}:${message}`);
+      return snapshot(runId);
+    },
+    async resolve(runId, attentionId, resolution) {
+      calls.push(`resolve:${runId}:${attentionId}:${resolution}`);
+      return snapshot(runId);
+    },
+    async task(runId, taskId) {
+      calls.push(`task:${runId}:${taskId}`);
+      return taskContext(taskId);
+    },
+    async runs() {
+      calls.push("runs");
+      return [{ runId: "restart-me", state: "paused" }];
+    },
+  });
+  registerLoopExtension(host.api, backend, undefined, limits);
+  const piContext = context(notifications);
+  const command = host.commands.get("loop")!;
+
+  await command.handler("pause run-1", piContext);
+  await command.handler("steer run-1 all prioritize verification evidence", piContext);
+  await command.handler("resolve run-1 attention-1 approved with rollback", piContext);
+  await command.handler("task run-1 impl", piContext);
+  await command.handler("runs", piContext);
+
+  expect(calls).toEqual([
+    "pause:run-1",
+    "steer:run-1:all:prioritize verification evidence",
+    "resolve:run-1:attention-1:approved with rollback",
+    "task:run-1:impl",
+    "runs",
+  ]);
+  expect(notifications.some((value) => value.includes("Dependencies: research"))).toBe(true);
+  expect(notifications.at(-1)).toContain("restart-me · paused");
+});
+
+test("loop_run reports observer interruption as still running", async () => {
+  const host = fakePi();
+  const notifications: string[] = [];
+  registerLoopExtension(host.api, fakeBackend({
+    async run(input) {
+      input.signal.throwIfAborted();
+      return {
+        status: "running",
+        tasks: input.tasks.length,
+        escalations: [],
+        providersByTask: {},
+        startedAt: {},
+        finishedAt: {},
+      };
+    },
+  }), undefined, limits);
+
+  const result = await host.tools.get("loop_run")!.execute(
+    "tool-running",
+    {
+      intent: "Continue in the detached owner",
+      runId: "run-detached",
+      tasksJson: JSON.stringify([task("impl", "implementation", [], ["src/**"])]),
+    },
+    new AbortController().signal,
+    undefined,
+    context(notifications),
+  );
+
+  expect(result.content[0]?.text).toContain("Execution continues in the detached owner");
+  expect(result.content[0]?.text).toContain("Next: /loop status run-detached");
+});
+
+test("observer abort resolves a running summary instead of a false failure", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "loop-observer-abort-"));
+  const executable = join(directory, "fake-loop");
+  writeFileSync(executable, [
+    "#!/usr/bin/env bun",
+    "process.stdin.resume();",
+    "process.on('SIGTERM', () => process.exit(0));",
+    "console.log(JSON.stringify({ type: 'snapshot', value: {} }));",
+    "setInterval(() => {}, 1000);",
+  ].join("\n"));
+  chmodSync(executable, 0o755);
+  const previous = process.env.LOOP_BIN;
+  process.env.LOOP_BIN = executable;
+  const controller = new AbortController();
+  try {
+    const pending = runLoopPlan({
+      intent: "Keep executing",
+      tasks: [task("impl", "implementation", [], ["src/**"])],
+      runId: "run-observer",
+      cwd: directory,
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(pending).resolves.toMatchObject({ status: "running", tasks: 1 });
+  } finally {
+    if (previous === undefined) delete process.env.LOOP_BIN;
+    else process.env.LOOP_BIN = previous;
+  }
+});
+
 test("Pi extension does not hide output configuration errors behind defaults", () => {
   const previous = process.env.LOOP_CONFIG_DIR;
   process.env.LOOP_CONFIG_DIR = join(mkdtempSync(join(tmpdir(), "loop-pi-config-error-")), "missing");
@@ -164,7 +281,12 @@ test("Pi extension does not hide output configuration errors behind defaults", (
   }
 });
 
-function task(id: string, kind: string, dependencies: string[], writeScope: string[]) {
+function task(
+  id: string,
+  kind: TaskSpecInput["kind"],
+  dependencies: string[],
+  writeScope: string[],
+): TaskSpecInput {
   return {
     id,
     title: id,
@@ -206,13 +328,7 @@ function fakePi() {
 }
 
 function fakeBackend(overrides: Partial<LoopLeadBackend> = {}): LoopLeadBackend {
-  const snapshot = {
-    runId: "run-x",
-    state: "active" as const,
-    tasks: [],
-    activeWorkers: [],
-    openAttentionIds: [],
-  };
+  const current = snapshot("run-x");
   return {
     async run(input) {
       return {
@@ -225,18 +341,83 @@ function fakeBackend(overrides: Partial<LoopLeadBackend> = {}): LoopLeadBackend 
       };
     },
     async snapshot() {
-      return snapshot;
+      return current;
     },
     async cancel() {
-      return { ...snapshot, state: "cancelled" as const };
+      return { ...current, state: "cancelled" as const };
+    },
+    async pause() {
+      return { ...current, state: "paused" as const };
     },
     async resume() {
-      return snapshot;
+      return current;
+    },
+    async steer() {
+      return current;
+    },
+    async resolve() {
+      return current;
+    },
+    async task(_runId, taskId) {
+      return taskContext(taskId);
+    },
+    async runs() {
+      return [{ runId: current.runId, state: current.state }];
     },
     async models() {
       return ["fast · configured-model"];
     },
     ...overrides,
+  };
+}
+
+function emptySnapshot(runId: string): SnapshotOutput {
+  return {
+    runId,
+    state: "active",
+    tasks: [],
+    activeWorkers: [],
+    openAttentionIds: [],
+    attention: [],
+    intent: "Test intent",
+    workingDirectory: "/project",
+    guidance: [],
+    lastSequence: 0,
+  };
+}
+
+function snapshot(runId: string): SnapshotOutput {
+  return {
+    ...emptySnapshot(runId),
+    tasks: [{
+      id: "impl",
+      title: "Implement",
+      kind: "implementation",
+      state: "running",
+      attempt: 1,
+      preferredCompute: "fast",
+      dependencies: ["research"],
+      readScope: ["src/**"],
+      writeScope: ["src/impl.ts"],
+      blockedBy: [],
+      activity: "Editing renderer",
+    }],
+  };
+}
+
+function taskContext(taskId: string): TaskContextOutput {
+  return {
+    intent: "Test intent",
+    workingDirectory: "/project",
+    task: task(taskId, "implementation", ["research"], ["src/impl.ts"]),
+    attempt: 1,
+    dependencyResults: [{
+      taskId: "research",
+      title: "Research",
+      summary: "Found the generated contract",
+    }],
+    previousChecks: [],
+    guidance: [],
   };
 }
 

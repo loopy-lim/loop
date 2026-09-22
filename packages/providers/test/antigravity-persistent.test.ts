@@ -33,6 +33,7 @@ function fakeChild() {
     },
     end() {
       written.push("__end__");
+      queueMicrotask(() => child.emit("close", 0, null));
     },
   };
   child.pid = 424242;
@@ -40,6 +41,7 @@ function fakeChild() {
   child.killed = false;
   child.kill = () => {
     child.killed = true;
+    queueMicrotask(() => child.emit("close", null, "SIGKILL"));
     return true;
   };
   return { child, written };
@@ -63,6 +65,28 @@ const input: StartWorkerInput = {
   computeClass: "strong",
   attempt: 1,
   requirements: ["must pass checks"],
+  context: {
+    intent: "CONTEXT_INTENT_ONLY",
+    workingDirectory: "/project",
+    task: {
+      id: "task-1",
+      title: "Context task title",
+      kind: "implementation",
+      dependencies: [],
+      readScope: ["packages/providers/**"],
+      writeScope: ["packages/providers/src/**"],
+      requirements: ["Use generated context"],
+      completionChecks: [],
+      preferredCompute: "strong",
+      minimumCompute: "fast",
+      maximumCompute: "frontier",
+      maxAttempts: 3,
+    },
+    attempt: 1,
+    dependencyResults: [],
+    previousChecks: [],
+    guidance: [],
+  },
 };
 
 describe("AgyStreamDriver", () => {
@@ -93,7 +117,7 @@ describe("AgyStreamDriver", () => {
     expect(result.conversationId).toBe("conv-1");
     expect(written[0]).toContain('"event":"user"');
     expect(written[0]).toContain("Implement task 1");
-    driver.dispose();
+    await driver.dispose();
   });
 
   test("fails closed on non-successful statuses", async () => {
@@ -114,10 +138,10 @@ describe("AgyStreamDriver", () => {
     const result = await turn;
     expect(result.ok).toBe(false);
     expect(result.error).toBe("quota exhausted");
-    driver.dispose();
+    await driver.dispose();
   });
 
-  test("passes conversation id on resume-style construction", () => {
+  test("passes conversation id on resume-style construction", async () => {
     const { child } = fakeChild();
     let capturedArgs: string[] | undefined;
     const spawnProcess = ((_command: string, args: string[]) => {
@@ -129,7 +153,32 @@ describe("AgyStreamDriver", () => {
     expect(capturedArgs).toContain("--conversation");
     expect(capturedArgs![capturedArgs!.indexOf("--conversation") + 1]).toBe("conv-9");
     expect(capturedArgs).toContain("--input-format");
-    driver.dispose();
+    await driver.dispose();
+  });
+
+  test("cancel resolves only after the persistent child closes", async () => {
+    const { child } = fakeChild();
+    child.kill = () => {
+      child.killed = true;
+      return true;
+    };
+    const driver = AgyStreamDriver.start({
+      cwd: "/project",
+      spawnProcess: spawnScript(child),
+      turnTimeoutMs: 5_000,
+    });
+    const turn = driver.turn("keep working");
+    let stopped = false;
+    const cancellation = driver.cancel(0).then(() => {
+      stopped = true;
+    });
+
+    await Bun.sleep(10);
+    expect(stopped).toBe(false);
+    child.emit("close", null, "SIGTERM");
+    await cancellation;
+
+    expect((await turn).failure?.kind).toBe("cancelled");
   });
 });
 
@@ -159,8 +208,8 @@ describe("AgyPersistentProvider", () => {
     expect(result.success).toBe(true);
     expect(result.summary).toBe("done");
     expect(result.sessionId).toBe("conv-77");
-    expect(turns[0]).toContain("Implement task 1");
-    expect(turns[0]).toContain("must pass checks");
+    expect(turns[0]).toContain("CONTEXT_INTENT_ONLY");
+    expect(turns[0]).toContain("packages/providers/src/**");
   });
 
   test("resume reattaches the previous conversation", async () => {
@@ -187,4 +236,76 @@ describe("AgyPersistentProvider", () => {
     const result = await provider.result(handle.id);
     expect(result.success).toBe(true);
   });
+
+  test("cancel waits for the driver and active turn to stop", async () => {
+    const turn = deferred<{ ok: boolean; response: string; conversationId: string; failure: { kind: "cancelled"; retryable: false } }>();
+    const stopped = deferred<void>();
+    const driver = {
+      turn: () => turn.promise,
+      cancel: () => stopped.promise.then(() => {
+        turn.resolve({
+          ok: false,
+          response: "",
+          conversationId: "conv-cancel",
+          failure: { kind: "cancelled", retryable: false },
+        });
+      }),
+      dispose: async () => undefined,
+      get conversationId() {
+        return "conv-cancel";
+      },
+    };
+    const provider = new AgyPersistentProvider({
+      id: "antigravity:test",
+      cwd: "/project",
+      driverFactory: () => driver as never,
+    });
+    const handle = await provider.start(input);
+
+    let cancelled = false;
+    const cancellation = provider.cancel(handle.id).then(() => {
+      cancelled = true;
+    });
+    await Promise.resolve();
+    expect(cancelled).toBe(false);
+
+    stopped.resolve();
+    await cancellation;
+    expect(await provider.status(handle.id)).toBe("cancelled");
+    expect((await provider.result(handle.id)).failure?.kind).toBe("cancelled");
+  });
+
+  test("release disposes the worker process and removes its session", async () => {
+    let disposed = false;
+    const driver = {
+      turn: async () => ({ ok: true, response: "done", conversationId: "conv-release" }),
+      cancel: async () => undefined,
+      dispose: async () => {
+        disposed = true;
+      },
+      get conversationId() {
+        return "conv-release";
+      },
+    };
+    const provider = new AgyPersistentProvider({
+      id: "antigravity:test",
+      cwd: "/project",
+      driverFactory: () => driver as never,
+    });
+    const handle = await provider.start(input);
+    await provider.result(handle.id);
+
+    await provider.release!(handle.id);
+
+    expect(disposed).toBe(true);
+    expect(provider.status(handle.id)).rejects.toThrow("unknown worker");
+  });
 });
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}

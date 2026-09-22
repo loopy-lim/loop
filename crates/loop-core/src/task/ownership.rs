@@ -30,11 +30,10 @@ where
         .into_iter()
         .map(Into::into)
         .map(|value: String| {
-            value
-                .trim()
-                .trim_start_matches("./")
-                .trim_end_matches('/')
-                .to_string()
+            if [".", "./"].contains(&value.trim()) {
+                return ".".to_string();
+            }
+            value.trim().trim_start_matches("./").to_string()
         })
         .filter(|value| !value.is_empty())
         .collect();
