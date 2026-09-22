@@ -1,6 +1,68 @@
 #!/bin/sh
 set -eu
 
+# Preflight: fail fast with an actionable message before any build or install
+# step when the toolchain is missing or too old. POSIX sh only.
+
+version_ge() (
+  # Succeed when the dot-separated numeric version in $1 is >= the one in $2.
+  awk -v current="$1" -v required="$2" 'BEGIN {
+    nc = split(current, cur, ".")
+    nr = split(required, req, ".")
+    total = (nc > nr) ? nc : nr
+    for (i = 1; i <= total; i++) {
+      c = (i <= nc) ? cur[i] + 0 : 0
+      r = (i <= nr) ? req[i] + 0 : 0
+      if (c != r) {
+        exit (c < r) ? 1 : 0
+      }
+    }
+    exit 0
+  }'
+)
+
+installed_version() (
+  # Print the first version-looking token from "$1 --version" (e.g. "1.4.1",
+  # "cargo 1.88.0 (...)").
+  "$1" --version 2>/dev/null | awk '{
+    for (i = 1; i <= NF; i++) {
+      if ($i ~ /^[0-9]+(\.[0-9]+)+([-+][A-Za-z0-9.-]+)?$/) {
+        print $i
+        exit
+      }
+    }
+  }'
+)
+
+require_version() {
+  tool_name=$1
+  required_version=$2
+  install_hint=$3
+
+  if ! command -v "$tool_name" >/dev/null 2>&1; then
+    echo "error: $tool_name was not found in PATH; Loop requires $tool_name >= $required_version." >&2
+    echo "       Install: $install_hint" >&2
+    exit 1
+  fi
+
+  found_version=$(installed_version "$tool_name")
+  if [ -z "$found_version" ]; then
+    echo "error: could not read a version from '$tool_name --version'; Loop requires $tool_name >= $required_version." >&2
+    echo "       Install: $install_hint" >&2
+    exit 1
+  fi
+
+  if ! version_ge "$found_version" "$required_version"; then
+    echo "error: $tool_name $found_version is too old; Loop requires >= $required_version." >&2
+    echo "       Install: $install_hint" >&2
+    exit 1
+  fi
+}
+
+require_version bun 1.4.1 "https://bun.sh (curl -fsSL https://bun.sh/install | bash, or your package manager)"
+require_version cargo 1.88 "https://rustup.rs (rustup keeps cargo and rustc current)"
+require_version rustc 1.88 "https://rustup.rs (rustup update stable)"
+
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 user_home=${HOME:?HOME is required}
 bin_dir=${LOOP_INSTALL_BIN_DIR:-"$user_home/.local/bin"}
