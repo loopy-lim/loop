@@ -72,6 +72,27 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
       else io.stdout(formatModelList(config.models, config.output));
       return 0;
     }
+    if (parsed.command === "cleanup") {
+      const runId = parsed.operands[0] ?? "";
+      const config = configuration(parsed);
+      const protocol = await loadProtocol();
+      await protocol.rustra.ready();
+
+      const input = {
+        databasePath: config.databasePath,
+        runId,
+        keepRecent: parsed.keep ?? 10,
+        dryRun: parsed.dryRun,
+      };
+      const result = await protocol.cleanupRun(input);
+
+      if (parsed.json) {
+        io.stdout(`${JSON.stringify(result)}\n`);
+      } else {
+        io.stdout(formatCleanupSnapshot(result, config.output, parsed.dryRun));
+      }
+      return 0;
+    }
     if (parsed.command === "runs") {
       const config = configuration(parsed);
       const protocol = await loadProtocol();
@@ -204,6 +225,9 @@ interface ParsedArguments {
   detach: boolean;
   auth: boolean;
   help: boolean;
+  execute: boolean;
+  dryRun: boolean;
+  keep?: number;
 }
 
 function parse(argv: string[]): ParsedArguments {
@@ -215,6 +239,9 @@ function parse(argv: string[]): ParsedArguments {
   let detach = false;
   let auth = false;
   let helpRequested = false;
+  let execute = false;
+  let dryRun = true;
+  let keep: number | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index]!;
     if (argument === "--help" || argument === "-h") {
@@ -227,6 +254,18 @@ function parse(argv: string[]): ParsedArguments {
       detach = true;
     } else if (argument === "--auth") {
       auth = true;
+    } else if (argument === "--execute") {
+      execute = true;
+      dryRun = false;
+    } else if (argument === "--dry-run") {
+      dryRun = true;
+      execute = false;
+    } else if (argument === "--keep") {
+      const value = argv[index + 1];
+      if (!value) throw new UsageError(`${argument} requires a value`);
+      keep = parseInt(value, 10);
+      if (isNaN(keep)) throw new UsageError(`${argument} must be a number`);
+      index += 1;
     } else if (argument === "--config" || argument === "--database") {
       const value = argv[index + 1];
       if (!value) throw new UsageError(`${argument} requires a value`);
@@ -249,6 +288,9 @@ function parse(argv: string[]): ParsedArguments {
     detach,
     auth,
     help: helpRequested,
+    execute,
+    dryRun,
+    keep,
   };
 }
 
@@ -405,6 +447,31 @@ function prepareBridgeEnvironment(): void {
 
 export function formatSnapshot(command: string, snapshot: SnapshotOutput, limits: OutputLimits): string {
   return renderSnapshot(command, snapshot, limits).replace("Next: /loop", "Next: loop") + "\n";
+}
+
+export function formatCleanupSnapshot(
+  snapshot: import("@loop/protocol").CleanupRunOutput,
+  limits: OutputLimits,
+  dryRun: boolean,
+): string {
+  const prefix = dryRun ? "[DRY RUN] " : "";
+  const lines = [
+    `${prefix}Cleanup Report`,
+    `Removed: ${snapshot.removedArtifacts.length}`,
+    `Skipped: ${snapshot.skippedArtifacts.length}`,
+  ];
+  if (snapshot.removedArtifacts.length > 0) {
+    lines.push(...snapshot.removedArtifacts.map(a => `- ${a}`));
+  }
+  if (snapshot.skippedArtifacts.length > 0) {
+    lines.push(...snapshot.skippedArtifacts.map(a => `! ${a.artifact} (${a.reason})`));
+  }
+
+  return `${compactLines(lines, {
+    lineLimit: limits.statusLineLimit,
+    lineTextLimit: limits.lineTextLimit,
+    overflow: (omitted) => `… ${omitted} more lines`,
+  }).join("\n")}\n`;
 }
 
 export function formatModelList(
@@ -624,6 +691,7 @@ Usage:
   loop task <run-id> <task-id>       Show context, results and verification evidence
   loop steer <run-id> <task-id|all> <message>
   loop resolve <run-id> <attention-id> <approved|retry|cancel|answer>
+  loop cleanup [run-id] [--execute] [--keep <N>]
   loop run <intent>                 Start the interactive Loop agent with an initial request
   loop verify-install [--json]      Run the offline fake-provider acceptance
 
@@ -632,6 +700,9 @@ Options:
   --database <path>                 SQLite database path
   --json                            Machine-readable output
   --auth                            Check native auth stores without exposing credentials
+  --execute                         Actually delete artifacts (cleanup command)
+  --dry-run                         Preview deletion without executing (default for cleanup)
+  --keep <N>                        Keep the most recent <N> artifacts (default: 10)
 `;
 }
 

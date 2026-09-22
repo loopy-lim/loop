@@ -66,6 +66,16 @@ Configuration never contains secret values. Put credentials in environment varia
 - An open attention item pauses new claims until it is resolved.
 - Persisted `Running` is never trusted without live worker reconciliation.
 
+## Cleanup and retention
+
+Loop does not automatically purge run data or workspaces to prevent unintended data loss.
+- You must explicitly run `loop cleanup` to remove terminal (completed/failed/cancelled) runs and their merged workspaces.
+- By default, `loop cleanup` runs in `--dry-run` mode, printing a plan of what would be removed.
+- To execute the deletion, use `loop cleanup --execute`.
+- By default, it retains the most recent 10 runs (configurable via `--keep N`).
+- Alternatively, you can target a specific run with `loop cleanup <run-id> --execute`.
+- Active runs or runs requiring attention will never be deleted. Unmerged or dirty workspaces are also skipped and require manual attention.
+
 See `docs/architecture.md`, `docs/model-routing.md`, and `docs/provider-support.md` for the three implementation seams.
 
 실행 관찰, 일시정지·재개, 지침 전달, 화면 종료 후 지속 실행은 [실행 제어 안내](docs/reliable-runs.md)를 참고하세요.
