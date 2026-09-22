@@ -1,4 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import type { ProviderEvent } from "../types";
+import { redactProviderText } from "../redact";
 
 /**
  * Persistent agy stream-json driver (in-house, learned from
@@ -57,6 +59,7 @@ export class AgyStreamDriver {
   #closed = false;
   #cancelling = false;
   #queue: Promise<unknown> = Promise.resolve();
+  readonly #listeners = new Set<(event: ProviderEvent) => void>();
   readonly #closedPromise: Promise<void>;
   readonly #resolveClosed: () => void;
 
@@ -74,7 +77,11 @@ export class AgyStreamDriver {
     child.stdout?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => this.#onStdout(chunk));
     child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk: string) => this.#onLog(`stderr: ${chunk.slice(0, 200)}`));
+    child.stderr?.on("data", (chunk: string) => {
+      const text = redactProviderText(chunk);
+      this.#onLog(`stderr: ${text.slice(0, 200)}`);
+      this.#emit({ type: "output", stream: "stderr", text });
+    });
     child.on("error", (error: Error) => {
       this.#closed = true;
       this.#failAll(`agy driver process error: ${error.message}`);
@@ -124,6 +131,15 @@ export class AgyStreamDriver {
 
   get running(): boolean {
     return !this.#closed && this.#child.exitCode === null && !this.#child.killed;
+  }
+
+  subscribe(listener: (event: ProviderEvent) => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  #emit(event: ProviderEvent): void {
+    for (const listener of this.#listeners) listener(event);
   }
 
   /** Serialized: turns run one at a time against the single agy process. */
@@ -233,7 +249,10 @@ export class AgyStreamDriver {
     }
     if (type === "step_update" && this.#pending) {
       const delta = event.step_update?.text_delta;
-      if (typeof delta === "string") this.#pending.response += delta;
+      if (typeof delta === "string") {
+        this.#pending.response += delta;
+        this.#emit({ type: "output", stream: "stdout", text: redactProviderText(delta) });
+      }
       return;
     }
     if (type === "result" && this.#pending) {

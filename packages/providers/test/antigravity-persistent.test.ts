@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 
 import { AgyStreamDriver } from "../src/antigravity/driver";
 import { AgyPersistentProvider } from "../src/antigravity/persistent";
-import type { StartWorkerInput } from "../src/types";
+import type { StartWorkerInput, ProviderEvent } from "../src/types";
 
 interface FakeOut extends EventEmitter {
   setEncoding(): void;
@@ -183,6 +183,44 @@ describe("AgyStreamDriver", () => {
 });
 
 describe("AgyPersistentProvider", () => {
+  test("streams redacted activity before the turn completes and unsubscribes", async () => {
+    const { child } = fakeChild();
+    const driver = AgyStreamDriver.start({ cwd: "/project", spawnProcess: spawnScript(child), turnTimeoutMs: 5000 });
+    const provider = new AgyPersistentProvider({ id: "agy-progress", cwd: "/project", driverFactory: () => driver });
+    const handle = await provider.start(input);
+    const events: ProviderEvent[] = [];
+    const unsubscribe = provider.subscribe(handle.id, event => events.push(event));
+    try {
+      child.stdout.emit("data", JSON.stringify({ event: "step_update", step_update: { text_delta: "Checking graph dependencies" } }) + "\n");
+      child.stderr.emit("data", "Authorization: Bearer provider-secret\nretrying transport");
+      expect(events).toContainEqual({ type: "output", stream: "stdout", text: "Checking graph dependencies" });
+      expect(JSON.stringify(events)).toContain("retrying transport");
+      expect(JSON.stringify(events)).not.toContain("provider-secret");
+      expect(await provider.status(handle.id)).toBe("running");
+      const count = events.length;
+      unsubscribe();
+      child.stdout.emit("data", JSON.stringify({ event: "step_update", step_update: { text_delta: "more work" } }) + "\n");
+      expect(events).toHaveLength(count);
+    } finally {
+      child.stdout.emit("data", JSON.stringify({ event: "result", result: { status: "SUCCESS", response: "done" } }) + "\n");
+      await provider.result(handle.id);
+      await provider.release(handle.id);
+    }
+  });
+
+  test("a timed-out turn reports failure and releases its process before reuse", async () => {
+    const { child } = fakeChild();
+    const driver = AgyStreamDriver.start({ cwd: "/project", spawnProcess: spawnScript(child), turnTimeoutMs: 20 });
+    const provider = new AgyPersistentProvider({ id: "agy-timeout", cwd: "/project", driverFactory: () => driver });
+    const handle = await provider.start(input);
+    const result = await provider.result(handle.id);
+    await provider.release(handle.id);
+    expect(result.success).toBe(false);
+    expect(result.failure?.kind).toBe("timeout");
+    expect(driver.running).toBe(false);
+    await expect(provider.status(handle.id)).rejects.toThrow("unknown worker");
+  });
+
   test("start returns a resumable handle and folds the turn into a result", async () => {
     const turns: string[] = [];
     const driver = {

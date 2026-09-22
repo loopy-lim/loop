@@ -181,11 +181,9 @@ export class AgyPersistentProvider implements AgentProvider {
   }
 
   subscribe(workerId: string, listener: (event: ProviderEvent) => void): () => void {
-    // Events are folded into the terminal result for now; the driver's
-    // activity stream can be surfaced here when a consumer needs progress.
-    void workerId;
-    void listener;
-    return () => undefined;
+    const session = this.#session(workerId);
+    if (!session) throw new Error(`unknown worker: ${workerId}`);
+    return session.driver.subscribe(listener);
   }
 
   /** Gracefully end every live agy process owned by this provider. */

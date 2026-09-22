@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 import {
   HerdrLifecycleReporter,
@@ -16,6 +19,21 @@ function insideHerdr(overrides: Record<string, string> = {}) {
 }
 
 describe("HerdrLifecycleReporter", () => {
+  test("a stalled Herdr status report cannot block the Pi agent_end hook", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "loop-herdr-report-"));
+    const command = join(directory, "herdr-fixture");
+    const lateReply = join(directory, "late-reply");
+    writeFileSync(command, `#!/usr/bin/env bun\nsetTimeout(() => { require('node:fs').writeFileSync(${JSON.stringify(lateReply)}, 'late'); }, 400);\n`);
+    chmodSync(command, 0o755);
+    try {
+      const reporter = new HerdrLifecycleReporter({ environment: insideHerdr({ HERDR_BIN_PATH: command }), timeoutMs: 60 });
+      const handlers = new Map<string, () => Promise<void> | void>();
+      registerHerdrLifecycle({ on: (event, handler) => { handlers.set(event, handler); } }, reporter);
+      await handlers.get("agent_end")!();
+      expect(existsSync(lateReply)).toBe(false);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+
   test("makes no calls outside Herdr", async () => {
     const calls: string[][] = [];
     const reporter = new HerdrLifecycleReporter({

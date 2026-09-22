@@ -161,9 +161,11 @@ export class HerdrAgentProvider implements AgentProvider {
 
   async #wait(session: Session): Promise<WorkerResult> {
     const startDeadline = Date.now() + this.#startGraceMs;
+    let observedWorking = false;
     for (;;) {
       const observed = await this.#runtime.status(session.handle);
       if (observed === "running") {
+        observedWorking = true;
         await delay(this.#pollIntervalMs);
         continue;
       }
@@ -177,7 +179,7 @@ export class HerdrAgentProvider implements AgentProvider {
           failure: { kind: "cancelled", retryable: false },
         };
       }
-      if (observed === "idle") {
+      if (observed === "idle" && !observedWorking) {
         if (Date.now() < startDeadline) {
           await delay(this.#pollIntervalMs);
           continue;
@@ -191,7 +193,9 @@ export class HerdrAgentProvider implements AgentProvider {
           failure: { kind: "incomplete_output", retryable: true },
         };
       }
-      if (observed === "completed") {
+      // Pi reports idle on agent_end. Only accept that transition after this
+      // newly created worker was actually observed working on the prompt.
+      if (observed === "completed" || (observed === "idle" && observedWorking)) {
         session.status = "completed";
         const summary = (await this.#runtime.read(session.handle)).trim();
         this.#emit(session, { type: "lifecycle", status: "completed" });

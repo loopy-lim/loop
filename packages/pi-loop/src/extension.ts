@@ -319,6 +319,13 @@ export function runLoopPlan(input: {
     let settled = false;
     let ownerObserved = false;
     let disconnectRequested = false;
+    let stopTimer: ReturnType<typeof setTimeout> | undefined;
+    const stopObserver = () => {
+      if (child.exitCode !== null || child.signalCode !== null || stopTimer) return;
+      child.kill("SIGTERM");
+      stopTimer = setTimeout(() => child.kill("SIGKILL"), 1000);
+      stopTimer.unref();
+    };
     const runningSummary = (): RunSummary => ({
       status: "running",
       tasks: input.tasks.length,
@@ -346,7 +353,7 @@ export function runLoopPlan(input: {
         disconnectRequested = true;
         return;
       }
-      child.kill("SIGTERM");
+      stopObserver();
       succeed(runningSummary());
     };
     child.stdout.setEncoding("utf8");
@@ -368,10 +375,14 @@ export function runLoopPlan(input: {
           if (event.type === "summary") {
             ownerObserved = true;
             summary = normalizeRunSummary(event.value, input.tasks.length);
+            // A durable summary completes the tool protocol. Native handles or
+            // inherited pipes must not keep Pi waiting for the observer's exit.
+            succeed(summary);
+            stopObserver();
           }
           if (disconnectRequested && ownerObserved) disconnectObserver();
         } catch {
-          child.kill("SIGTERM");
+          stopObserver();
           fail(new Error("Loop returned invalid progress JSON"));
         }
       }
@@ -379,6 +390,7 @@ export function runLoopPlan(input: {
     child.stderr.on("data", (chunk: string) => (stderr += chunk));
     child.on("error", fail);
     child.on("close", (code) => {
+      if (stopTimer) clearTimeout(stopTimer);
       if (settled) return;
       if (code === 0 && summary) succeed(summary);
       else fail(new Error((stderr || `Loop exited ${code} without a summary`).slice(-4_000)));

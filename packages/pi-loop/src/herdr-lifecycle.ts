@@ -31,6 +31,7 @@ export interface HerdrLifecycleOptions {
   runner?: (args: string[]) => Promise<void>;
   source?: string;
   agent?: string;
+  timeoutMs?: number;
 }
 
 interface LifecycleCore {
@@ -42,6 +43,7 @@ interface LifecycleCore {
 export class HerdrLifecycleReporter implements HerdrLifecycleSink {
   readonly #core: LifecycleCore | undefined;
   readonly #runner: ((args: string[]) => Promise<void>) | undefined;
+  readonly #timeoutMs: number;
 
   constructor(options: HerdrLifecycleOptions = {}) {
     const env = options.environment ?? process.env;
@@ -51,6 +53,7 @@ export class HerdrLifecycleReporter implements HerdrLifecycleSink {
     const agent = options.agent ?? "loop";
     let sequence = 0;
     this.#runner = options.runner;
+    this.#timeoutMs = options.timeoutMs ?? 2_000;
 
     const activePane = env.HERDR_ENV && pane ? pane : undefined;
     this.#core = activePane
@@ -117,18 +120,21 @@ export class HerdrLifecycleReporter implements HerdrLifecycleSink {
       await this.#runner(args);
       return;
     }
-    await HerdrLifecycleReporter.spawn(args);
+    await HerdrLifecycleReporter.spawn(args, this.#timeoutMs);
   }
 
-  private static spawn(args: string[]): Promise<void> {
+  private static spawn(args: string[], timeoutMs: number): Promise<void> {
     return new Promise((resolve) => {
       // argv-only spawn: never a shell, failures are non-fatal to the Lead UI.
       const child = spawn(args[0], args.slice(1), {
         stdio: "ignore",
         shell: false,
       });
-      child.on("error", () => resolve());
-      child.on("close", () => resolve());
+      // Status reporting is optional telemetry, not a gate on Pi's next turn.
+      const deadline = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+      const finish = () => { clearTimeout(deadline); resolve(); };
+      child.on("error", finish);
+      child.on("close", finish);
     });
   }
 }

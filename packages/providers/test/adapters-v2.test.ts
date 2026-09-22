@@ -453,6 +453,24 @@ test("Herdr idle state cannot turn stale pane text into a successful result", as
   expect(reads).toBe(0);
 });
 
+test("Pi returning from working to idle completes the observed Herdr turn", async () => {
+  let polls = 0;
+  const runner: HerdrRunner = {
+    async run(_command, args) {
+      if (args[0] === "workspace") return ok({ result: { workspace: { workspace_id: "workspace-1" }, root_pane: { pane_id: "workspace-1:p1" } } });
+      if (args[0] === "tab" && args[1] === "create") return ok({ result: { tab: { tab_id: "workspace-1:t2" }, root_pane: { pane_id: "workspace-1:p2" } } });
+      if (args[0] === "agent" && args[1] === "get") return ok({ result: { agent: { agent_status: polls++ === 0 ? "working" : "idle" } } });
+      if (args[0] === "agent" && args[1] === "read") return { exitCode: 0, stdout: "Pi finished the requested work", stderr: "" };
+      return ok({ result: {} });
+    },
+  };
+  const provider = new HerdrAgentProvider({ id: "pi-visible", runtime: new HerdrWorkerRuntime({ runner }), kind: "pi", projectRoot: "/project", computeClasses: ["fast"], pollIntervalMs: 0, startGraceMs: 10 });
+  const handle = await provider.start(input);
+  try {
+    expect(await provider.result(handle.id)).toMatchObject({ success: true, summary: "Pi finished the requested work" });
+  } finally { await provider.release(handle.id); }
+});
+
 test("Herdr cancellation waits for the active turn and release closes only the worker tab", async () => {
   const calls: string[][] = [];
   let observedStatus = "working";

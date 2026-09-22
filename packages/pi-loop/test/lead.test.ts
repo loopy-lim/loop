@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -267,6 +267,32 @@ test("observer abort resolves a running summary instead of a false failure", asy
   } finally {
     if (previous === undefined) delete process.env.LOOP_BIN;
     else process.env.LOOP_BIN = previous;
+  }
+});
+
+test("terminal summary returns to Pi even when the observer process stays alive", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "loop-observer-completed-"));
+  const executable = join(directory, "fake-loop");
+  writeFileSync(executable, [
+    "#!/usr/bin/env bun",
+    "process.stdin.resume();",
+    "console.log(JSON.stringify({ type: 'snapshot', value: { state: 'completed' } }));",
+    "console.log(JSON.stringify({ type: 'summary', value: { status: 'completed', tasks: 1 } }));",
+    "setInterval(() => {}, 1000);",
+  ].join("\n"));
+  chmodSync(executable, 0o755);
+  const previous = process.env.LOOP_BIN;
+  process.env.LOOP_BIN = executable;
+  const controller = new AbortController();
+  try {
+    const pending = runLoopPlan({ intent: "Complete", tasks: [task("impl", "implementation", [], ["src/**"])], runId: "completed-run", cwd: directory, signal: controller.signal });
+    const result = await Promise.race([pending, Bun.sleep(300).then(() => ({ status: "still-waiting" }))]);
+    expect(result.status).toBe("completed");
+  } finally {
+    controller.abort();
+    if (previous === undefined) delete process.env.LOOP_BIN;
+    else process.env.LOOP_BIN = previous;
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 

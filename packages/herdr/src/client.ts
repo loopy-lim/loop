@@ -39,6 +39,14 @@ interface WorkspaceRef {
 }
 
 export class NodeHerdrRunner implements HerdrRunner {
+  readonly #timeoutMs: number;
+  readonly #cancelGraceMs: number;
+
+  constructor(options: { timeoutMs?: number; cancelGraceMs?: number } = {}) {
+    this.#timeoutMs = options.timeoutMs ?? 15_000;
+    this.#cancelGraceMs = options.cancelGraceMs ?? 1_000;
+  }
+
   async run(command: string, args: string[]): Promise<HerdrResult> {
     return await new Promise((resolve) => {
       const child = spawn(command, args, {
@@ -47,6 +55,18 @@ export class NodeHerdrRunner implements HerdrRunner {
       });
       let stdout = "";
       let stderr = "";
+      let timedOut = false;
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+        killTimer = setTimeout(() => child.kill("SIGKILL"), this.#cancelGraceMs);
+      }, this.#timeoutMs);
+      const finish = (result: HerdrResult) => {
+        clearTimeout(deadline);
+        if (killTimer) clearTimeout(killTimer);
+        resolve(result);
+      };
       child.stdout.setEncoding("utf8");
       child.stderr.setEncoding("utf8");
       child.stdout.on("data", (chunk: string) => {
@@ -56,10 +76,11 @@ export class NodeHerdrRunner implements HerdrRunner {
         stderr += chunk;
       });
       child.on("error", (error) => {
-        resolve({ exitCode: 1, stdout, stderr: stderr || error.message });
+        finish({ exitCode: 1, stdout, stderr: stderr || error.message });
       });
       child.on("close", (code) => {
-        resolve({ exitCode: code ?? 1, stdout, stderr });
+        finish({ exitCode: timedOut ? 124 : code ?? 1, stdout,
+          stderr: timedOut ? `Herdr command timed out after ${this.#timeoutMs}ms${stderr ? `: ${stderr}` : ""}` : stderr });
       });
     });
   }
