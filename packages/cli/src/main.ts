@@ -55,6 +55,11 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
 
   try {
     if (!parsed.command) {
+      if (!process.env.HERDR_ENV) {
+        io.stderr(
+          "Notice: no active Herdr workspace detected; continuing without Herdr run reporting. Run 'herdr' first, or start 'loop' inside an existing Herdr pane.\n",
+        );
+      }
       return await startInteractiveLead(
         "",
         parsed,
@@ -356,8 +361,13 @@ async function doctor(
     await checkNativeAuthentication(config, checks, probe);
   }
 
-  if (json) io.stdout(`${JSON.stringify({ checks })}\n`);
-  else io.stdout(formatDoctorChecks(checks, config.output));
+  if (json) {
+    io.stdout(`${JSON.stringify({ checks })}\n`);
+  } else {
+    let output = formatDoctorChecks(checks, config.output);
+    if (!checkAuth) output += "Tip: Run 'loop doctor --auth' to verify provider credentials.\n";
+    io.stdout(output);
+  }
   return checks.every((check) => check.ok) ? 0 : 1;
 }
 

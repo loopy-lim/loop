@@ -50,7 +50,18 @@ herdr
 loop
 ```
 
-Start Herdr first, then run `loop` in a Herdr pane or use the `Open Loop Agent` plugin action. Bare `loop` opens the interactive Pi-backed Loop Lead in that same terminal; it never creates or attaches a Herdr workspace for itself. `loop run "Implement feature X"` opens the same Lead with an initial intent. The bundled Loop extension turns that intent into a validated DAG, invokes the private scheduler command, and reports the `loop` lifecycle to Herdr. `/loop status`, `/loop graph`, `/loop workers`, `/loop attention`, `/loop models`, `/loop cancel`, and `/loop resume` remain available inside the Lead.
+## Usage
+
+Loop reports run lifecycle to Herdr. Start Herdr first (`herdr`), then run `loop` inside an existing Herdr pane or use the `Open Loop Agent` plugin action for full reporting. Loop never creates or attaches a Herdr workspace for itself; outside Herdr it prints a notice and continues to the Lead without Herdr run reporting:
+
+`Notice: no active Herdr workspace detected; continuing without Herdr run reporting. Run 'herdr' first, or start 'loop' inside an existing Herdr pane.`
+
+- **`loop`** (bare): Opens the interactive Pi-backed Loop Lead in the current terminal to begin a session.
+- **`loop run "<intent>"`**: Opens the same Lead and immediately initializes it with the provided intent, allowing you to start a workflow in a single step.
+
+The bundled Loop extension turns that intent into a validated DAG, invokes the private scheduler command, and reports the `loop` lifecycle to Herdr. Inside the Lead, commands like `/loop status`, `/loop graph`, `/loop workers`, `/loop attention`, `/loop models`, `/loop cancel`, and `/loop resume` remain available.
+
+For run control — observing runs, pausing and resuming, steering tasks, and continuing after the terminal closes — see [docs/reliable-runs.md](reliable-runs.md).
 
 `loop doctor --auth` verifies the configured Pi Lead provider, Codex native login, and AGY native keyring through their own read-only CLI status commands. It never asks those CLIs to reveal a credential and never sends a model prompt. AGY workers remain Herdr-managed `agy` CLI processes; Loop does not store or forward an AGY key.
 
@@ -78,4 +89,4 @@ Loop does not automatically purge run data or workspaces to prevent unintended d
 
 See `docs/architecture.md`, `docs/model-routing.md`, and `docs/provider-support.md` for the three implementation seams.
 
-실행 관찰, 일시정지·재개, 지침 전달, 화면 종료 후 지속 실행은 [실행 제어 안내](docs/reliable-runs.md)를 참고하세요.
+실행 관찰, 일시정지·재개, 지침 전달, 화면 종료 후 지속 실행은 [실행 제어 안내](reliable-runs.md)를 참고하세요.
