@@ -131,7 +131,10 @@ export class HerdrAgentProvider implements AgentProvider {
   }
 
   async #wait(session: Session): Promise<WorkerResult> {
-    await this.#runtime.wait(session.handle);
+    // The prompt turn can reject even while the agent keeps working (e.g. the
+    // herdr CLI hiccups mid-wait); fall back to polling the agent state
+    // instead of failing the worker.
+    await this.#runtime.wait(session.handle).catch(() => undefined);
     while (session.status === "running") {
       const observed = await this.#runtime.status(session.handle);
       if (observed === "running") {

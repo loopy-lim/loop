@@ -9,6 +9,7 @@
   "dependencies": {
     "@loop/herdr": "workspace:*",
     "@loop/orchestrator": "workspace:*",
+    "@loop/presentation": "workspace:*",
     "@loop/protocol": "workspace:*",
     "@loop/providers": "workspace:*"
   }

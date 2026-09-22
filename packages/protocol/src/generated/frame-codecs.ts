@@ -162,7 +162,7 @@ function _pcDecodeF32(buf: Uint8Array, offset: number): { value: number; bytesRe
 
 import { createComplexCodec, createSchemaPostcardCodec } from '@rustra/types';
 import type { FrameCodec, RustraError, ComplexSchema } from '@rustra/types';
-import type { ActiveWorkerOutput, AddTaskInput, Array_of_EventOutput, AttentionKind, CheckResultInput, ClaimRunnableTasksInput, CleanupRunInput, CleanupRunOutput, CompletionCheckInput, ComputeClass, CreateRunInput, DecisionInput, EventOutput, OperationOutput, RequestAttentionInput, ResolveAttentionInput, RunInput, RunState, SkippedArtifactOutput, SnapshotOutput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskIdsOutput, TaskKind, TaskSnapshotOutput, TaskSpecInput, TaskState, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
+import type { ActiveWorkerOutput, AddTaskInput, Array_of_EventOutput, AttentionKind, CheckResultInput, ClaimRunnableTasksInput, CleanupRunInput, CleanupRunOutput, CompletionCheckInput, ComputeClass, CreateRunInput, DecisionInput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, EventOutput, OperationOutput, PolicyEvaluationOutput, RequestAttentionInput, ResolveAttentionInput, RunInput, RunState, SkippedArtifactOutput, SnapshotOutput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskIdsOutput, TaskKind, TaskSnapshotOutput, TaskSpecInput, TaskState, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
 
 export const addTaskCodec: FrameCodec<AddTaskInput, OperationOutput> = {
   commandId: 4,
@@ -684,6 +684,201 @@ export const createRunCodec: FrameCodec<CreateRunInput, SnapshotOutput> = {
       result.openAttentionIds = _arr;
     }
     return { ok: true, result: result as SnapshotOutput };
+  },
+};
+
+export const evaluateSurfaceRemovalCodec: FrameCodec<EvaluateSurfaceRemovalInput, PolicyEvaluationOutput> = {
+  commandId: 19,
+  execution: "sync",
+  syncFields: ["surfaceId","isOwnedByLoop"],
+
+  encode(args: EvaluateSurfaceRemovalInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(EvaluateSurfaceRemovalInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 19, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.surfaceId));
+    parts.push(new Uint8Array([args.isOwnedByLoop ? 1 : 0]));
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  encodeInto(args: EvaluateSurfaceRemovalInput, reuse?: Uint8Array): Uint8Array {
+    let out = reuse ?? new Uint8Array(64);
+    let w = 0;
+    const ensure = (need: number) => {
+      if (w + need <= out.length) return;
+      const grown = new Uint8Array(Math.max(out.length * 2, w + need));
+      grown.set(out.subarray(0, w));
+      out = grown;
+    };
+    ensure(2);
+    out[w++] = 19; out[w++] = 0;
+    { const _s = args.surfaceId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { ensure(1); out[w++] = args.isOwnedByLoop ? 1 : 0; }
+    return out.subarray(0, w);
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: PolicyEvaluationOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<PolicyEvaluationOutput> = {};
+    {
+      result.allowed = u8[offset] === 1;
+      offset += 1;
+    }
+    {
+      const _tag = u8[offset];
+      offset += 1;
+      if (_tag === 0) {
+        result.refusalCode = null;
+      } else {
+        {
+          const _v = _pcDecodeString(u8, offset);
+          result.refusalCode = _v.value;
+          offset += _v.bytesRead;
+        }
+      }
+    }
+    {
+      const _tag = u8[offset];
+      offset += 1;
+      if (_tag === 0) {
+        result.reason = null;
+      } else {
+        {
+          const _v = _pcDecodeString(u8, offset);
+          result.reason = _v.value;
+          offset += _v.bytesRead;
+        }
+      }
+    }
+    return { ok: true, result: result as PolicyEvaluationOutput };
+  },
+};
+
+export const evaluateWorktreeRemovalCodec: FrameCodec<EvaluateWorktreeRemovalInput, PolicyEvaluationOutput> = {
+  commandId: 18,
+  execution: "sync",
+
+  encode(args: EvaluateWorktreeRemovalInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(EvaluateWorktreeRemovalInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 18, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.projectRoot));
+    parts.push(_pcEncodeString(args.worktreePath));
+    parts.push(new Uint8Array([args.isMerged ? 1 : 0]));
+    parts.push(new Uint8Array([args.isClean ? 1 : 0]));
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  encodeInto(args: EvaluateWorktreeRemovalInput, reuse?: Uint8Array): Uint8Array {
+    let out = reuse ?? new Uint8Array(64);
+    let w = 0;
+    const ensure = (need: number) => {
+      if (w + need <= out.length) return;
+      const grown = new Uint8Array(Math.max(out.length * 2, w + need));
+      grown.set(out.subarray(0, w));
+      out = grown;
+    };
+    ensure(2);
+    out[w++] = 18; out[w++] = 0;
+    { const _s = args.projectRoot; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { const _s = args.worktreePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] &= 0x7f; out.set(_u, w); w += _u.length; }
+    { ensure(1); out[w++] = args.isMerged ? 1 : 0; }
+    { ensure(1); out[w++] = args.isClean ? 1 : 0; }
+    return out.subarray(0, w);
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: PolicyEvaluationOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<PolicyEvaluationOutput> = {};
+    {
+      result.allowed = u8[offset] === 1;
+      offset += 1;
+    }
+    {
+      const _tag = u8[offset];
+      offset += 1;
+      if (_tag === 0) {
+        result.refusalCode = null;
+      } else {
+        {
+          const _v = _pcDecodeString(u8, offset);
+          result.refusalCode = _v.value;
+          offset += _v.bytesRead;
+        }
+      }
+    }
+    {
+      const _tag = u8[offset];
+      offset += 1;
+      if (_tag === 0) {
+        result.reason = null;
+      } else {
+        {
+          const _v = _pcDecodeString(u8, offset);
+          result.reason = _v.value;
+          offset += _v.bytesRead;
+        }
+      }
+    }
+    return { ok: true, result: result as PolicyEvaluationOutput };
   },
 };
 

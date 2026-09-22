@@ -25,9 +25,15 @@ export interface HerdrWorkerRuntimeOptions {
   promptTimeoutMs?: number;
 }
 
+export interface CloseWorkspaceResult {
+  closed: boolean;
+  reason?: string;
+}
+
 interface WorkspaceRef {
   workspaceId: string;
   rootPaneId: string;
+  tabIds: Set<string>;
 }
 
 export class NodeHerdrRunner implements HerdrRunner {
@@ -92,9 +98,14 @@ export class HerdrWorkerRuntime {
       "--no-focus",
     ]);
     const paneId = requiredString(tab, ["result", "root_pane", "pane_id"]);
+    const tabId = requiredString(tab, ["result", "tab", "tab_id"]);
+    if (this.#workspaces.has(input.runId)) {
+      this.#workspaces.get(input.runId)!.tabIds.add(tabId);
+    }
     const handle: HerdrWorkerHandle = {
       workerId,
       workspaceId: parent.workspaceId,
+      tabId,
       paneId,
       taskId: input.taskId,
       ...(input.execution.type === "agent" ? { agentName: workerId } : {}),
@@ -104,7 +115,7 @@ export class HerdrWorkerRuntime {
       await this.#launch(handle, input.execution, input.prompt, input.waitForPrompt === true);
       return handle;
     } catch (error) {
-      await this.#run(["pane", "close", paneId]).catch(() => undefined);
+      await this.#run(["tab", "close", tabId]).catch(() => undefined);
       throw error;
     }
   }
@@ -126,8 +137,12 @@ export class HerdrWorkerRuntime {
       : await this.#run(["pane", "get", handle.paneId]);
     const state = optionalString(
       payload,
-      handle.agentName ? ["result", "agent", "state"] : ["result", "pane", "state"],
-    );
+      handle.agentName ? ["result", "agent", "agent_status"] : ["result", "pane", "agent_status"],
+    )
+      ?? optionalString(
+        payload,
+        handle.agentName ? ["result", "agent", "state"] : ["result", "pane", "state"],
+      );
     return mapState(state);
   }
 
@@ -136,8 +151,8 @@ export class HerdrWorkerRuntime {
     if (!Number.isInteger(lines) || lines < 1 || lines > 10_000) {
       throw new Error("lines must be an integer between 1 and 10000");
     }
-    const payload = handle.agentName
-      ? await this.#run([
+    const args = handle.agentName
+      ? [
           "agent",
           "read",
           handle.agentName,
@@ -145,9 +160,15 @@ export class HerdrWorkerRuntime {
           "recent-unwrapped",
           "--lines",
           String(lines),
-        ])
-      : await this.#run(["pane", "read", handle.paneId, "--lines", String(lines)]);
-    return optionalString(payload, ["result", "output"]) ?? "";
+        ]
+      : ["pane", "read", handle.paneId, "--lines", String(lines)];
+    // Unlike the other herdr verbs, `read` prints the raw pane text instead
+    // of the JSON envelope, so parse it as plain output.
+    const result = await this.#runner.run(this.#command, args);
+    if (result.exitCode !== 0) {
+      throw new Error(formatHerdrError(result));
+    }
+    return result.stdout;
   }
 
   async cancel(handle: HerdrWorkerHandle): Promise<void> {
@@ -161,8 +182,111 @@ export class HerdrWorkerRuntime {
 
   async cleanup(handle: HerdrWorkerHandle): Promise<void> {
     validateHandle(handle);
-    await this.#run(["pane", "close", handle.paneId]);
+    try {
+      await this.#run(["tab", "close", handle.tabId]);
+    } catch (error) {
+      if (!isAlreadyGone(error)) {
+        throw error;
+      }
+      // Already-gone surfaces count as cleaned.
+    }
     this.#turns.delete(handle.workerId);
+  }
+
+  async closeWorkspace(runId: string): Promise<CloseWorkspaceResult> {
+    const workspace = this.#workspaces.get(runId);
+    if (!workspace) {
+      try {
+        const listPayload = await this.#run(["workspace", "list"]);
+        const workspaces = optionalArray(listPayload, ["result", "workspaces"]) ?? [];
+        const found = workspaces.find((w) =>
+          typeof w === "object" && w !== null && "label" in w && (w as { label: unknown }).label === `loop-${runId}`
+        );
+        if (found && typeof found === "object" && "workspace_id" in found) {
+          const wsId = String((found as { workspace_id: unknown }).workspace_id);
+          return await this.#teardownWorkspace(runId, wsId, undefined, new Set());
+        }
+      } catch (error) {
+        if (isAlreadyGone(error)) {
+          return { closed: true, reason: "already_gone" };
+        }
+      }
+      return { closed: true, reason: "already_gone" };
+    }
+    return await this.#teardownWorkspace(runId, workspace.workspaceId, workspace.rootPaneId, workspace.tabIds);
+  }
+
+  async #teardownWorkspace(
+    runId: string,
+    workspaceId: string,
+    rootPaneId?: string,
+    tabIds: Set<string> = new Set(),
+  ): Promise<CloseWorkspaceResult> {
+    try {
+      await this.#run(["workspace", "close", workspaceId]);
+      this.#workspaces.delete(runId);
+      return { closed: true, reason: "workspace_closed" };
+    } catch (wsError) {
+      if (isAlreadyGone(wsError)) {
+        this.#workspaces.delete(runId);
+        return { closed: true, reason: "already_gone" };
+      }
+
+      // Tab-close fallback per docs/research/herdr-teardown-surface.md:
+      // Closing tabs in the workspace; closing the last tab cascades to workspace destruction.
+      try {
+        const tabListPayload = await this.#run(["tab", "list", "--workspace", workspaceId]);
+        const tabsFromList = optionalArray(tabListPayload, ["result", "tabs"]) ?? [];
+        const allTabIds = new Set<string>(tabIds);
+        for (const t of tabsFromList) {
+          if (typeof t === "object" && t !== null && "tab_id" in t && typeof t.tab_id === "string") {
+            allTabIds.add(t.tab_id);
+          }
+        }
+
+        if (allTabIds.size === 0 && rootPaneId) {
+          await this.#run(["pane", "close", rootPaneId]).catch((err) => {
+            if (!isAlreadyGone(err)) throw err;
+          });
+        } else {
+          for (const tabId of allTabIds) {
+            await this.#run(["tab", "close", tabId]).catch((err) => {
+              if (!isAlreadyGone(err)) throw err;
+            });
+          }
+        }
+        this.#workspaces.delete(runId);
+        return { closed: true, reason: "tabs_closed" };
+      } catch (tabError) {
+        if (isAlreadyGone(tabError)) {
+          this.#workspaces.delete(runId);
+          return { closed: true, reason: "already_gone" };
+        }
+        throw wsError;
+      }
+    }
+  }
+
+  /**
+   * Herdr can reject the first agent start while the freshly created pane is
+   * still initializing ("agent_pane_busy: ... is not an available shell").
+   * Retry briefly before giving up so a scheduler attempt is not burned.
+   */
+  async #startAgentWithRetry(args: string[], attempts = 3): Promise<unknown> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        return await this.#run(args);
+      } catch (error) {
+        lastError = error;
+        const message = error instanceof Error ? error.message : String(error);
+        if (!message.includes("agent_pane_busy") && !message.includes("not an available shell")) {
+          throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+      }
+    }
+    throw lastError;
   }
 
   async #launch(
@@ -182,18 +306,27 @@ export class HerdrWorkerRuntime {
         handle.paneId,
       ];
       if (execution.args.length > 0) args.push("--", ...execution.args);
-      await this.#run(args);
+      await this.#startAgentWithRetry(args);
       if (prompt.length > 0) {
         if (waitForPrompt) {
+          // The turn must never reject: herdr may fail the wait CLI after a
+          // timeout or a pane close (agent_not_running), and an unhandled
+          // rejection kills the whole orchestrator process. Polling in the
+          // provider is the source of truth for worker state.
           const turn = this.#run([
             "agent",
             "prompt",
             handle.workerId,
             prompt,
             "--wait",
+            "--until",
+            "done",
             "--timeout",
             String(this.#promptTimeoutMs),
-          ]).then(() => undefined);
+          ]).then(
+            () => undefined,
+            () => undefined,
+          );
           this.#turns.set(handle.workerId, turn);
         } else {
           await this.#run(["agent", "prompt", handle.workerId, prompt]);
@@ -218,9 +351,11 @@ export class HerdrWorkerRuntime {
       `loop-${input.runId}`,
       "--no-focus",
     ]);
-    const workspace = {
+    const rootTabId = optionalString(payload, ["result", "tab", "tab_id"]);
+    const workspace: WorkspaceRef = {
       workspaceId: requiredString(payload, ["result", "workspace", "workspace_id"]),
       rootPaneId: requiredString(payload, ["result", "root_pane", "pane_id"]),
+      tabIds: new Set<string>(rootTabId ? [rootTabId] : []),
     };
     this.#workspaces.set(input.runId, workspace);
     return { workspaceId: workspace.workspaceId, paneId: workspace.rootPaneId };
@@ -309,4 +444,24 @@ function redact(value: string): string {
   return value
     .replace(/(?:api[_-]?key|token|authorization)\s*[:=]\s*[^\s,}"']+/gi, "[credential]=[redacted]")
     .slice(0, 2_000);
+}
+
+function optionalArray(payload: unknown, path: string[]): unknown[] | undefined {
+  let value = payload;
+  for (const key of path) {
+    if (typeof value !== "object" || value === null || !(key in value)) return undefined;
+    value = (value as Record<string, unknown>)[key];
+  }
+  return Array.isArray(value) ? value : undefined;
+}
+
+function isAlreadyGone(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    message.includes("not_found") ||
+    message.includes("not_running") ||
+    message.includes("workspace_not_found") ||
+    message.includes("tab_not_found") ||
+    message.includes("pane_not_found")
+  );
 }

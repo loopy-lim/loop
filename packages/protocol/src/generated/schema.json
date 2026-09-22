@@ -493,6 +493,108 @@
       }
     },
     {
+      "name": "evaluateSurfaceRemoval",
+      "commandId": 19,
+      "inputType": "EvaluateSurfaceRemovalInput",
+      "outputType": "PolicyEvaluationOutput",
+      "inputSchema": {
+        "title": "EvaluateSurfaceRemovalInput",
+        "type": "object",
+        "required": [
+          "isOwnedByLoop",
+          "surfaceId"
+        ],
+        "properties": {
+          "surfaceId": {
+            "type": "string"
+          },
+          "isOwnedByLoop": {
+            "type": "boolean"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "PolicyEvaluationOutput",
+        "type": "object",
+        "required": [
+          "allowed"
+        ],
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "refusalCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "execution": "sync"
+    },
+    {
+      "name": "evaluateWorktreeRemoval",
+      "commandId": 18,
+      "inputType": "EvaluateWorktreeRemovalInput",
+      "outputType": "PolicyEvaluationOutput",
+      "inputSchema": {
+        "title": "EvaluateWorktreeRemovalInput",
+        "type": "object",
+        "required": [
+          "isClean",
+          "isMerged",
+          "projectRoot",
+          "worktreePath"
+        ],
+        "properties": {
+          "projectRoot": {
+            "type": "string"
+          },
+          "worktreePath": {
+            "type": "string"
+          },
+          "isMerged": {
+            "type": "boolean"
+          },
+          "isClean": {
+            "type": "boolean"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "PolicyEvaluationOutput",
+        "type": "object",
+        "required": [
+          "allowed"
+        ],
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "refusalCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "execution": "sync"
+    },
+    {
       "name": "getRun",
       "commandId": 2,
       "inputType": "RunInput",

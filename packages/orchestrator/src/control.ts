@@ -11,4 +11,7 @@ export type OrchestrationControl = Pick<
   | "cancelRun"
   | "resumeRun"
   | "subscribeEvent"
+  | "cleanupRun"
+  | "evaluateWorktreeRemoval"
+  | "evaluateSurfaceRemoval"
 >;

@@ -1,3 +1,5 @@
+import { compactLines, type OutputLimits, singleLine } from "@loop/presentation";
+
 export interface StageStatus {
   name: string;
   done: number;
@@ -12,21 +14,38 @@ export interface StatusView {
   attention: number;
 }
 
-export function renderStatus(view: StatusView): string {
+export function renderStatus(view: StatusView, limits: OutputLimits): string {
   const symbol = {
     done: "✓",
     working: "●",
     waiting: "○",
     failed: "!",
   } as const;
-  const stages = view.stages
-    .slice(0, 6)
-    .map((stage) => `${stage.name} ${stage.done}/${stage.total} ${symbol[stage.state]}`);
+  const runLine = `Run ${view.runId}`;
+  const workersLine = `Workers: ${view.workers} · Attention: ${view.attention}`;
+  const stageLines = view.stages.map((stage) =>
+    `${stage.name} ${stage.done}/${stage.total} ${symbol[stage.state]}`
+  );
+  if (limits.statusLineLimit < 3) {
+    return compactLines([runLine, ...stageLines, workersLine], {
+      lineLimit: limits.statusLineLimit,
+      lineTextLimit: limits.lineTextLimit,
+      overflow: (omitted) => `… ${omitted} more status lines`,
+    }).join("\n");
+  }
+  const stageBudget = limits.statusLineLimit - 2;
+  const stages = compactLines(
+    stageLines,
+    {
+      lineLimit: stageBudget,
+      lineTextLimit: limits.lineTextLimit,
+      overflow: (omitted) => `… ${omitted} more status lines`,
+    },
+  );
   return [
-    `Run ${view.runId}`,
+    singleLine(runLine, limits.lineTextLimit),
     ...stages,
-    `Workers: ${view.workers} · Attention: ${view.attention}`,
+    singleLine(workersLine, limits.lineTextLimit),
   ]
-    .slice(0, 8)
     .join("\n");
 }

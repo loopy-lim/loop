@@ -6,7 +6,7 @@
 // DO NOT EDIT — changes will be overwritten and fail codegen --check.
 // ────────────────────────────────────────────────────────────
 
-import { addTaskCodec, cancelRunCodec, claimRunnableTasksCodec, cleanupRunCodec, createRunCodec, getRunCodec, getSnapshotCodec, recordDecisionCodec, recordVerificationCodec, recordWorkerResultCodec, recordWorkerStartedCodec, requestAttentionCodec, resolveAttentionCodec, resumeRunCodec, submitPlanCodec, subscribeEventsCodec, updateTaskCodec } from './frame-codecs.js';
+import { addTaskCodec, cancelRunCodec, claimRunnableTasksCodec, cleanupRunCodec, createRunCodec, evaluateSurfaceRemovalCodec, evaluateWorktreeRemovalCodec, getRunCodec, getSnapshotCodec, recordDecisionCodec, recordVerificationCodec, recordWorkerResultCodec, recordWorkerStartedCodec, requestAttentionCodec, resolveAttentionCodec, resumeRunCodec, submitPlanCodec, subscribeEventsCodec, updateTaskCodec } from './frame-codecs.js';
 
 export const frameRegistry = new Map<string, import('@rustra/types').FrameCodec<any, any>>([
   // route: postcard
@@ -19,6 +19,10 @@ export const frameRegistry = new Map<string, import('@rustra/types').FrameCodec<
   ['cleanupRun', cleanupRunCodec],
   // route: postcard
   ['createRun', createRunCodec],
+  // route: postcard
+  ['evaluateSurfaceRemoval', evaluateSurfaceRemovalCodec],
+  // route: postcard
+  ['evaluateWorktreeRemoval', evaluateWorktreeRemovalCodec],
   // route: postcard
   ['getRun', getRunCodec],
   // route: postcard

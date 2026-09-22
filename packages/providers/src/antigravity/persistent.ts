@@ -85,7 +85,9 @@ export class AgyPersistentProvider implements AgentProvider {
   }
 
   async start(input: StartWorkerInput): Promise<WorkerHandle> {
-    const workerId = `${input.runId}:${input.taskId}`;
+    // Worker ids are globally unique in the store, so retries of the same
+    // task within one run need the attempt to avoid colliding.
+    const workerId = `${input.runId}:${input.taskId}:${input.attempt}`;
     const driver = this.#driverFactory({ cwd: this.#cwd, model: this.#model });
     const session: Session = {
       driver,
@@ -98,7 +100,7 @@ export class AgyPersistentProvider implements AgentProvider {
   }
 
   async resume(sessionId: string, input: ResumeWorkerInput): Promise<WorkerHandle> {
-    const workerId = `${input.runId}:${input.taskId}`;
+    const workerId = `${input.runId}:${input.taskId}:${input.attempt}`;
     const driver = this.#driverFactory({ cwd: this.#cwd, model: this.#model, conversationId: sessionId });
     const session: Session = {
       driver,

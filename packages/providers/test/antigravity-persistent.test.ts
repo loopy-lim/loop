@@ -154,7 +154,7 @@ describe("AgyPersistentProvider", () => {
       driverFactory: () => driver as never,
     });
     const handle = await provider.start(input);
-    expect(handle.id).toBe("run-1:task-1");
+    expect(handle.id).toBe("run-1:task-1:1");
     const result = await provider.result(handle.id);
     expect(result.success).toBe(true);
     expect(result.summary).toBe("done");

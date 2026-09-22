@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const root = resolve(import.meta.dir, "..");
 
@@ -20,4 +23,33 @@ test("the adjacent Pi extension bundle has no external runtime dependency", () =
   };
 
   expect(rootPackage.scripts["build:pi"]).not.toContain("--external typebox");
+});
+
+test("the Node-targeted Pi extension loads without Bun globals", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "loop-pi-node-bundle-"));
+  try {
+    const build = await Bun.build({
+      entrypoints: [resolve(root, "packages/pi-loop/src/extension.ts")],
+      naming: "loop-pi-extension.js",
+      outdir: directory,
+      target: "node",
+    });
+    expect(build.success).toBe(true);
+
+    const bundleUrl = pathToFileURL(join(directory, "loop-pi-extension.js")).href;
+    const probe = [
+      `const extension = await import(${JSON.stringify(bundleUrl)});`,
+      "const noop = () => {};",
+      "extension.default({ registerCommand: noop, registerTool: noop, on: noop });",
+    ].join("\n");
+    const loaded = spawnSync("node", ["--input-type=module", "-e", probe], {
+      encoding: "utf8",
+      env: { ...process.env, LOOP_CONFIG_DIR: resolve(root, "config") },
+    });
+
+    expect(loaded.stderr).toBe("");
+    expect(loaded.status).toBe(0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

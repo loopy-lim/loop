@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   registerLoopExtension,
@@ -6,9 +9,17 @@ import {
   type PiExtensionApi,
 } from "../src/extension";
 
+const limits = {
+  statusLineLimit: 8,
+  attentionLineLimit: 6,
+  findingsLineLimit: 5,
+  listLineLimit: 8,
+  lineTextLimit: 160,
+};
+
 test("natural-language Pi turns receive the Loop Lead contract", async () => {
   const host = fakePi();
-  registerLoopExtension(host.api, fakeBackend());
+  registerLoopExtension(host.api, fakeBackend(), undefined, limits);
 
   const hook = host.hooks.get("before_agent_start")!;
   const result = await hook(
@@ -45,7 +56,7 @@ test("loop_run validates the DAG and delegates execution to Loop", async () => {
       };
     },
   });
-  registerLoopExtension(host.api, backend);
+  registerLoopExtension(host.api, backend, undefined, limits);
 
   const tool = host.tools.get("loop_run")!;
   const result = await tool.execute(
@@ -68,6 +79,89 @@ test("loop_run validates the DAG and delegates execution to Loop", async () => {
   expect(calls).toHaveLength(1);
   expect(updates.some((update) => update.includes("State: active"))).toBe(true);
   expect(result.content[0]?.text).toContain("State: completed");
+});
+
+test("Pi updates, notify, tool result, and commands share injected output limits", async () => {
+  const host = fakePi();
+  const updates: string[] = [];
+  const notifications: string[] = [];
+  const customLimits = {
+    ...limits,
+    statusLineLimit: 3,
+    attentionLineLimit: 3,
+    listLineLimit: 3,
+  };
+  const snapshot = {
+    runId: "run-limited",
+    state: "active" as const,
+    tasks: Array.from({ length: 6 }, (_, index) => ({
+      id: `task-${index + 1}`,
+      title: `Task ${index + 1}`,
+      kind: "implementation" as const,
+      state: "ready" as const,
+      preferredCompute: "fast" as const,
+      workerId: null,
+      attempt: 0,
+      selectedCompute: null,
+    })),
+    activeWorkers: [],
+    openAttentionIds: [],
+  };
+  const backend = fakeBackend({
+    async run(input) {
+      input.onProgress?.(snapshot);
+      return {
+        status: "completed",
+        tasks: input.tasks.length,
+        escalations: [],
+        providersByTask: {},
+        startedAt: {},
+        finishedAt: {},
+      };
+    },
+    async snapshot() {
+      return snapshot;
+    },
+    async models() {
+      return Array.from({ length: 6 }, (_, index) => `fast · model-${index + 1}`);
+    },
+  });
+  registerLoopExtension(host.api, backend, undefined, customLimits);
+  const piContext = context(notifications);
+
+  const result = await host.tools.get("loop_run")!.execute(
+    "tool-limited",
+    {
+      intent: "Implement bounded output",
+      runId: "run\r\nlimited",
+      tasksJson: JSON.stringify([task("implementation", "implementation", [], ["src/**"])]),
+    },
+    new AbortController().signal,
+    (update: { content: Array<{ text: string }> }) => updates.push(update.content[0]?.text ?? ""),
+    piContext,
+  );
+  await host.commands.get("loop")!.handler("graph run-limited", piContext);
+  await host.commands.get("loop")!.handler("models", piContext);
+
+  expect(updates.every((value) => value.split("\n").length <= 3)).toBe(true);
+  expect(updates[0]?.split("\n")).toHaveLength(2);
+  expect(updates[0]).not.toMatch(/\r/);
+  expect(result.content[0]?.text.split("\n").length).toBeLessThanOrEqual(3);
+  expect(notifications[0]).toBe(result.content[0]?.text);
+  expect(notifications.every((value) => value.split("\n").length <= 3)).toBe(true);
+  expect(notifications.at(-2)?.split("\n").at(-1)).toBe("… 4 more tasks");
+  expect(notifications.at(-1)?.split("\n").at(-1)).toBe("… 4 more models");
+});
+
+test("Pi extension does not hide output configuration errors behind defaults", () => {
+  const previous = process.env.LOOP_CONFIG_DIR;
+  process.env.LOOP_CONFIG_DIR = join(mkdtempSync(join(tmpdir(), "loop-pi-config-error-")), "missing");
+  try {
+    expect(() => registerLoopExtension(fakePi().api, fakeBackend())).toThrow(/missing configuration file/);
+  } finally {
+    if (previous === undefined) delete process.env.LOOP_CONFIG_DIR;
+    else process.env.LOOP_CONFIG_DIR = previous;
+  }
 });
 
 function task(id: string, kind: string, dependencies: string[], writeScope: string[]) {
@@ -146,9 +240,9 @@ function fakeBackend(overrides: Partial<LoopLeadBackend> = {}): LoopLeadBackend 
   };
 }
 
-function context() {
+function context(notifications: string[] = []) {
   return {
     cwd: "/project",
-    ui: { notify() {} },
+    ui: { notify(message: string) { notifications.push(message); } },
   };
 }

@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { ComputeClass } from "@loop/protocol";
+import { parse as parseToml } from "smol-toml";
 
 export interface ModelProfile {
   id: string;
@@ -183,7 +184,7 @@ function readToml(path: string): Record<string, unknown> {
     throw new ConfigError("config.file_missing", `missing configuration file: ${path}`);
   }
   try {
-    return record(Bun.TOML.parse(readFileSync(path, "utf8")), path);
+    return record(parseToml(readFileSync(path, "utf8")), path);
   } catch (error) {
     if (error instanceof ConfigError) throw error;
     throw new ConfigError("config.parse_failed", `failed to parse ${path}: ${String(error)}`);

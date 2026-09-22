@@ -22,6 +22,7 @@ export interface HerdrWorkerInput {
 export interface HerdrWorkerHandle {
   workerId: string;
   workspaceId: string;
+  tabId: string;
   paneId: string;
   taskId: string;
   agentName?: string;

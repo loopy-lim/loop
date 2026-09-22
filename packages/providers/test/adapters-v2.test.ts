@@ -323,13 +323,14 @@ test("interactive provider delegates agent lifecycle to Herdr", async () => {
         });
       }
       if (args[0] === "tab" && args[1] === "create") {
-        return ok({ result: { root_pane: { pane_id: "workspace-1:p2" } } });
+        return ok({ result: { tab: { tab_id: "workspace-1:t2" }, root_pane: { pane_id: "workspace-1:p2" } } });
       }
       if (args[0] === "agent" && args[1] === "get") {
-        return ok({ result: { agent: { state: "done" } } });
+        return ok({ result: { agent: { agent_status: "done" } } });
       }
       if (args[0] === "agent" && args[1] === "read") {
-        return ok({ result: { output: "verified worker output" } });
+        // herdr `read` returns raw pane text, not JSON.
+        return { exitCode: 0, stdout: "verified worker output", stderr: "" };
       }
       return ok({ result: {} });
     },
@@ -358,6 +359,49 @@ test("interactive provider delegates agent lifecycle to Herdr", async () => {
     "workspace-write",
   ]));
   expect(calls.some((args) => args[0] === "agent" && args[1] === "prompt")).toBe(true);
+});
+
+test("prompt turn rejection falls back to polling instead of failing the worker", async () => {
+  const herdrRunner: HerdrRunner = {
+    async run(_command, args) {
+      if (args[0] === "workspace") {
+        return ok({
+          result: {
+            workspace: { workspace_id: "workspace-1" },
+            root_pane: { pane_id: "workspace-1:p1" },
+          },
+        });
+      }
+      if (args[0] === "tab" && args[1] === "create") {
+        return ok({ result: { tab: { tab_id: "workspace-1:t2" }, root_pane: { pane_id: "workspace-1:p2" } } });
+      }
+      if (args[0] === "agent" && args[1] === "prompt") {
+        // herdr exits 0 but prints non-JSON (observed in cleanup-support-r3).
+        return { exitCode: 0, stdout: "agent turn state lost", stderr: "" };
+      }
+      if (args[0] === "agent" && args[1] === "get") {
+        return ok({ result: { agent: { agent_status: "done" } } });
+      }
+      if (args[0] === "agent" && args[1] === "read") {
+        return { exitCode: 0, stdout: "work finished despite the hiccup", stderr: "" };
+      }
+      return ok({ result: {} });
+    },
+  };
+  const provider = new HerdrAgentProvider({
+    id: "resilient",
+    runtime: new HerdrWorkerRuntime({ runner: herdrRunner }),
+    kind: "pi",
+    projectRoot: "/project",
+    computeClasses: ["fast"],
+    pollIntervalMs: 0,
+  });
+
+  const handle = await provider.start(input);
+  expect(await provider.result(handle.id)).toMatchObject({
+    success: true,
+    summary: "work finished despite the hiccup",
+  });
 });
 
 function ok(value: unknown) {

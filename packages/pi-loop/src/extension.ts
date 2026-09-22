@@ -3,6 +3,8 @@ import { spawn } from "node:child_process";
 
 import { Type } from "typebox";
 import type { RunSummary } from "@loop/orchestrator";
+import { loadLoopConfig } from "@loop/orchestrator/config";
+import { type OutputLimits, singleLine } from "@loop/presentation";
 import type { SnapshotOutput, TaskSpecInput } from "@loop/protocol";
 
 import { validateDecomposition } from "./lead/decompose";
@@ -13,6 +15,9 @@ import {
   type HerdrLifecycleSink,
   type PiLifecycleEvent,
 } from "./herdr-lifecycle";
+import { renderModels } from "./ui/models";
+import { renderSnapshot } from "./ui/snapshot";
+import { renderLoopRunSummary } from "./ui/summary";
 
 interface PiContext {
   cwd: string;
@@ -77,6 +82,7 @@ export function registerLoopExtension(
   pi: PiExtensionApi,
   backend: LoopLeadBackend = new DefaultLoopLeadBackend(),
   lifecycle: HerdrLifecycleSink = new HerdrLifecycleReporter(),
+  limits: OutputLimits = loadLoopConfig().output,
 ): void {
   let currentRunId: string | undefined;
 
@@ -101,7 +107,10 @@ export function registerLoopExtension(
       const runId = params.runId?.trim() || `loop-${randomUUID()}`;
       const tasks = parseTasks(params.tasksJson);
       currentRunId = runId;
-      onUpdate?.(result(`Run ${runId}\nStarting ${tasks.length} tasks`, { runId }));
+      onUpdate?.(result([
+        singleLine(`Run ${runId}`, limits.lineTextLimit),
+        singleLine(`Starting ${tasks.length} tasks`, limits.lineTextLimit),
+      ].join("\n"), { runId }));
       const summary = await backend.run({
         intent: params.intent,
         tasks,
@@ -109,13 +118,13 @@ export function registerLoopExtension(
         cwd: context.cwd,
         signal,
         onProgress: (snapshot) => {
-          onUpdate?.(result(renderSnapshot("status", snapshot), {
+          onUpdate?.(result(renderSnapshot("status", snapshot, limits), {
             runId,
             state: snapshot.state,
           }));
         },
       });
-      const text = formatRunSummary(runId, summary);
+      const text = renderLoopRunSummary(runId, summary, limits);
       context.ui.notify(text, summary.status === "completed" ? "success" : "warning");
       return result(text, { runId, status: summary.status });
     },
@@ -127,7 +136,7 @@ export function registerLoopExtension(
       const [command = "status", requestedRunId] = rawArgs.trim().split(/\s+/).filter(Boolean);
       const runId = requestedRunId ?? currentRunId;
       if (command === "models") {
-        context.ui.notify((await backend.models(context.cwd)).join("\n") || "No models configured", "info");
+        context.ui.notify(renderModels(await backend.models(context.cwd), limits), "info");
         return;
       }
       if (!runId) {
@@ -139,7 +148,7 @@ export function registerLoopExtension(
         : command === "resume"
           ? await backend.resume(runId, context.cwd)
           : await backend.snapshot(runId, context.cwd);
-      const rendered = renderSnapshot(command, snapshot);
+      const rendered = renderSnapshot(command, snapshot, limits);
       context.ui.notify(rendered, snapshot.state === "attention" ? "warning" : "info");
     },
   });
@@ -298,37 +307,6 @@ function leadInstructions(intent: string): string {
     "Every task must declare dependencies, readScope, writeScope, requirements, preferredCompute, minimumCompute, maximumCompute, maxAttempts, and at least one machine-verifiable completionChecks entry.",
     "Research tasks may run in parallel. Decision and integration tasks must be serialized. Do not claim completion yourself; Loop verifies it.",
     decompositionPrompt(intent),
-  ].join("\n");
-}
-
-function formatRunSummary(runId: string, summary: RunSummary): string {
-  return [
-    `Run ${runId}`,
-    `State: ${summary.status}`,
-    `Tasks: ${summary.tasks}`,
-    `Escalations: ${summary.escalations.length}`,
-    summary.status === "completed" ? "Verification: passed" : "Verification: attention required",
-  ].join("\n");
-}
-
-function renderSnapshot(command: string, snapshot: SnapshotOutput): string {
-  if (command === "graph") {
-    return snapshot.tasks.slice(0, 7).map((task) => `${task.id} · ${task.state}`).join("\n");
-  }
-  if (command === "workers") {
-    return snapshot.activeWorkers.slice(0, 7).map((worker) => `${worker.id} · ${worker.taskId}`).join("\n")
-      || "No active workers";
-  }
-  if (command === "attention") {
-    return snapshot.openAttentionIds.slice(0, 5).join("\n") || "OK";
-  }
-  const done = snapshot.tasks.filter((task) => task.state === "done").length;
-  return [
-    `Run ${snapshot.runId}`,
-    `State: ${snapshot.state}`,
-    `Tasks: ${done}/${snapshot.tasks.length}`,
-    `Workers: ${snapshot.activeWorkers.length}`,
-    `Attention: ${snapshot.openAttentionIds.length}`,
   ].join("\n");
 }
 

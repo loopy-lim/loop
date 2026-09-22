@@ -15,7 +15,9 @@ escalation = ["deterministic", "typed_decision", "tiny", "fast", "balanced", "st
 missing_worker_state = "lost"
 require_live_confirmation = true
 
-[attention]
-maximum_findings = 5
+[output]
 status_line_limit = 8
 attention_line_limit = 6
+findings_line_limit = 5
+list_line_limit = 8
+line_text_limit = 160

@@ -10,6 +10,7 @@
   "dependencies": {
     "@loop/herdr": "workspace:*",
     "@loop/protocol": "workspace:*",
-    "@loop/providers": "workspace:*"
+    "@loop/providers": "workspace:*",
+    "smol-toml": "1.8.0"
   }
 }

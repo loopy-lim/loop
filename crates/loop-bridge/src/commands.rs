@@ -211,6 +211,27 @@ pub struct CleanupRunOutput {
     pub skipped_artifacts: Vec<SkippedArtifactOutput>,
 }
 
+#[bridge_type]
+pub struct EvaluateWorktreeRemovalInput {
+    pub project_root: String,
+    pub worktree_path: String,
+    pub is_merged: bool,
+    pub is_clean: bool,
+}
+
+#[bridge_type]
+pub struct PolicyEvaluationOutput {
+    pub allowed: bool,
+    pub refusal_code: Option<String>,
+    pub reason: Option<String>,
+}
+
+#[bridge_type]
+pub struct EvaluateSurfaceRemovalInput {
+    pub surface_id: String,
+    pub is_owned_by_loop: bool,
+}
+
 fn bridge_error(code: &'static str, error: impl std::fmt::Display) -> RustraError {
     RustraError::custom(code, error.to_string())
 }
@@ -604,6 +625,60 @@ pub fn cleanup_run(input: CleanupRunInput) -> Result<CleanupRunOutput> {
     }
 }
 
+#[command]
+pub fn evaluate_worktree_removal(
+    input: EvaluateWorktreeRemovalInput,
+) -> Result<PolicyEvaluationOutput> {
+    match loop_core::policy::evaluate_worktree_removal(
+        &input.project_root,
+        &input.worktree_path,
+        input.is_merged,
+        input.is_clean,
+    ) {
+        Ok(()) => Ok(PolicyEvaluationOutput {
+            allowed: true,
+            refusal_code: None,
+            reason: None,
+        }),
+        Err(refusal) => Ok(PolicyEvaluationOutput {
+            allowed: false,
+            refusal_code: Some(
+                serde_json::to_string(&refusal.code)
+                    .unwrap_or_default()
+                    .trim_matches('"')
+                    .to_string(),
+            ),
+            reason: Some(refusal.reason),
+        }),
+    }
+}
+
+#[command]
+pub fn evaluate_surface_removal(
+    input: EvaluateSurfaceRemovalInput,
+) -> Result<PolicyEvaluationOutput> {
+    match loop_core::policy::evaluate_surface_removal(
+        &input.surface_id,
+        input.is_owned_by_loop,
+    ) {
+        Ok(()) => Ok(PolicyEvaluationOutput {
+            allowed: true,
+            refusal_code: None,
+            reason: None,
+        }),
+        Err(refusal) => Ok(PolicyEvaluationOutput {
+            allowed: false,
+            refusal_code: Some(
+                serde_json::to_string(&refusal.code)
+                    .unwrap_or_default()
+                    .trim_matches('"')
+                    .to_string(),
+            ),
+            reason: Some(refusal.reason),
+        }),
+    }
+}
+
 fn append(path: &str, event: Event) -> Result<OperationOutput> {
     let mut store = store(path)?;
     append_and_notify(&mut store, &event, "event_append_failed")?;
@@ -774,7 +849,9 @@ pub fn loop_package() -> &'static Package {
             resume_run,
             get_snapshot,
             subscribe_events,
-            cleanup_run
+            cleanup_run,
+            evaluate_worktree_removal,
+            evaluate_surface_removal
         )
         .event::<RunChangedEvent>("loop.run_changed")
         .build();

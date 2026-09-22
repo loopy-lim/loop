@@ -6,7 +6,7 @@
 // DO NOT EDIT — changes will be overwritten and fail codegen --check.
 // ────────────────────────────────────────────────────────────
 
-import type { AddTaskInput, Array_of_EventOutput, ClaimRunnableTasksInput, CleanupRunInput, CleanupRunOutput, CreateRunInput, DecisionInput, OperationOutput, RequestAttentionInput, ResolveAttentionInput, RunInput, SnapshotOutput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskIdsOutput, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
+import type { AddTaskInput, Array_of_EventOutput, ClaimRunnableTasksInput, CleanupRunInput, CleanupRunOutput, CreateRunInput, DecisionInput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, OperationOutput, PolicyEvaluationOutput, RequestAttentionInput, ResolveAttentionInput, RunInput, SnapshotOutput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskIdsOutput, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
 import { createGeneratedFields2, invokeGenerated } from '@rustra/types';
 import type { InvokeOptions } from '@rustra/types';
 
@@ -28,6 +28,13 @@ export function cleanupRun(input: CleanupRunInput, options?: InvokeOptions): Pro
 cleanupRun.commandId = 'cleanupRun';
 
 export const createRun = createGeneratedFields2<CreateRunInput, SnapshotOutput>(1, 'createRun', "databasePath", "runId", 'createRun');
+
+export const evaluateSurfaceRemoval = createGeneratedFields2<EvaluateSurfaceRemovalInput, PolicyEvaluationOutput>(19, 'evaluateSurfaceRemoval', "surfaceId", "isOwnedByLoop", 'evaluateSurfaceRemoval');
+
+export function evaluateWorktreeRemoval(input: EvaluateWorktreeRemovalInput, options?: InvokeOptions): Promise<PolicyEvaluationOutput> {
+  return invokeGenerated<PolicyEvaluationOutput>(18, 'evaluateWorktreeRemoval', input, options);
+}
+evaluateWorktreeRemoval.commandId = 'evaluateWorktreeRemoval';
 
 export const getRun = createGeneratedFields2<RunInput, SnapshotOutput>(2, 'getRun', "databasePath", "runId", 'getRun');
 

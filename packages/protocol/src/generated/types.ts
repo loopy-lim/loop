@@ -123,6 +123,24 @@ export type SnapshotOutput = {
   openAttentionIds: string[];
 };
 
+export type EvaluateSurfaceRemovalInput = {
+  surfaceId: string;
+  isOwnedByLoop: boolean;
+};
+
+export type PolicyEvaluationOutput = {
+  allowed: boolean;
+  refusalCode?: string | null;
+  reason?: string | null;
+};
+
+export type EvaluateWorktreeRemovalInput = {
+  projectRoot: string;
+  worktreePath: string;
+  isMerged: boolean;
+  isClean: boolean;
+};
+
 export type DecisionInput = {
   databasePath: string;
   runId: string;

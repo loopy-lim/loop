@@ -1,10 +1,11 @@
+import type { HerdrWorkerRuntime } from "@loop/herdr";
 import type { SnapshotOutput, TaskSpecInput } from "@loop/protocol";
 import { onRustraEvent, type SubscribeFn } from "@loop/protocol";
 import type { ProviderRegistry } from "@loop/providers";
 
 import type { CompletionVerifier } from "./completion";
 import type { OrchestrationControl } from "./control";
-import { Orchestrator, type RunSummary } from "./coordinator";
+import { Orchestrator, type CleanupRunReport, type CleanupRunRequest, type RunSummary } from "./coordinator";
 
 export type ObservedWorkerState = "running" | "completed" | "lost" | "unknown";
 
@@ -19,6 +20,7 @@ export interface LoopRuntimeOptions {
   maxWorkers: number;
   maxFrontierWorkers?: number;
   completionVerifier?: CompletionVerifier;
+  herdr?: HerdrWorkerRuntime;
 }
 
 export interface StartRunInput {
@@ -42,6 +44,16 @@ export class LoopRuntime {
       maxWorkers: options.maxWorkers,
       maxFrontierWorkers: options.maxFrontierWorkers,
       completionVerifier: options.completionVerifier,
+      herdr: options.herdr,
+    });
+  }
+
+  cleanupRun(
+    request: Omit<CleanupRunRequest, "databasePath"> & { databasePath?: string },
+  ): Promise<CleanupRunReport> {
+    return this.#orchestrator.cleanupRun({
+      databasePath: request.databasePath ?? this.#databasePath,
+      ...request,
     });
   }
 

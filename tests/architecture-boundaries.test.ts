@@ -56,6 +56,16 @@ test("provider, Pi, SQLite, and generated protocol dependencies do not invert", 
     .filter((file) => /export (?:type|interface) TaskSpecInput/.test(readFileSync(file, "utf8")))
     .map((file) => relative(root, file));
   expect(taskTypeDefinitions).toEqual(["packages/protocol/src/generated/types.ts"]);
+
+  for (const file of tsFiles(join(root, "packages/presentation/src"))) {
+    const source = readFileSync(file, "utf8");
+    expect(source).not.toMatch(/@loop\/(providers|pi-loop|herdr)/);
+    expect(source).not.toMatch(/Provider|PiRuntime|Herdr/);
+  }
+
+  for (const file of rustFiles(join(root, "crates/loop-core/src"))) {
+    expect(readFileSync(file, "utf8")).not.toMatch(/OutputLimits|compactLines|line_text_limit/);
+  }
 });
 
 test("configuration keeps model names and provider endpoints out of business logic", () => {

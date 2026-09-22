@@ -22,6 +22,7 @@
       "dependencies": {
         "@loop/herdr": "workspace:*",
         "@loop/orchestrator": "workspace:*",
+        "@loop/presentation": "workspace:*",
         "@loop/protocol": "workspace:*",
         "@loop/providers": "workspace:*",
       },
@@ -37,6 +38,7 @@
         "@loop/herdr": "workspace:*",
         "@loop/protocol": "workspace:*",
         "@loop/providers": "workspace:*",
+        "smol-toml": "1.8.0",
       },
     },
     "packages/pi-loop": {
@@ -44,9 +46,14 @@
       "version": "0.1.0",
       "dependencies": {
         "@loop/orchestrator": "workspace:*",
+        "@loop/presentation": "workspace:*",
         "@loop/protocol": "workspace:*",
         "typebox": "1.3.27",
       },
+    },
+    "packages/presentation": {
+      "name": "@loop/presentation",
+      "version": "0.1.0",
     },
     "packages/protocol": {
       "name": "@loop/protocol",
@@ -72,6 +79,8 @@
     "@loop/orchestrator": ["@loop/orchestrator@workspace:packages/orchestrator"],
 
     "@loop/pi-loop": ["@loop/pi-loop@workspace:packages/pi-loop"],
+
+    "@loop/presentation": ["@loop/presentation@workspace:packages/presentation"],
 
     "@loop/protocol": ["@loop/protocol@workspace:packages/protocol"],
 
@@ -126,6 +135,8 @@
     "@typescript/typescript-win32-x64": ["@typescript/typescript-win32-x64@7.0.2", "", { "os": "win32", "cpu": "x64" }, "sha512-0BQ3HkAHHlKLSp1qRvf3SUhGpGsDuhB/jgFw75guyqbxJqEaS0Cw/VFO8i2nHglJUzQCRtMMR/IBAKE3ETMC4g=="],
 
     "bun-types": ["bun-types@1.4.2", "", { "dependencies": { "@types/node": "*" } }, "sha512-bxV1FgK7yBIzjRe5zBozIM4Bem11ZJcCXSrjWRG3YWLt8yFDePu4cLjpebO8OvPeIE9trbyPF4fuj3Cia4Fj3w=="],
+
+    "smol-toml": ["smol-toml@1.8.0", "", {}, "sha512-kCZr2V3ch9i00x8zXRhjUNVcjG9ijES5dDudkXvUVCT5QlJNQWElSJdZqyPemffHoLNUYwOcou0Fy+ojN0uHSQ=="],
 
     "typebox": ["typebox@1.3.27", "", {}, "sha512-zu+jc1pcy4UiNThxikUr36f0Rybk9PEeCg/NE6adeWr/SKsdNO4EzZHYRDlv2YCVAfj3Odq3dESSo/jNyoBXzA=="],
 

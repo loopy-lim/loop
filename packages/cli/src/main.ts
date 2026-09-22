@@ -10,6 +10,7 @@ import {
   loadLoopConfig,
   type LoopConfig,
 } from "@loop/orchestrator/config";
+import { compactLines, type OutputLimits } from "@loop/presentation";
 import type { TaskSpecInput } from "@loop/protocol";
 
 export interface CliIo {
@@ -34,6 +35,7 @@ export interface InteractiveLeadInvocation {
   command: string;
   args: string[];
   cwd: string;
+  configDirectory?: string;
 }
 
 const defaultIo: CliIo = {
@@ -64,7 +66,8 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
     }
     if (parsed.command === "models") {
       const config = configuration(parsed);
-      print(config.models, parsed.json, io);
+      if (parsed.json) print(config.models, true, io);
+      else io.stdout(formatModelList(config.models, config.output));
       return 0;
     }
     if (["status", "graph", "workers", "attention", "cancel", "resume"].includes(parsed.command)) {
@@ -80,7 +83,7 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
           ? await protocol.resumeRun(input).then(() => protocol.getSnapshot(input))
           : await protocol.getSnapshot(input);
       if (parsed.json) io.stdout(`${JSON.stringify(snapshot)}\n`);
-      else io.stdout(formatSnapshot(parsed.command, snapshot));
+      else io.stdout(formatSnapshot(parsed.command, snapshot, config.output));
       return 0;
     }
     if (parsed.command === "run") {
@@ -226,6 +229,7 @@ async function startInteractiveLead(
     cwd: process.cwd(),
     executablePath,
     environment: process.env,
+    configDirectory: config.configDirectory,
   }));
 }
 
@@ -266,13 +270,7 @@ async function doctor(
   }
 
   if (json) io.stdout(`${JSON.stringify({ checks })}\n`);
-  else {
-    io.stdout("Loop doctor\n");
-    for (const check of checks.slice(0, 7)) {
-      const auth = check.auth ? `; auth ${check.auth}` : "";
-      io.stdout(`${check.ok ? "✓" : "!"} ${check.name}: ${check.detail}${auth}\n`);
-    }
-  }
+  else io.stdout(formatDoctorChecks(checks, config.output));
   return checks.every((check) => check.ok) ? 0 : 1;
 }
 
@@ -360,31 +358,87 @@ function prepareBridgeEnvironment(): void {
   if (existsSync(adjacent)) process.env.RUSTRA_BUN_LIBRARY = adjacent;
 }
 
-function formatSnapshot(command: string, snapshot: {
+export function formatSnapshot(command: string, snapshot: {
   runId: string;
   state: string;
   tasks: Array<{ id: string; state: string }>;
   activeWorkers: Array<{ id: string; taskId: string }>;
   openAttentionIds: string[];
-}): string {
+}, limits: OutputLimits): string {
   if (command === "graph") {
-    return snapshot.tasks.slice(0, 8).map((task) => `${task.id} · ${task.state}`).join("\n") + "\n";
+    return `${compactLines(snapshot.tasks.map((task) => `${task.id} · ${task.state}`), {
+      lineLimit: limits.listLineLimit,
+      lineTextLimit: limits.lineTextLimit,
+      overflow: (omitted) => `… ${omitted} more tasks`,
+    }).join("\n")}\n`;
   }
   if (command === "workers") {
-    return (snapshot.activeWorkers.slice(0, 8).map((worker) => `${worker.id} · ${worker.taskId}`).join("\n")
-      || "No active workers") + "\n";
+    if (snapshot.activeWorkers.length === 0) return "No active workers\n";
+    return `${compactLines(
+      snapshot.activeWorkers.map((worker) => `${worker.id} · ${worker.taskId}`),
+      {
+        lineLimit: limits.listLineLimit,
+        lineTextLimit: limits.lineTextLimit,
+        overflow: (omitted) => `… ${omitted} more workers`,
+      },
+    ).join("\n")}\n`;
   }
   if (command === "attention") {
-    return (snapshot.openAttentionIds.slice(0, 5).join("\n") || "OK") + "\n";
+    if (snapshot.openAttentionIds.length === 0) return "OK\n";
+    return `${compactLines(
+      [`Attention: ${snapshot.openAttentionIds.length} open`, ...snapshot.openAttentionIds],
+      {
+        lineLimit: limits.attentionLineLimit,
+        lineTextLimit: limits.lineTextLimit,
+        overflow: (omitted) => `… ${omitted} more attention items`,
+      },
+    ).join("\n")}\n`;
   }
   const done = snapshot.tasks.filter((task) => task.state === "done").length;
-  return [
+  return `${compactLines([
     `Run ${snapshot.runId}`,
     `State: ${snapshot.state}`,
     `Tasks: ${done}/${snapshot.tasks.length}`,
     `Workers: ${snapshot.activeWorkers.length}`,
     `Attention: ${snapshot.openAttentionIds.length}`,
-  ].join("\n") + "\n";
+  ], {
+    lineLimit: limits.statusLineLimit,
+    lineTextLimit: limits.lineTextLimit,
+    overflow: (omitted) => `… ${omitted} more status lines`,
+  }).join("\n")}\n`;
+}
+
+export function formatModelList(
+  models: Array<{ computeClass: string; id: string }>,
+  limits: OutputLimits,
+): string {
+  if (models.length === 0) return "No models configured\n";
+  return `${compactLines(models.map((model) => `${model.computeClass} · ${model.id}`), {
+    lineLimit: limits.listLineLimit,
+    lineTextLimit: limits.lineTextLimit,
+    overflow: (omitted) => `… ${omitted} more models`,
+  }).join("\n")}\n`;
+}
+
+export function formatDoctorChecks(
+  checks: Array<{ name: string; ok: boolean; detail: string; auth?: string }>,
+  limits: OutputLimits,
+): string {
+  const ordered = [...checks].sort((left, right) => Number(left.ok) - Number(right.ok));
+  const failed = checks.filter((check) => !check.ok).length;
+  const passed = checks.length - failed;
+  const lines = [
+    "Loop doctor",
+    ...ordered.map((check) => {
+      const auth = check.auth ? `; auth ${check.auth}` : "";
+      return `${check.ok ? "✓" : "!"} ${check.name}: ${check.detail}${auth}`;
+    }),
+  ];
+  return `${compactLines(lines, {
+    lineLimit: limits.listLineLimit,
+    lineTextLimit: limits.lineTextLimit,
+    overflow: (omitted) => `… ${omitted} more checks (${failed} failed, ${passed} passed)`,
+  }).join("\n")}\n`;
 }
 
 export function buildInteractiveLeadInvocation(input: {
@@ -395,6 +449,7 @@ export function buildInteractiveLeadInvocation(input: {
   cwd: string;
   executablePath: string;
   environment: Record<string, string | undefined>;
+  configDirectory?: string;
 }): InteractiveLeadInvocation {
   const adjacentExtension = join(dirname(input.executablePath), "loop-pi-extension.js");
   const developmentExtension = resolve(import.meta.dir, "../../../dist/loop-pi-extension.js");
@@ -410,13 +465,16 @@ export function buildInteractiveLeadInvocation(input: {
     input.model,
   ];
   if (input.intent.trim()) args.push("--", input.intent.trim());
-  return { command: input.command, args, cwd: input.cwd };
+  return { command: input.command, args, cwd: input.cwd, configDirectory: input.configDirectory };
 }
 
 function runInteractiveLead(input: InteractiveLeadInvocation): Promise<number> {
   return new Promise((resolve, reject) => {
     const child = spawn(input.command, input.args, {
       cwd: input.cwd,
+      env: input.configDirectory
+        ? { ...process.env, LOOP_CONFIG_DIR: input.configDirectory }
+        : process.env,
       shell: false,
       stdio: "inherit",
     });

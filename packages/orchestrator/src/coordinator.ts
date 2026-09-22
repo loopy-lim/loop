@@ -1,4 +1,7 @@
-import type { TaskSpecInput } from "@loop/protocol";
+import { rmSync } from "node:fs";
+
+import { assertWorktreeInsideProject, type HerdrCaller, type HerdrWorkerRuntime } from "@loop/herdr";
+import type { SkippedArtifactOutput, TaskSpecInput } from "@loop/protocol";
 import type { AgentProvider, ProviderRegistry, WorkerResult } from "@loop/providers";
 
 import { CompletionVerifier, NodeCompletionRunner } from "./completion";
@@ -10,6 +13,28 @@ interface OrchestratorOptions {
   maxWorkers: number;
   maxFrontierWorkers?: number;
   completionVerifier?: CompletionVerifier;
+  herdr?: HerdrWorkerRuntime;
+}
+
+export interface CleanupRunRequest {
+  databasePath: string;
+  runId: string;
+  keepRecent?: number;
+  dryRun?: boolean;
+  projectRoot?: string;
+  worktrees?: string[];
+  worktree?: string;
+  caller?: HerdrCaller;
+  isLeadPane?: boolean;
+  isMerged?: boolean;
+  isClean?: boolean;
+  herdr?: HerdrWorkerRuntime;
+}
+
+export interface CleanupRunReport {
+  removedArtifacts: string[];
+  skippedArtifacts: SkippedArtifactOutput[];
+  reasons: Record<string, string>;
 }
 
 export interface RunRequest {
@@ -42,6 +67,7 @@ export class Orchestrator {
   readonly #maxWorkers: number;
   readonly #maxFrontierWorkers: number;
   readonly #completionVerifier: CompletionVerifier;
+  readonly #herdr?: HerdrWorkerRuntime;
 
   constructor(options: OrchestratorOptions) {
     this.#control = options.control;
@@ -50,6 +76,130 @@ export class Orchestrator {
     this.#maxFrontierWorkers = Math.max(1, options.maxFrontierWorkers ?? 1);
     this.#completionVerifier =
       options.completionVerifier ?? new CompletionVerifier(new NodeCompletionRunner());
+    this.#herdr = options.herdr;
+  }
+
+  async cleanupRun(request: CleanupRunRequest): Promise<CleanupRunReport> {
+    const dryRun = request.dryRun ?? true;
+    const removedArtifacts: string[] = [];
+    const skippedArtifacts: SkippedArtifactOutput[] = [];
+    const reasons: Record<string, string> = {};
+
+    // 1. Consult core policy and purge store records via the bridge
+    const storeCleanup = await this.#control.cleanupRun({
+      databasePath: request.databasePath,
+      runId: request.runId,
+      keepRecent: request.keepRecent ?? 0,
+      dryRun,
+    });
+    removedArtifacts.push(...storeCleanup.removedArtifacts);
+    skippedArtifacts.push(...storeCleanup.skippedArtifacts);
+
+    // 2. Herdr surface teardown
+    // ADR safety rule: never close caller-provided surfaces or the lead pane
+    if (request.caller || request.isLeadPane) {
+      const surfaceId = request.caller?.paneId ?? (request.caller?.workspaceId ? `caller:${request.caller.workspaceId}` : "lead-pane");
+      const surfaceEval = await this.#control.evaluateSurfaceRemoval({
+        surfaceId,
+        isOwnedByLoop: false,
+      });
+      skippedArtifacts.push({
+        artifact: surfaceId,
+        reason: surfaceEval.reason ?? "caller-owned surface cannot be removed",
+      });
+    } else {
+      const herdr = request.herdr ?? this.#herdr;
+      if (herdr) {
+        const surfaceId = `loop-${request.runId}`;
+        const surfaceEval = await this.#control.evaluateSurfaceRemoval({
+          surfaceId,
+          isOwnedByLoop: true,
+        });
+        if (surfaceEval.allowed) {
+          try {
+            const closeResult = await herdr.closeWorkspace(request.runId);
+            if (closeResult.closed) {
+              removedArtifacts.push(surfaceId);
+              if (closeResult.reason) {
+                reasons[surfaceId] = closeResult.reason;
+              }
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            skippedArtifacts.push({
+              artifact: surfaceId,
+              reason: `failed to close surface: ${message}`,
+            });
+          }
+        } else {
+          skippedArtifacts.push({
+            artifact: surfaceId,
+            reason: surfaceEval.reason ?? "surface removal refused",
+          });
+        }
+      }
+    }
+
+    // 3. Worktree directory removal
+    // Only after assertWorktreeInsideProject validation and ADR safety rules
+    const worktreeList = [
+      ...(request.worktrees ?? []),
+      ...(request.worktree ? [request.worktree] : []),
+    ];
+    const projectRoot = request.projectRoot ?? process.cwd();
+
+    for (const worktreePath of worktreeList) {
+      // Validation 1: assertWorktreeInsideProject invariant
+      try {
+        assertWorktreeInsideProject(projectRoot, worktreePath);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        skippedArtifacts.push({
+          artifact: worktreePath,
+          reason: message,
+        });
+        continue;
+      }
+
+      // Validation 2: Consult core policy via the bridge (ADR safety rules: root match, clean, merged)
+      const evaluation = await this.#control.evaluateWorktreeRemoval({
+        projectRoot,
+        worktreePath,
+        isMerged: request.isMerged ?? true,
+        isClean: request.isClean ?? true,
+      });
+
+      if (!evaluation.allowed) {
+        skippedArtifacts.push({
+          artifact: worktreePath,
+          reason: evaluation.reason ?? "worktree removal refused",
+        });
+        continue;
+      }
+
+      // ADR safety rule: dry-run default for lossy records
+      if (dryRun) {
+        removedArtifacts.push(worktreePath);
+        reasons[worktreePath] = "dry_run";
+      } else {
+        try {
+          rmSync(worktreePath, { recursive: true, force: true });
+          removedArtifacts.push(worktreePath);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          skippedArtifacts.push({
+            artifact: worktreePath,
+            reason: `failed to remove directory: ${message}`,
+          });
+        }
+      }
+    }
+
+    return {
+      removedArtifacts,
+      skippedArtifacts,
+      reasons,
+    };
   }
 
   async run(request: RunRequest): Promise<RunSummary> {
@@ -71,7 +221,8 @@ export class Orchestrator {
     if (missingRoute) {
       await this.#control.requestAttention({
         ...runInput(request),
-        attentionId: `provider-${missingRoute.taskId}-${missingRoute.computeClass}`,
+        // Attention ids are globally unique in the store; scope by runId.
+        attentionId: `provider-${request.runId}-${missingRoute.taskId}-${missingRoute.computeClass}`,
         kind: "failure",
         summary: `No available provider supports ${missingRoute.computeClass}`,
         taskId: missingRoute.taskId,
@@ -120,7 +271,10 @@ export class Orchestrator {
             workingDirectory: request.workingDirectory,
           });
         } catch (error) {
-          const workerId = `start-failure-${taskId}-${task.attempt}`;
+          // Worker ids are globally unique in the store, so the synthetic
+          // start-failure id must carry the runId to survive re-runs of the
+          // same task graph in a different run.
+          const workerId = `start-failure-${request.runId}-${taskId}-${task.attempt}`;
           await this.#control.recordWorkerStarted({
             ...runInput(request),
             taskId,

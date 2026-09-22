@@ -1,3 +1,6 @@
+import type { RunSummary } from "@loop/orchestrator";
+import { compactLines, type OutputLimits } from "@loop/presentation";
+
 export interface RunSummaryView {
   tasks: number;
   implementationBranches: number;
@@ -6,7 +9,7 @@ export interface RunSummaryView {
   changedFiles?: number;
 }
 
-export function renderRunSummary(view: RunSummaryView): string {
+export function renderRunSummary(view: RunSummaryView, limits: OutputLimits): string {
   const lines = [
     "Done",
     "",
@@ -21,5 +24,27 @@ export function renderRunSummary(view: RunSummaryView): string {
     );
   }
   if (view.changedFiles !== undefined) lines.push(`Changed: ${view.changedFiles} files`);
-  return lines.slice(0, 8).join("\n");
+  return compactLines(lines, {
+    lineLimit: limits.statusLineLimit,
+    lineTextLimit: limits.lineTextLimit,
+    overflow: (omitted) => `… ${omitted} more status lines`,
+  }).join("\n");
+}
+
+export function renderLoopRunSummary(
+  runId: string,
+  summary: RunSummary,
+  limits: OutputLimits,
+): string {
+  return compactLines([
+    `Run ${runId}`,
+    `State: ${summary.status}`,
+    `Tasks: ${summary.tasks}`,
+    `Escalations: ${summary.escalations.length}`,
+    summary.status === "completed" ? "Verification: passed" : "Verification: attention required",
+  ], {
+    lineLimit: limits.statusLineLimit,
+    lineTextLimit: limits.lineTextLimit,
+    overflow: (omitted) => `… ${omitted} more status lines`,
+  }).join("\n");
 }

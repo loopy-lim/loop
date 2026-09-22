@@ -9,3 +9,5 @@ export * from "./ui/attention";
 export * from "./ui/graph";
 export * from "./ui/worker";
 export * from "./ui/summary";
+export * from "./ui/models";
+export * from "./ui/snapshot";
