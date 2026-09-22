@@ -91,10 +91,30 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
       };
       const result = await protocol.cleanupRun(input);
 
+      let removedHerdrWorkspaces: string[] = [];
+      try {
+        const probe = options.probe ?? probeCommand;
+        const listResult = await probe("herdr", ["workspace", "list"]);
+        if (listResult.exitCode === 0) {
+          const parsedList = JSON.parse(listResult.output);
+          const workspaces: Array<{ label?: string, workspace_id: string }> = parsedList?.result?.workspaces ?? [];
+          const leaks = workspaces.filter(w => w.label?.startsWith("loop-loop-")).map(w => w.workspace_id);
+          for (const leak of leaks) {
+            if (!parsed.dryRun) {
+              await probe("herdr", ["workspace", "close", leak]);
+            }
+            removedHerdrWorkspaces.push(leak);
+          }
+        }
+      } catch (e) {
+        // ignore if herdr isn't available
+      }
+      const combinedResult = { ...result, removedHerdrWorkspaces };
+
       if (parsed.json) {
-        io.stdout(`${JSON.stringify(result)}\n`);
+        io.stdout(`${JSON.stringify(combinedResult)}\n`);
       } else {
-        io.stdout(formatCleanupSnapshot(result, config.output, parsed.dryRun));
+        io.stdout(formatCleanupSnapshot(combinedResult, config.output, parsed.dryRun));
       }
       return 0;
     }
@@ -471,16 +491,20 @@ export function formatSnapshot(command: string, snapshot: SnapshotOutput, limits
 }
 
 export function formatCleanupSnapshot(
-  snapshot: import("@loop/protocol").CleanupRunOutput,
+  snapshot: import("@loop/protocol").CleanupRunOutput & { removedHerdrWorkspaces?: string[] },
   limits: OutputLimits,
   dryRun: boolean,
 ): string {
   const prefix = dryRun ? "[DRY RUN] " : "";
+  const herdrRemoved = snapshot.removedHerdrWorkspaces?.length ?? 0;
   const lines = [
     `${prefix}Cleanup Report`,
-    `Removed: ${snapshot.removedArtifacts.length}`,
+    `Removed: ${snapshot.removedArtifacts.length} artifacts` + (herdrRemoved ? `, ${herdrRemoved} leaked workspaces` : ""),
     `Skipped: ${snapshot.skippedArtifacts.length}`,
   ];
+  if (herdrRemoved > 0) {
+    lines.push(...snapshot.removedHerdrWorkspaces!.map(w => `- Workspace ${w} (leaked)`));
+  }
   if (snapshot.removedArtifacts.length > 0) {
     lines.push(...snapshot.removedArtifacts.map(a => `- ${a}`));
   }

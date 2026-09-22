@@ -247,6 +247,29 @@ export class HerdrWorkerRuntime {
     this.#turns.delete(handle.workerId);
   }
 
+  async purgeLeakedWorkspaces(dryRun: boolean): Promise<string[]> {
+    const listPayload = await this.#run(["workspace", "list"]).catch(() => null);
+    if (!listPayload) return [];
+    const workspaces = optionalArray(listPayload, ["result", "workspaces"]);
+    if (!workspaces) return [];
+    const removed: string[] = [];
+    for (const w of workspaces) {
+      if (typeof w === "object" && w !== null && "label" in w) {
+        const label = (w as { label: unknown }).label;
+        if (typeof label === "string" && label.startsWith("loop-loop-")) {
+          const wsId = optionalString(w, ["workspace_id"]);
+          if (wsId) {
+            if (!dryRun) {
+              await this.#run(["workspace", "close", wsId]).catch(() => {});
+            }
+            removed.push(wsId);
+          }
+        }
+      }
+    }
+    return removed;
+  }
+
   async closeWorkspace(runId: string): Promise<CloseWorkspaceResult> {
     const workspace = this.#workspaces.get(runId);
     if (!workspace) {

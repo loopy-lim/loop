@@ -86,6 +86,7 @@ Loop does not automatically purge run data or workspaces to prevent unintended d
 - By default, it retains the most recent 10 runs (configurable via `--keep N`).
 - Alternatively, you can target a specific run with `loop cleanup <run-id> --execute`.
 - Active runs or runs requiring attention will never be deleted. Unmerged or dirty workspaces are also skipped and require manual attention.
+- Running `loop cleanup` will also identify and purge any leaked Herdr workspaces prefixed with `loop-loop-*` left over from failed teardowns.
 
 See `docs/architecture.md`, `docs/model-routing.md`, and `docs/provider-support.md` for the three implementation seams.
 

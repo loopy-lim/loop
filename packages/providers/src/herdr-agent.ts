@@ -73,8 +73,8 @@ export class HerdrAgentProvider implements AgentProvider {
   }
 
   async start(input: StartWorkerInput): Promise<WorkerHandle> {
-    const callerWorkspaceId = process.env.HERDR_WORKSPACE_ID;
     const callerPaneId = process.env.HERDR_PANE_ID;
+    const callerWorkspaceId = callerPaneId ? callerPaneId.split(':')[0] : undefined;
     const caller = callerWorkspaceId && callerPaneId ? {
       workspaceId: callerWorkspaceId,
       paneId: callerPaneId,
@@ -84,7 +84,7 @@ export class HerdrAgentProvider implements AgentProvider {
       projectRoot: this.#projectRoot,
       runId: input.runId,
       taskId: input.taskId,
-      workerName: `${input.runId}-${input.taskId}-${input.attempt}`,
+      workerName: `${input.runId}-${input.taskId}`,
       worktree: input.workingDirectory ?? this.#projectRoot,
       execution: { type: "agent", kind: this.#kind, args: this.#args },
       prompt: buildWorkerPrompt(input),

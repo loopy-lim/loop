@@ -83,13 +83,13 @@ test("pi worker routes to caller workspace instead of creating a headless one", 
     workingDirectory: "/project",
   });
 
-  expect(worker.id).toBe("loop-run-test-task-test-0");
+  expect(worker.id).toBe("loop-run-test-task-test");
 
   expect(runner.calls.slice(0, 4)).toEqual([
-    ["tab", "create", "--workspace", "caller-ws", "--cwd", "/project", "--label", "loop-run-test-task-test-0", "--no-focus"],
-    ["pane", "rename", "caller-ws:p-new", "loop-run-test-task-test-0"],
-    ["agent", "start", "loop-run-test-task-test-0", "--kind", "pi", "--pane", "caller-ws:p-new"],
-    ["agent", "prompt", "loop-run-test-task-test-0", "Loop worker task\n\ntitle=Test Task\nkind=task\nattempt=0"]
+    ["tab", "create", "--workspace", "caller-ws", "--cwd", "/project", "--label", "loop-run-test-task-test", "--no-focus"],
+    ["pane", "rename", "caller-ws:p-new", "loop-run-test-task-test"],
+    ["agent", "start", "loop-run-test-task-test", "--kind", "pi", "--pane", "caller-ws:p-new"],
+    ["agent", "prompt", "loop-run-test-task-test", "Loop worker task\n\ntitle=Test Task\nkind=task\nattempt=0"]
   ]);
   
   await provider.release!(worker.id);

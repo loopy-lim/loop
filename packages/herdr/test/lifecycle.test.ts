@@ -543,3 +543,56 @@ function scriptedRunner(): HerdrRunner & { calls: string[][] } {
 function result(value: unknown) {
   return { exitCode: 0, stdout: JSON.stringify(value), stderr: "" };
 }
+
+test("purgeLeakedWorkspaces lists workspaces and closes ones prefixed with loop-loop-", async () => {
+  const calls: string[][] = [];
+  const runner: HerdrRunner = {
+    async run(_cmd, args) {
+      calls.push(args);
+      if (args[0] === "workspace" && args[1] === "list") {
+        return result({
+          result: {
+            workspaces: [
+              { label: "loop-run-123", workspace_id: "w1" },
+              { label: "loop-loop-leak1", workspace_id: "w2" },
+              { label: "loop-loop-leak2", workspace_id: "w3" },
+              { label: "my-workspace", workspace_id: "w4" },
+            ]
+          }
+        });
+      }
+      return result({ result: {} });
+    }
+  };
+  
+  const runtime = new HerdrWorkerRuntime({ runner });
+  const removed = await runtime.purgeLeakedWorkspaces(false);
+  expect(removed).toEqual(["w2", "w3"]);
+  expect(calls).toContainEqual(["workspace", "close", "w2"]);
+  expect(calls).toContainEqual(["workspace", "close", "w3"]);
+  expect(calls.some(c => c[0] === "workspace" && c[1] === "close" && (c[2] === "w1" || c[2] === "w4"))).toBe(false);
+});
+
+test("purgeLeakedWorkspaces skips deletion on dry run", async () => {
+  const calls: string[][] = [];
+  const runner: HerdrRunner = {
+    async run(_cmd, args) {
+      calls.push(args);
+      if (args[0] === "workspace" && args[1] === "list") {
+        return result({
+          result: {
+            workspaces: [
+              { label: "loop-loop-leak1", workspace_id: "w2" },
+            ]
+          }
+        });
+      }
+      return result({ result: {} });
+    }
+  };
+  
+  const runtime = new HerdrWorkerRuntime({ runner });
+  const removed = await runtime.purgeLeakedWorkspaces(true);
+  expect(removed).toEqual(["w2"]);
+  expect(calls.some(c => c[0] === "workspace" && c[1] === "close")).toBe(false);
+});
