@@ -25,6 +25,7 @@ export function taskSpecInputDescription(): string {
   return [
     "JSON TaskSpecInput[] using the generated protocol fields.",
     "Dependencies must reference task ids; scopes must state exact read and write ownership; completion checks must be machine-verifiable.",
+    'Each task may carry an optional "persona" id (implementer | reviewer | debugger | architect | designer); unknown ids are rejected at submission with the valid id list. Kind defaults: implementation→implementer, decision→architect, verification→reviewer, research→debugger, integration→architect.',
     `Typed example: ${JSON.stringify([TASK_SPEC_INPUT_EXAMPLE])}`,
   ].join(" ");
 }

@@ -5,14 +5,8 @@ import type { OrchestrationControl } from "./control";
 import { resolvePersona, type PersonaRegistry } from "./persona";
 import { redact } from "./redact";
 
-// D4 of the worker persona contract transports the resolved persona text on
-// StartWorkerInput.personaInstructions; that field declaration is owned by
-// @loop/providers (a scoped follow-up restores it after the revert that lost
-// it). This structural supertype keeps the orchestrator typed in the meantime
-// and collapses to StartWorkerInput once the field returns.
-type PersonaWorkerStartInput = StartWorkerInput & { personaInstructions?: string };
-
 export interface TaskExecution { done: Promise<void>; settled: boolean; error?: unknown; abort(): void }
+// PersonaWorkerStartInput 임시 구조 타입은 제거됨(2026-09): StartWorkerInput.personaInstructions 복원으로 상위 타입을 직접 사용한다.
 interface Options {
   input: { databasePath: string; runId: string; executionOwner: string };
   context: TaskContextOutput;
@@ -59,8 +53,7 @@ async function run({ input, context, workerId, provider, control, verifier, pers
   };
   try {
     if (signal.aborted) { await control.recordWorkerStopped(workerInput); return; }
-    const startInput: PersonaWorkerStartInput = { runId: input.runId, taskId, title: context.task.title, kind: context.task.kind, computeClass: context.task.preferredCompute, attempt: context.attempt, requirements: context.task.requirements, workingDirectory: context.workingDirectory, context };
-    if (persona.instructions) startInput.personaInstructions = persona.instructions;
+    const startInput: StartWorkerInput = { runId: input.runId, taskId, title: context.task.title, kind: context.task.kind, computeClass: context.task.preferredCompute, attempt: context.attempt, requirements: context.task.requirements, workingDirectory: context.workingDirectory, context, ...(persona.instructions ? { personaInstructions: persona.instructions } : {}) };
     const starting = provider.start(startInput);
     let handle: WorkerHandle;
     try { handle = await startup(starting, signal); }

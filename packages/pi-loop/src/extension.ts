@@ -14,6 +14,11 @@ import type {
 
 import { validateDecomposition } from "./lead/decompose";
 import { decompositionPrompt, taskSpecInputDescription } from "./lead/prompts";
+
+/** Canonical worker persona ids (worker persona contract, designer included). */
+const KNOWN_PERSONA_IDS = ["implementer", "reviewer", "debugger", "architect", "designer"] as const;
+const PERSONA_KIND_DEFAULTS =
+  "implementation→implementer, decision→architect, verification→reviewer, research→debugger, integration→architect; designer is explicit-request only";
 import {
   HerdrLifecycleReporter,
   registerHerdrLifecycle,
@@ -110,6 +115,7 @@ export function registerLoopExtension(
       "Submit a dependency DAG to Loop after understanding an engineering request.",
       "Loop owns scheduling, worker dispatch, verification, retries, and durable state.",
       "Pass tasksJson as a JSON array using the generated Loop task fields.",
+      `Each task may carry an optional persona id (${KNOWN_PERSONA_IDS.join(" | ")}). Kind defaults: ${PERSONA_KIND_DEFAULTS}.`,
     ].join(" "),
     parameters: Type.Object({
       intent: Type.String({ description: "The user's complete engineering intent" }),
@@ -120,7 +126,7 @@ export function registerLoopExtension(
     }),
     async execute(_toolCallId, params, signal, onUpdate, context) {
       const runId = params.runId?.trim() || `loop-${randomUUID()}`;
-      const tasks = parseTasks(params.tasksJson);
+      const tasks = normalizePersonas(parseTasks(params.tasksJson));
       currentRunId = runId;
       onUpdate?.(result([
         singleLine(`Run ${runId}`, limits.lineTextLimit),
@@ -448,6 +454,24 @@ function parseTasks(value: string): TaskSpecInput[] {
   }
   if (!Array.isArray(parsed)) throw new Error("Loop plan must be a task array");
   return validateDecomposition(parsed as TaskSpecInput[]);
+}
+
+/**
+ * Worker persona contract: unknown ids are rejected deterministically at
+ * submission time (never silently diverge from the orchestrator's runtime
+ * fallback), and blank/absent values forward as null so the orchestrator
+ * applies its kind-based default.
+ */
+function normalizePersonas(tasks: TaskSpecInput[]): TaskSpecInput[] {
+  return tasks.map((task) => {
+    const persona = task.persona?.trim();
+    if (persona && !(KNOWN_PERSONA_IDS as readonly string[]).includes(persona)) {
+      throw new Error(
+        `unknown persona '${persona}' in task ${task.id}. Valid persona ids: ${KNOWN_PERSONA_IDS.join(", ")}`,
+      );
+    }
+    return { ...task, persona: persona || null };
+  });
 }
 
 function leadInstructions(intent: string): string {
