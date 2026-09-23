@@ -132,7 +132,7 @@ impl PurgeAction {
         }
     }
 
-    pub fn for_run(
+    fn for_run(
         artifact_kind: ArtifactKind,
         target: impl Into<String>,
         run_id: impl Into<String>,

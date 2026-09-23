@@ -8,13 +8,6 @@ export type PiLifecycleEvent =
 
 export type HerdrLifecycleState = "idle" | "working";
 
-export interface HerdrLifecycleReport {
-  source: string;
-  agent: string;
-  state: HerdrLifecycleState;
-  seq: number;
-}
-
 export interface HerdrLifecycleSink {
   report(state: HerdrLifecycleState): Promise<void>;
   release(): Promise<void>;

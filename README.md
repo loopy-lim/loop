@@ -25,6 +25,7 @@ Herdr → loop → Pi Lead + Loop extension
 | `packages/protocol` | Generated Rustra TypeScript contract and Bun host |
 | `packages/orchestrator` | Thin worker lifecycle coordinator |
 | `packages/providers` | Codex, Antigravity, Z.AI, Pi, and fake adapters |
+| `packages/presentation` | Compact line formatting for Lead output |
 | `packages/pi-loop` | Pi Lead tool/command extension and compact output |
 | `packages/herdr` | Visible workspace/pane integration |
 | `packages/cli` | Standalone `loop` entry point and composition root |

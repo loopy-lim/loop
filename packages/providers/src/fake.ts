@@ -115,8 +115,6 @@ export class FailingProvider extends FakeProvider {
   }
 }
 
-export class ScriptedProvider extends FakeProvider {}
-
 export class SlowProvider implements AgentProvider {
   readonly #sessions = new Map<string, Session>();
   cancelled = 0;

@@ -36,6 +36,7 @@ Reader: contributors deciding where a change belongs.
 | Store | schema, ordered events, materialized indexes, worker reconciliation | provider calls, scheduling policy |
 | Bridge | high-level Rustra operations and validation at the process boundary | database CRUD API, model-specific behavior |
 | Protocol | generated Rustra types/commands and Bun native host | parallel domain definitions or manual bridge clients |
+| Presentation | compact render primitives over protocol types (`compactLines`, `renderSnapshot`, `renderTaskContext`) | file/process spawning, scheduling, provider knowledge |
 | Orchestrator | dispatch/cancel/result loop using `AgentProvider` | duplicated scheduler rules |
 | Adapters | provider CLI/API normalization, Herdr calls, redaction | cross-provider scheduling or terminal ownership |
 | Pi | decomposition, `loop_run`, compact human interaction | direct SQLite/native-library access |

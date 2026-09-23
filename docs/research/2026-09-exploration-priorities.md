@@ -51,12 +51,15 @@
 
 1. **WorkerStatus·ComputeClass의 생성 protocol 통합** — boundary-audit findings 4행("`WorkerStatus`(`packages/providers/src/types.ts:5`)는 `WorkerState`(`crates/loop-core/src/run/worker.rs:6-12`)의 `lost` 대신 `failed`를 가짐 — B4 위반 저위험") + findings 5행 부차(Debug 포맷 저장 `sqlite.rs:452`) + test-gap-map findings 2행(재수출만 존재하는 `Worker`/`WorkerState`/`WorkerResult`). risk 티어지만 저위험이고 priority-1과 생성 protocol 접점을 공유하므로 **priority-1 이후에 순차 실행**해 코드젠 충돌을 피한다. `lost`/`failed` 어휘는 Rust에서 1회 확정.
    - **상태(2026-09-24 재감사): 부분 착지** — `lost` 어휘 통일 착지(`a701a58`); 생성 protocol 편입은 없었고 `worker.rs:8-11` 주석이 사실과 다른 신규 drift가 됨 + `sqlite.rs` Debug 포맷 저장 잔존 → 결정 문서 실행 1(risk)로 확정.
+   - **상태(2026-09-24 이물질 감사): 착지** — 로드맵 실행 1 착지(`37981a2`): `worker.rs:5-15` 주석이 "Nothing in the bridge transports it today"로 정정(동결 계약 서술 포함), `sqlite.rs` 저장 어휘 상수화 + `worker-state-vocabulary.rs` 동결 테스트(저장 호출의 `format!("{:?}")` 잔여 0건). 근거: `docs/decisions/2026-09-24-weird-cleanup.md` §배경 검증.
 2. **provider-support.md 갱신** — docs-drift findings 1·2·4행(스테일 Pi escalation 서술, AgyPersistentProvider 미등재, openai-codex 인증 경로 누락, print 어댑터 frontier 기본값). 자율 가능하나 priority-1/2가 다시 문서를 바꾸므로 착지 후 1회 갱신.
    - **상태(2026-09-24 재감사): 미착지** — P7/P8/P9 스테일 문구 잔존(`docs/provider-support.md:8,12`). 갱신 연기 조건("priority-1/2 착지 후 1회 갱신")은 이제 충족 → 결정 문서 실행 2(risk)로 확정.
+   - **상태(2026-09-24 이물질 감사): 착지** — 로드맵 실행 2 착지(`1f557a6`): provider-support.md에 mixed routing·`openai-codex`(ChatGPT native login) 인증 서술·`AgyPersistentProvider` 등재 확인. 근거: `docs/decisions/2026-09-24-weird-cleanup.md` §배경 검증.
 3. **computeClasses 사다리 설정 단일화** — boundary-audit findings 3행(6개 어댑터 생성자 하드코딩). 항목 1과 묶어 처리.
    - **상태(2026-09-24 재감사): 착지됨** — 어댑터 생성자 `computeClasses` 필수 옵션화 + models.toml 단일 소스 주입. docs-drift C4는 무효화(stale) — 재상정 금지(결정 문서 준수).
 4. **simplify 5건 전체** — simplify-audit findings 1–5. 전부 동작 불변의 정리 티어로 최하위. 단 **finding 5는 `PersonaWorkerStartInput`(task-execution.ts:9-13) 임시 타입 제거와 동일 PR 필수**(simplify-audit 비고: "`@loop/providers`의 `personaInstructions` 필드 복원 후속 작업이 finding 5와 함께 이루어져야 상수로 남지 않음") — 분리 금지 조건으로 기록. 죽은 경로 정리(`packages/providers/src/jev/` 빈 디렉터리, boundary-audit note 7; herdr `BoundedPaneSender` 죽은 수출 후보, test-gap findings 4행)도 여기에 묶음.
    - **상태(2026-09-24 재감사): 부분 착지** — f2/f3/f4/f5 + jev 빈 디렉터 착지(f5 분리 금지 조건까지 `bbc5f31`로 이행). f1(pi-loop 페르소나 3중 복제)만 미착지 → 다음 사이클 정리 티어 후보(결정 문서 "남긴 항목"). `BoundedPaneSender` 항목은 무효화(stale, 실사용 확인).
+   - **상태(2026-09-24 이물질 감사): 전건 착지** — f1 착지(`5692091` 어휘 단일 소스 + `428b018` 산문 파생): `extension.ts:8-12`가 `@loop/orchestrator/persona` 상수를 임포트. f1~f5 전부 착지 완료. 근거: `docs/decisions/2026-09-24-weird-cleanup.md` §배경 검증.
 
 ## 미해결 리스크
 

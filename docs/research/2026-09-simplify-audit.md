@@ -36,3 +36,16 @@
 
 - `test -s docs/research/2026-09-simplify-audit.md` — 통과(본 파일)
 - `grep -q \.ts: docs/research/2026-09-simplify-audit.md` — 통과(findings 전항에 `.ts:` 근거 포함)
+
+---
+
+## 착지 상태 — 2026-09-24 추기 (`implement-cleanup`)
+
+> 본문은 작성 당시 감사 스냅샷 그대로 보존한다(기존 내용 무변경). 아래는 `docs/decisions/2026-09-24-weird-cleanup.md`(§배경 검증)가 확인한 착지 사실의 추기다.
+
+- **f1 — 착지** (`5692091` 어휘 단일 소스 + `428b018` 산문 파생): `packages/pi-loop/src/extension.ts:8-12`가 `@loop/orchestrator/persona`의 `KIND_DEFAULT_PERSONAS`·`PERSONA_IDS`·`EXPLICIT_ONLY_PERSONA_IDS`를 임포트하고 산문이 상수에서 파생. 로컬 `KNOWN_PERSONA_IDS` 부재.
+- **f2 — 착지**: `packages/orchestrator/src/persona.ts:53-67` — kind 기본 조회 1회 후 결과로 분기.
+- **f3 — 착지**: `packages/orchestrator/src/coordinator.ts:196` — `{ ...taskExecutionOptions, context, workerId, provider }` 한 식 전개.
+- **f4 — 착지**: `packages/pi-loop/src/extension.ts:477-483` — `if (persona && …)` 단일 조건.
+- **f5 — 착지** (`bbc5f31`, 분리 금지 조건 이행): `packages/orchestrator/src/task-execution.ts:56` 조건부 스프레드 한 식 + `packages/providers/src/types.ts:51` `personaInstructions` 복원. 임시 타입 `PersonaWorkerStartInput` 소멸(제거 이력 주석만 잔존).
+- 부수: jev 빈 디렉터리 소멸. `BoundedPaneSender`는 실사용(`packages/providers/src/mirror.ts:2,276`)으로 "죽은 수출 후보" 판정은 무효 — 재상정 금지.

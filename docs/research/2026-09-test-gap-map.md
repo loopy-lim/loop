@@ -74,3 +74,12 @@
 3. loop-store: private `migration.rs`/`schema.rs` 에 직접 테스트 없음 — 전 store 테스트가 우회 간접 실행만 하므로 레거시 키 이관(migration.rs:8-11) 회귀 방어 없음.
 4. herdr: `bounded-sender.ts:12`(BoundedPaneSender 배압 로직)·`worktree.ts:3`(경로 가드 실패 분기) 직접 테스트 없음; BoundedPaneSender 는 사용처도 없어 죽은 수출 후보.
 5. orchestrator: `composition.ts:23`(buildProviderRegistry) 무테스트, `task-execution.ts` 는 persona.test.ts 단일 진입으로 커버 얕음 — 나머지 모듈은 1:1 테스트 파일 존재.
+
+---
+
+## 상태 정정 — 2026-09-24 (`decide-cleanup` 추기)
+
+- findings 4행의 "BoundedPaneSender 는 사용처도 없어 죽은 수출 후보" 주장은 **무효**: 워커 가시성 작업(`ecee48c`) 이후 `packages/providers/src/mirror.ts:2,276`에서 실사용 중. 근거: `docs/decisions/2026-09-24-weird-cleanup.md` S-7'.
+- "직접 테스트 없음" 부분은 여전히 사실(모듈표 47행 포함) — 무효화는 죽은 수출 주장에만 적용된다.
+- findings 1행의 bridge 명령 직접 테스트 공백은 부분 해소: 6종 명령(get_run, add_task, update_task, record_decision, pause_run/confirm_paused, subscribe_events)의 직접 테스트가 `crates/loop-bridge/tests/commands-direct.rs`로 착지(커밋 `9724e81`). 나머지 9종은 여전히 간접 커버만.
+- findings 3행의 loop-store 마이그레이션 직접 테스트 공백은 해소: `crates/loop-store/tests/worker-state-vocabulary.rs` 및 migration·schema 직접 테스트 착지(커밋 `cbb3b74`).

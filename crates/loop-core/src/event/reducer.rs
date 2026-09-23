@@ -407,10 +407,6 @@ impl RunProjection {
         self.artifacts.get(id).is_some_and(|a| a.is_removed())
     }
 
-    pub fn drop_artifact(&mut self, id: &str) -> Option<ArtifactRecord> {
-        self.artifacts.remove(id)
-    }
-
     pub fn drop_removed_artifacts(&mut self) {
         self.artifacts.retain(|_, a| !a.is_removed());
     }
