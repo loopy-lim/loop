@@ -29,6 +29,7 @@ fn worker_result_and_dependency_context_are_durable_and_relevant() {
         read_scope: vec!["docs/**".into()],
         write_scope: vec![],
         requirements: vec!["Find evidence".into()],
+        persona: None,
         completion_checks: vec![CompletionCheckInput {
             id: "check".into(),
             command: "true".into(),

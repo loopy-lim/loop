@@ -1,10 +1,11 @@
 use loop_bridge::{
     CheckResultInput, ClaimRunnableTasksInput, CleanupRunInput, CompareTracesInput,
     CompletionCheckInput, CreateRunInput, GetTraceInput, RequestAttentionInput,
-    ResolveAttentionInput, RunInput, SubmitPlanInput, TaskSpecInput, VerificationInput,
-    WorkerInput, WorkerResultInput, cancel_run, claim_runnable_tasks, cleanup_run, compare_traces,
-    create_run, get_snapshot, get_trace, loop_package, record_verification, record_worker_result,
-    record_worker_started, request_attention, resolve_attention, submit_plan,
+    ResolveAttentionInput, RunInput, SubmitPlanInput, TaskContextInput, TaskSpecInput,
+    VerificationInput, WorkerInput, WorkerResultInput, cancel_run, claim_runnable_tasks,
+    cleanup_run, compare_traces, create_run, get_run_plan, get_snapshot, get_task_context,
+    get_trace, loop_package, record_verification, record_worker_result, record_worker_started,
+    request_attention, resolve_attention, submit_plan,
 };
 use loop_core::attention::AttentionKind;
 use loop_core::policy::ComputeClass;
@@ -20,6 +21,7 @@ fn research(id: &str) -> TaskSpecInput {
         read_scope: vec![],
         write_scope: vec![],
         requirements: vec![],
+        persona: None,
         completion_checks: vec![CompletionCheckInput {
             id: "tests".into(),
             command: "true".into(),
@@ -1004,4 +1006,58 @@ fn compare_traces_rejects_empty_and_unknown_runs() {
     })
     .unwrap_err();
     assert!(missing.to_string().contains("run_not_found"));
+}
+
+#[test]
+fn task_spec_input_persona_survives_protocol_json_round_trip() {
+    let json = serde_json::to_string(&research("persona-absent")).unwrap();
+    let parsed: TaskSpecInput = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed.persona, None);
+
+    let mut persona_task = research("persona-set");
+    persona_task.persona = Some("architect".into());
+    let json = serde_json::to_string(&persona_task).unwrap();
+    assert!(json.contains("\"persona\":\"architect\""));
+    let parsed: TaskSpecInput = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed.persona.as_deref(), Some("architect"));
+
+    let mut null_task = research("persona-null");
+    null_task.persona = None;
+    let json = serde_json::to_string(&null_task).unwrap();
+    let parsed: TaskSpecInput = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed.persona, None);
+}
+
+#[test]
+fn task_spec_persona_is_accepted_at_plan_boundary_but_not_durable_yet() {
+    let dir = tempfile::tempdir().unwrap();
+    let database_path = dir.path().join("persona.db").display().to_string();
+    create_run(CreateRunInput {
+        database_path: database_path.clone(),
+        run_id: "run-persona".into(),
+    })
+    .unwrap();
+    let mut task = research("persona-echo");
+    task.persona = Some("architect".into());
+    submit_plan(SubmitPlanInput {
+        database_path: database_path.clone(),
+        run_id: "run-persona".into(),
+        tasks: vec![task],
+    })
+    .unwrap();
+    // loop-core Task에 persona 메타데이터가 생기기 전까지 에코는 None이다
+    // (docs/decisions/2026-09-22-worker-persona-contract.md D2 후속 작업에서 Some으로 전환).
+    let context = get_task_context(TaskContextInput {
+        database_path: database_path.clone(),
+        run_id: "run-persona".into(),
+        task_id: "persona-echo".into(),
+    })
+    .unwrap();
+    assert_eq!(context.task.persona, None);
+    let plan = get_run_plan(RunInput {
+        database_path,
+        run_id: "run-persona".into(),
+    })
+    .unwrap();
+    assert_eq!(plan.tasks[0].persona, None);
 }

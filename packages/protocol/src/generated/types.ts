@@ -17,6 +17,7 @@ export type TaskSpecInput = {
   readScope: string[];
   writeScope: string[];
   requirements: string[];
+  persona?: string | null;
   completionChecks: CompletionCheckInput[];
   preferredCompute: ComputeClass;
   minimumCompute: ComputeClass;

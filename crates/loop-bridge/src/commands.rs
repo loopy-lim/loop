@@ -45,6 +45,7 @@ pub struct TaskSpecInput {
     pub read_scope: Vec<String>,
     pub write_scope: Vec<String>,
     pub requirements: Vec<String>,
+    pub persona: Option<String>,
     pub completion_checks: Vec<CompletionCheckInput>,
     pub preferred_compute: ComputeClass,
     pub minimum_compute: ComputeClass,

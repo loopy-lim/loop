@@ -92,6 +92,12 @@
                 "type": "string"
               }
             },
+            "persona": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "completionChecks": {
               "type": "array",
               "items": {
@@ -1433,6 +1439,12 @@
                 "type": "string"
               }
             },
+            "persona": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "completionChecks": {
               "type": "array",
               "items": {
@@ -1929,6 +1941,12 @@
                 "type": "string"
               }
             },
+            "persona": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "completionChecks": {
               "type": "array",
               "items": {
@@ -2416,6 +2434,12 @@
               "items": {
                 "type": "string"
               }
+            },
+            "persona": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "completionChecks": {
               "type": "array",
@@ -3393,6 +3417,12 @@
               "items": {
                 "type": "string"
               }
+            },
+            "persona": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "completionChecks": {
               "type": "array",

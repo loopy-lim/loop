@@ -411,6 +411,9 @@ pub(crate) fn task_spec(task: &Task) -> TaskSpecInput {
         read_scope: task.ownership.read_scope.clone(),
         write_scope: task.ownership.write_scope.clone(),
         requirements: task.requirements.clone(),
+        // persona는 loop-core Task에 내구 메타데이터가 생기기 전까지 에코 시 None이다
+        // (docs/decisions/2026-09-22-worker-persona-contract.md D2 후속 작업).
+        persona: None,
         completion_checks: task
             .completion_contract
             .checks
