@@ -3,6 +3,13 @@ import { spawn } from "node:child_process";
 
 import { Type } from "typebox";
 import type { RunSummary } from "@loop/orchestrator";
+// Subpath import: the persona module is a leaf (no bridge dependency), so the
+// Node-targeted pi extension bundle stays free of Bun-only imports (bun:ffi).
+import {
+  EXPLICIT_ONLY_PERSONA_IDS,
+  KIND_DEFAULT_PERSONAS,
+  PERSONA_IDS,
+} from "@loop/orchestrator/persona";
 import { loadLoopConfig } from "@loop/orchestrator/config";
 import { compactLines, type OutputLimits, singleLine } from "@loop/presentation";
 import type {
@@ -15,10 +22,13 @@ import type {
 import { validateDecomposition } from "./lead/decompose";
 import { decompositionPrompt, taskSpecInputDescription } from "./lead/prompts";
 
-/** Canonical worker persona ids (worker persona contract, designer included). */
-const KNOWN_PERSONA_IDS = ["implementer", "reviewer", "debugger", "architect", "designer"] as const;
-const PERSONA_KIND_DEFAULTS =
-  "implementation→implementer, decision→architect, verification→reviewer, research→debugger, integration→architect; designer is explicit-request only";
+/**
+ * Persona vocabulary is single-sourced from the orchestrator's persona
+ * registry (@loop/orchestrator persona module); this adapter only renders it.
+ */
+const PERSONA_KIND_DEFAULTS_PROSE = `${Object.entries(KIND_DEFAULT_PERSONAS)
+  .map(([kind, id]) => `${kind}→${id}`)
+  .join(", ")}; ${EXPLICIT_ONLY_PERSONA_IDS.join(", ")} is explicit-request only`;
 import {
   HerdrLifecycleReporter,
   registerHerdrLifecycle,
@@ -115,7 +125,7 @@ export function registerLoopExtension(
       "Submit a dependency DAG to Loop after understanding an engineering request.",
       "Loop owns scheduling, worker dispatch, verification, retries, and durable state.",
       "Pass tasksJson as a JSON array using the generated Loop task fields.",
-      `Each task may carry an optional persona id (${KNOWN_PERSONA_IDS.join(" | ")}). Kind defaults: ${PERSONA_KIND_DEFAULTS}.`,
+      `Each task may carry an optional persona id (${PERSONA_IDS.join(" | ")}). Kind defaults: ${PERSONA_KIND_DEFAULTS_PROSE}.`,
     ].join(" "),
     parameters: Type.Object({
       intent: Type.String({ description: "The user's complete engineering intent" }),
@@ -465,9 +475,9 @@ function parseTasks(value: string): TaskSpecInput[] {
 function normalizePersonas(tasks: TaskSpecInput[]): TaskSpecInput[] {
   return tasks.map((task) => {
     const persona = task.persona?.trim();
-    if (persona && !(KNOWN_PERSONA_IDS as readonly string[]).includes(persona)) {
+    if (persona && !PERSONA_IDS.includes(persona)) {
       throw new Error(
-        `unknown persona '${persona}' in task ${task.id}. Valid persona ids: ${KNOWN_PERSONA_IDS.join(", ")}`,
+        `unknown persona '${persona}' in task ${task.id}. Valid persona ids: ${PERSONA_IDS.join(", ")}`,
       );
     }
     return { ...task, persona: persona || null };
