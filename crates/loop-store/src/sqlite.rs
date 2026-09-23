@@ -1,11 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use loop_core::attention::AttentionKind;
 use loop_core::event::{
     verification_recovery_attention, worker_recovery_attention, Artifact, Event, EventKind,
     ProjectionError, RunProjection,
 };
-use loop_core::policy::{CleanupRefusal, PurgePlan, RetentionPolicy};
+use loop_core::policy::{CleanupRefusal, ComputeClass, PurgePlan, RetentionPolicy};
 use loop_core::run::RunState;
 use loop_core::task::TaskState;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
@@ -355,6 +356,50 @@ fn database_now_ms(connection: &Connection) -> Result<i64, StoreError> {
     )?)
 }
 
+// Storage vocabulary frozen by `docs/decisions/2026-09-24-evolution-roadmap.md`
+// (실행 1). These columns historically stored
+// `format!("{:?}", variant).to_lowercase()`, so the persisted word is the
+// lowercase Rust variant name — NOT the serde form (`TypedDecision` stores as
+// `typeddecision`, not `typed_decision`). Renaming a variant must not change
+// these strings: existing persisted rows depend on them, and
+// `tests/worker-state-vocabulary.rs` pins every word.
+
+pub(crate) const fn compute_class_storage_word(class: ComputeClass) -> &'static str {
+    match class {
+        ComputeClass::Deterministic => "deterministic",
+        ComputeClass::TypedDecision => "typeddecision",
+        ComputeClass::Tiny => "tiny",
+        ComputeClass::Fast => "fast",
+        ComputeClass::Balanced => "balanced",
+        ComputeClass::Strong => "strong",
+        ComputeClass::Frontier => "frontier",
+    }
+}
+
+pub(crate) const fn attention_kind_storage_word(kind: AttentionKind) -> &'static str {
+    match kind {
+        AttentionKind::Question => "question",
+        AttentionKind::Decision => "decision",
+        AttentionKind::Approval => "approval",
+        AttentionKind::Conflict => "conflict",
+        AttentionKind::Failure => "failure",
+    }
+}
+
+pub(crate) const fn task_state_storage_word(state: TaskState) -> &'static str {
+    match state {
+        TaskState::Pending => "pending",
+        TaskState::Ready => "ready",
+        TaskState::Running => "running",
+        TaskState::Verifying => "verifying",
+        TaskState::Attention => "attention",
+        TaskState::Blocked => "blocked",
+        TaskState::Done => "done",
+        TaskState::Failed => "failed",
+        TaskState::Cancelled => "cancelled",
+    }
+}
+
 fn require_execution_owner(
     connection: &Connection,
     run_id: &str,
@@ -449,7 +494,7 @@ fn apply_indexes(transaction: &Transaction<'_>, event: &Event) -> Result<(), Sto
                     event.run_id,
                     task_id.as_str(),
                     task.attempt,
-                    format!("{:?}", task.preferred_compute).to_lowercase(),
+                    compute_class_storage_word(task.preferred_compute),
                 ],
             )?;
         }
@@ -483,7 +528,7 @@ fn apply_indexes(transaction: &Transaction<'_>, event: &Event) -> Result<(), Sto
             let data = serde_json::to_string(attention)?;
             transaction.execute(
                 "INSERT INTO attention (id, run_id, kind, state, data_json) VALUES (?1, ?2, ?3, 'open', ?4)",
-                params![attention.id, event.run_id, format!("{:?}", attention.kind).to_lowercase(), data],
+                params![attention.id, event.run_id, attention_kind_storage_word(attention.kind), data],
             )?;
             update_run_state(transaction, &event.run_id, "attention")?;
         }
@@ -577,7 +622,7 @@ fn insert_attention(
         params![
             attention.id,
             run_id,
-            format!("{:?}", attention.kind).to_lowercase(),
+            attention_kind_storage_word(attention.kind),
             serde_json::to_string(attention)?
         ],
     )?;
@@ -592,7 +637,7 @@ fn sync_projection_indexes(
         return Ok(());
     };
     if let Some(state) = projection.run_state {
-        update_run_state(transaction, run_id, &format!("{state:?}").to_lowercase())?;
+        update_run_state(transaction, run_id, &state.to_string())?;
     }
     for task in projection.tasks.values() {
         transaction.execute(
@@ -600,7 +645,7 @@ fn sync_projection_indexes(
             params![
                 run_id,
                 task.id.as_str(),
-                format!("{:?}", task.state).to_lowercase(),
+                task_state_storage_word(task.state),
                 serde_json::to_string(task)?,
             ],
         )?;

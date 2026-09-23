@@ -3,9 +3,17 @@ use serde::{Deserialize, Serialize};
 
 /// Lifecycle vocabulary for a worker as observed at the adapter boundary.
 ///
-/// This enum is the single source of the worker-status vocabulary: the bridge
-/// carries it into the generated protocol, and TypeScript adapters consume the
-/// generated `WorkerState` union instead of hand-writing a copy.
+/// This enum is the domain source of the worker-status vocabulary. Nothing
+/// in the bridge transports it today: `ActiveWorkerOutput` carries only
+/// `id`/`taskId`, and adapters expose worker status through `status()`
+/// without crossing the bridge. The vocabulary stays Rust-side until a bridge
+/// consumer actually asks for worker state (`docs/decisions/2026-09-24-evolution-roadmap.md`,
+/// 실행 1).
+///
+/// The TypeScript union `WorkerState` in `packages/providers/src/types.ts`
+/// is a deliberate frozen-contract copy of this enum's serde form, not
+/// generated output — its strings must change in lockstep with this enum or
+/// not at all.
 ///
 /// Vocabulary correspondence (decided here, once):
 ///

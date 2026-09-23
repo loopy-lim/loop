@@ -5,6 +5,12 @@ import type { ComputeClass, TaskContextOutput } from "@loop/protocol";
  * snake_case). `lost` is the only terminal-without-result state — adapters
  * that end a session without a usable result report `lost` and carry the
  * failure detail in `WorkerResult.failure` instead of a `failed` status.
+ *
+ * Frozen-contract exception (docs/decisions/2026-09-24-evolution-roadmap.md,
+ * 실행 1): this union is hand-written on purpose. Nothing in the generated
+ * protocol carries `WorkerState`, so there is nothing to generate it from.
+ * The strings below are a frozen contract with the Rust serde form in
+ * `crates/loop-core/src/run/worker.rs` — change both together or not at all.
  */
 export type WorkerState = "starting" | "running" | "completed" | "lost" | "cancelled";
 
