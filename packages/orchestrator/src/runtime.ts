@@ -3,7 +3,9 @@ import type { SnapshotOutput, TaskSpecInput } from "@loop/protocol";
 import type { ProviderRegistry } from "@loop/providers";
 
 import type { CompletionVerifier } from "./completion";
+import type { WorkerVisibility } from "./config";
 import type { OrchestrationControl } from "./control";
+import type { PersonaRegistry } from "./persona";
 import { Orchestrator, type CleanupRunReport, type CleanupRunRequest, type RunSummary } from "./coordinator";
 
 export type ObservedWorkerState = "running" | "completed" | "lost" | "unknown";
@@ -20,6 +22,8 @@ export interface LoopRuntimeOptions {
   maxFrontierWorkers?: number;
   completionVerifier?: CompletionVerifier;
   herdr?: HerdrWorkerRuntime;
+  personas?: PersonaRegistry;
+  workerVisibility?: WorkerVisibility;
 }
 
 export interface StartRunInput {
@@ -45,6 +49,8 @@ export class LoopRuntime {
       maxFrontierWorkers: options.maxFrontierWorkers,
       completionVerifier: options.completionVerifier,
       herdr: options.herdr,
+      personas: options.personas,
+      workerVisibility: options.workerVisibility,
     });
   }
 

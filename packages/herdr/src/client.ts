@@ -157,6 +157,45 @@ export class HerdrWorkerRuntime {
     }
   }
 
+  /**
+   * Creates a passive pane inside the run's workspace for mirroring worker
+   * output. The pane hosts no process — it is a pure viewer surface whose
+   * lifetime is owned by the caller (closePane on worker finish).
+   */
+  async createPane(runId: string, taskId: string, projectRoot: string, worktree: string, label: string): Promise<HerdrWorkerHandle> {
+    assertWorktreeInsideProject(projectRoot, worktree);
+    const parent = await this.#ensureWorkspace({
+      runId,
+      taskId,
+      projectRoot,
+      worktree,
+      execution: { type: "command", command: "echo", args: [] },
+      prompt: "",
+    });
+    const tab = await this.#run([
+      "tab", "create",
+      "--workspace", parent.workspaceId,
+      "--cwd", worktree,
+      "--label", label,
+      "--no-focus",
+    ]);
+    const paneId = requiredString(tab, ["result", "root_pane", "pane_id"]);
+    const tabId = requiredString(tab, ["result", "tab", "tab_id"]);
+    await this.#run(["pane", "rename", paneId, label]);
+    if (this.#workspaces.has(runId)) {
+      this.#workspaces.get(runId)!.tabIds.add(tabId);
+    }
+    return { workerId: label, workspaceId: parent.workspaceId, tabId, paneId, taskId };
+  }
+
+  async closePane(tabId: string): Promise<void> {
+    await this.#run(["tab", "close", tabId]).catch(() => undefined);
+  }
+
+  async sendText(paneId: string, text: string): Promise<void> {
+    await this.#run(["pane", "send-text", paneId, text]);
+  }
+
   attach(handle: HerdrWorkerHandle): HerdrWorkerHandle {
     validateHandle(handle);
     return { ...handle };

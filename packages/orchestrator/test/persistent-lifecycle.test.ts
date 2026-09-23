@@ -16,7 +16,7 @@ test("a completed persistent worker exits before the graph returns its summary",
     expect(fixture.pids()).toHaveLength(1);
     for (const pid of fixture.pids()) expect(alive(pid)).toBe(false);
     const snapshot = await protocol.getSnapshot(fixture.input);
-    expect(snapshot.tasks[0]?.activity).toContain("Checking graph dependencies");
+    expect(snapshot.tasks[0]?.activities.at(-1)).toContain("Checking graph dependencies");
     expect(snapshot.activeWorkers).toEqual([]);
   } finally { fixture.cleanup(); }
 });

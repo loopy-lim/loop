@@ -107,7 +107,7 @@ export type TaskSnapshotOutput = {
   writeScope: string[];
   blockedBy: string[];
   lastFailure?: string | null;
-  activity?: string | null;
+  activities: string[];
   resultSummary?: string | null;
 };
 
@@ -154,6 +154,38 @@ export type CheckResultInput = {
   id: string;
   passed: boolean;
 };
+
+export type ComputeCandidateInput = {
+  id: string;
+  computeClass: ComputeClass;
+  capabilities: ComputeCapabilitiesInput;
+  latency: number;
+  costWeight: number;
+  available: boolean;
+};
+
+/**
+ * Capability scores advertised for a compute candidate (loop-core `ComputeCapabilities` mirror; the core type lacks a JSON schema derive, so the bridge carries its own wire form and converts on entry).
+ */
+export type ComputeCapabilitiesInput = {
+  coding: number;
+  reasoning: number;
+  tools: number;
+  vision: number;
+  longContext: number;
+};
+
+export type CapabilityRequirementsInput = {
+  capabilities: ComputeCapabilitiesInput;
+  minimumCompute: ComputeClass;
+  maximumCompute: ComputeClass;
+  risk: RoutingRisk;
+};
+
+/**
+ * Task risk driving the compute-class floor (loop-core `Risk` mirror).
+ */
+export type RoutingRisk = 'low' | 'medium' | 'high' | 'critical';
 
 export type EventOutput = {
   sequence: number | bigint;
@@ -394,6 +426,17 @@ export type ResolveAttentionInput = {
   runId: string;
   attentionId: string;
   resolution: string;
+};
+
+export type SelectCandidateInput = {
+  candidates: ComputeCandidateInput[];
+  eligibleCandidateIds: string[];
+  requirements: CapabilityRequirementsInput;
+};
+
+export type SelectCandidateOutput = {
+  candidateId: string;
+  computeClass: ComputeClass;
 };
 
 export type SteerRunInput = {

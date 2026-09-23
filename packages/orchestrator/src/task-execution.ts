@@ -1,8 +1,16 @@
 import type { TaskContextOutput } from "@loop/protocol";
-import type { AgentProvider, WorkerHandle, WorkerResult } from "@loop/providers";
+import type { AgentProvider, StartWorkerInput, WorkerHandle, WorkerResult } from "@loop/providers";
 import type { CompletionVerifier } from "./completion";
 import type { OrchestrationControl } from "./control";
+import { resolvePersona, type PersonaRegistry } from "./persona";
 import { redact } from "./redact";
+
+// D4 of the worker persona contract transports the resolved persona text on
+// StartWorkerInput.personaInstructions; that field declaration is owned by
+// @loop/providers (a scoped follow-up restores it after the revert that lost
+// it). This structural supertype keeps the orchestrator typed in the meantime
+// and collapses to StartWorkerInput once the field returns.
+type PersonaWorkerStartInput = StartWorkerInput & { personaInstructions?: string };
 
 export interface TaskExecution { done: Promise<void>; settled: boolean; error?: unknown; abort(): void }
 interface Options {
@@ -12,6 +20,13 @@ interface Options {
   provider: AgentProvider;
   control: OrchestrationControl;
   verifier: CompletionVerifier;
+  personas?: PersonaRegistry;
+  /**
+   * When worker visibility renders lines into the store via the mirror sink,
+   * the raw 1 Hz recorder is suppressed so the history is not double-fed
+   * (docs/decisions/2026-09-23-worker-visibility.md D1/D3).
+   */
+  recordRawActivity?: boolean;
 }
 export function executeTask(options: Options): TaskExecution {
   const controller = new AbortController();
@@ -19,9 +34,11 @@ export function executeTask(options: Options): TaskExecution {
   execution.done = run(options, controller.signal).catch(error => { execution.error = error; }).finally(() => { execution.settled = true; });
   return execution;
 }
-async function run({ input, context, workerId, provider, control, verifier }: Options, signal: AbortSignal): Promise<void> {
+async function run({ input, context, workerId, provider, control, verifier, personas, recordRawActivity = true }: Options, signal: AbortSignal): Promise<void> {
   const taskId = context.task.id;
   const workerInput = { ...input, taskId, workerId };
+  const persona = resolvePersona({ requested: context.task.persona, kind: context.task.kind, registry: personas ?? {} });
+  const withPersonaWarning = (summary: string) => (persona.warning ? `${persona.warning}\n${summary}` : summary);
   let handleId: string | undefined;
   let workerFinished = false;
   let unsubscribe: (() => void) | undefined;
@@ -42,7 +59,9 @@ async function run({ input, context, workerId, provider, control, verifier }: Op
   };
   try {
     if (signal.aborted) { await control.recordWorkerStopped(workerInput); return; }
-    const starting = provider.start({ runId: input.runId, taskId, title: context.task.title, kind: context.task.kind, computeClass: context.task.preferredCompute, attempt: context.attempt, requirements: context.task.requirements, workingDirectory: context.workingDirectory, context });
+    const startInput: PersonaWorkerStartInput = { runId: input.runId, taskId, title: context.task.title, kind: context.task.kind, computeClass: context.task.preferredCompute, attempt: context.attempt, requirements: context.task.requirements, workingDirectory: context.workingDirectory, context };
+    if (persona.instructions) startInput.personaInstructions = persona.instructions;
+    const starting = provider.start(startInput);
     let handle: WorkerHandle;
     try { handle = await startup(starting, signal); }
     catch (error) {
@@ -54,8 +73,10 @@ async function run({ input, context, workerId, provider, control, verifier }: Op
       throw error;
     }
     handleId = handle.id;
+    // The subscription must stay attached even when raw recording is
+    // suppressed: the mirroring layer renders sink lines from these events.
     unsubscribe = provider.subscribe?.(handle.id, event => {
-      if (event.type !== "output" || Date.now() - lastActivity < 1000) return;
+      if (event.type !== "output" || !recordRawActivity || Date.now() - lastActivity < 1000) return;
       const activity = redact(event.text.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "").trim().split(/\r?\n/).at(-1) ?? "", 300);
       if (!activity) return;
       lastActivity = Date.now();
@@ -68,7 +89,7 @@ async function run({ input, context, workerId, provider, control, verifier }: Op
       await control.recordWorkerStopped(workerInput);
       return;
     }
-    await control.recordWorkerResult({ ...workerInput, success: result.success, summary: redact(result.summary) });
+    await control.recordWorkerResult({ ...workerInput, success: result.success, summary: withPersonaWarning(redact(result.summary)) });
     workerFinished = true;
     await release();
     if (!result.success) {
@@ -100,7 +121,7 @@ async function run({ input, context, workerId, provider, control, verifier }: Op
     }
     if (handleId && !workerFinished) await provider.cancel(handleId);
     await release();
-    if (!workerFinished) await control.recordWorkerResult({ ...workerInput, success: false, summary: redact(error) });
+    if (!workerFinished) await control.recordWorkerResult({ ...workerInput, success: false, summary: withPersonaWarning(redact(error)) });
     else await control.recordVerification({ ...input, taskId, passed: false, checks: [], reason: redact(error) });
   } finally {
     unsubscribe?.();

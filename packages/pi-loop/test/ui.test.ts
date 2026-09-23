@@ -246,6 +246,7 @@ test("status prioritizes attention and active work before completed history", ()
         readScope: [],
         writeScope: [],
         blockedBy: [],
+        activities: [],
         resultSummary: "complete",
       })),
       {
@@ -259,7 +260,7 @@ test("status prioritizes attention and active work before completed history", ()
         readScope: [],
         writeScope: ["src/current.ts"],
         blockedBy: [],
-        activity: "Editing current work",
+        activities: ["Editing current work"],
       },
     ],
   });
@@ -327,6 +328,7 @@ function richSnapshot(overrides: Partial<SnapshotOutput> = {}): SnapshotOutput {
       readScope: ["packages/protocol/**"],
       writeScope: [],
       blockedBy: [],
+      activities: [],
       resultSummary: "Found the protocol seam",
     }, {
       id: "impl",
@@ -339,7 +341,7 @@ function richSnapshot(overrides: Partial<SnapshotOutput> = {}): SnapshotOutput {
       readScope: ["src/**"],
       writeScope: ["src/impl.ts"],
       blockedBy: ["review"],
-      activity: "Inspecting call sites",
+      activities: ["Inspecting call sites"],
       lastFailure: "Typecheck failed",
     }],
     activeWorkers: [],

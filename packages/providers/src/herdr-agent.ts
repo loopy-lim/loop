@@ -205,7 +205,7 @@ export class HerdrAgentProvider implements AgentProvider {
       // newly created worker was actually observed working on the prompt.
       if (observed === "completed" || (observed === "idle" && observedWorking)) {
         session.status = "completed";
-        const summary = (await this.#runtime.read(session.handle)).trim();
+        const summary = redact((await this.#runtime.read(session.handle)).trim());
         this.#emit(session, { type: "lifecycle", status: "completed" });
         if (!summary) {
           return {
@@ -219,7 +219,7 @@ export class HerdrAgentProvider implements AgentProvider {
         return { success: true, summary, sessionId: session.handle.agentName };
       }
       session.status = observed === "blocked" ? "failed" : "failed";
-      const summary = (await this.#runtime.read(session.handle)).trim()
+      const summary = redact((await this.#runtime.read(session.handle)).trim())
         || `Herdr worker became ${observed}`;
       this.#emit(session, { type: "lifecycle", status: "failed" });
       return {

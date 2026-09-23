@@ -1,12 +1,12 @@
 [scheduler]
-max_parallel = 3
+max_parallel = 6
 max_frontier_workers = 1
 decision_parallelism = 1
 integration_parallelism = 1
 unknown_write_scope_is_exclusive = true
 
 [routing]
-default_compute_class = "fast"
+default_compute_class = "balanced"
 high_risk_floor = "strong"
 critical_risk_floor = "frontier"
 escalation = ["deterministic", "typed_decision", "tiny", "fast", "balanced", "strong", "frontier"]
@@ -21,3 +21,11 @@ attention_line_limit = 6
 findings_line_limit = 5
 list_line_limit = 8
 line_text_limit = 160
+# Live worker-activity surfaces (docs/decisions/2026-09-23-worker-visibility.md).
+# "off" keeps today's behavior byte-identical: no adapter wrapping, no extra
+# subscriptions, no panes. "watch" feeds the `loop watch` activity history;
+# "panes" adds one Herdr pane per worker (requires a HERDR_* context, falls
+# back to watch-only when headless).
+worker_visibility = "off"   # "off" | "watch" | "panes"
+worker_activity_lines = 5   # per-worker history lines shown in the watch feed (stored cap is 8)
+worker_pane_limit = 4       # concurrent Herdr mirror panes (only consumed by "panes")

@@ -1,9 +1,11 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { ComputeClass } from "@loop/protocol";
 import { parse as parseToml } from "smol-toml";
+
+import type { PersonaRegistry } from "./persona";
 
 export interface ModelProfile {
   id: string;
@@ -48,6 +50,9 @@ export interface LoopConfig {
     findingsLineLimit: number;
     listLineLimit: number;
     lineTextLimit: number;
+    workerVisibility: WorkerVisibility;
+    workerActivityLines: number;
+    workerPaneLimit: number;
   };
   lead: {
     command: string;
@@ -56,7 +61,18 @@ export interface LoopConfig {
   };
   models: ModelProfile[];
   providers: Record<string, ProviderConfig>;
+  personas: PersonaRegistry;
 }
+
+/** Live worker-activity surface (docs/decisions/2026-09-23-worker-visibility.md D5). */
+export type WorkerVisibility = "off" | "watch" | "panes";
+
+/**
+ * Stored history cap for per-task worker activity — the Rust core keeps at
+ * most this many lines per task (loop-core ACTIVITY_HISTORY_LIMIT). The
+ * presentation budget is clamped to it because showing more is impossible.
+ */
+const ACTIVITY_HISTORY_LIMIT = 8;
 
 export class ConfigError extends Error {
   constructor(
@@ -157,6 +173,9 @@ export function loadLoopConfig(options: LoadLoopConfigOptions = {}): LoopConfig 
       ),
       listLineLimit: positiveInteger(output.list_line_limit, "output.list_line_limit"),
       lineTextLimit: positiveInteger(output.line_text_limit, "output.line_text_limit"),
+      workerVisibility: workerVisibility(output.worker_visibility),
+      workerActivityLines: clampWorkerActivityLines(output.worker_activity_lines),
+      workerPaneLimit: positiveInteger(output.worker_pane_limit ?? 4, "output.worker_pane_limit"),
     },
     lead: {
       command: text(lead.command, "lead.command"),
@@ -165,7 +184,29 @@ export function loadLoopConfig(options: LoadLoopConfigOptions = {}): LoopConfig 
     },
     models,
     providers: parseProviders(providersDocument),
+    personas: loadPersonaRegistry(configDirectory),
   };
+}
+
+/**
+ * Persona registry per D1/D4 of the worker persona contract
+ * (docs/decisions/2026-09-22-worker-persona-contract.md): every
+ * `personas/*.md` file stem is a persona id and its trimmed body is the
+ * instruction text injected into worker prompts. A missing directory, a
+ * non-markdown file, or an empty body simply omits that id — resolution
+ * then degrades silently (or with a warning) instead of failing a run.
+ */
+export function loadPersonaRegistry(configDirectory: string): PersonaRegistry {
+  const directory = join(configDirectory, "personas");
+  if (!existsSync(directory)) return {};
+  const registry: PersonaRegistry = {};
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    const instructions = readFileSync(join(directory, entry.name), "utf8").trim();
+    if (!instructions) continue;
+    registry[entry.name.slice(0, -".md".length)] = instructions;
+  }
+  return registry;
 }
 
 const computeClasses = new Set<ComputeClass>([
@@ -318,6 +359,17 @@ function positiveInteger(value: unknown, path: string): number {
     throw new ConfigError("config.invalid", `${path} must be a positive integer`);
   }
   return Number(value);
+}
+
+function workerVisibility(value: unknown): WorkerVisibility {
+  if (value === undefined) return "off";
+  if (value === "off" || value === "watch" || value === "panes") return value;
+  throw new ConfigError("config.invalid", `output.worker_visibility must be "off", "watch", or "panes"`);
+}
+
+function clampWorkerActivityLines(value: unknown): number {
+  const lines = value === undefined ? 5 : positiveInteger(value, "output.worker_activity_lines");
+  return Math.min(lines, ACTIVITY_HISTORY_LIMIT);
 }
 
 function nonNegativeNumber(value: unknown, path: string): number {

@@ -797,6 +797,7 @@
         "TaskSnapshotOutput": {
           "type": "object",
           "required": [
+            "activities",
             "attempt",
             "blockedBy",
             "dependencies",
@@ -859,11 +860,11 @@
                 "null"
               ]
             },
-            "activity": {
-              "type": [
-                "string",
-                "null"
-              ]
+            "activities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "resultSummary": {
               "type": [
@@ -1179,6 +1180,7 @@
         "TaskSnapshotOutput": {
           "type": "object",
           "required": [
+            "activities",
             "attempt",
             "blockedBy",
             "dependencies",
@@ -1241,11 +1243,11 @@
                 "null"
               ]
             },
-            "activity": {
-              "type": [
-                "string",
-                "null"
-              ]
+            "activities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "resultSummary": {
               "type": [
@@ -1641,6 +1643,7 @@
         "TaskSnapshotOutput": {
           "type": "object",
           "required": [
+            "activities",
             "attempt",
             "blockedBy",
             "dependencies",
@@ -1703,11 +1706,11 @@
                 "null"
               ]
             },
-            "activity": {
-              "type": [
-                "string",
-                "null"
-              ]
+            "activities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             },
             "resultSummary": {
               "type": [
@@ -3233,6 +3236,175 @@
         }
       },
       "execution": "sync"
+    },
+    {
+      "name": "selectCandidate",
+      "commandId": 38,
+      "inputType": "SelectCandidateInput",
+      "outputType": "SelectCandidateOutput",
+      "inputSchema": {
+        "title": "SelectCandidateInput",
+        "type": "object",
+        "required": [
+          "candidates",
+          "eligibleCandidateIds",
+          "requirements"
+        ],
+        "properties": {
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/ComputeCandidateInput"
+            }
+          },
+          "eligibleCandidateIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requirements": {
+            "$ref": "#/definitions/CapabilityRequirementsInput"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "SelectCandidateOutput",
+        "type": "object",
+        "required": [
+          "candidateId",
+          "computeClass"
+        ],
+        "properties": {
+          "candidateId": {
+            "type": "string"
+          },
+          "computeClass": {
+            "$ref": "#/definitions/ComputeClass"
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "ComputeCandidateInput": {
+          "type": "object",
+          "required": [
+            "available",
+            "capabilities",
+            "computeClass",
+            "costWeight",
+            "id",
+            "latency"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "computeClass": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "capabilities": {
+              "$ref": "#/definitions/ComputeCapabilitiesInput"
+            },
+            "latency": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "costWeight": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "available": {
+              "type": "boolean"
+            }
+          }
+        },
+        "ComputeClass": {
+          "type": "string",
+          "enum": [
+            "deterministic",
+            "typed_decision",
+            "tiny",
+            "fast",
+            "balanced",
+            "strong",
+            "frontier"
+          ]
+        },
+        "ComputeCapabilitiesInput": {
+          "description": "Capability scores advertised for a compute candidate (loop-core `ComputeCapabilities` mirror; the core type lacks a JSON schema derive, so the bridge carries its own wire form and converts on entry).",
+          "type": "object",
+          "required": [
+            "coding",
+            "longContext",
+            "reasoning",
+            "tools",
+            "vision"
+          ],
+          "properties": {
+            "coding": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "reasoning": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "tools": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "vision": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "longContext": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            }
+          }
+        },
+        "CapabilityRequirementsInput": {
+          "type": "object",
+          "required": [
+            "capabilities",
+            "maximumCompute",
+            "minimumCompute",
+            "risk"
+          ],
+          "properties": {
+            "capabilities": {
+              "$ref": "#/definitions/ComputeCapabilitiesInput"
+            },
+            "minimumCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "maximumCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "risk": {
+              "$ref": "#/definitions/RoutingRisk"
+            }
+          }
+        },
+        "RoutingRisk": {
+          "description": "Task risk driving the compute-class floor (loop-core `Risk` mirror).",
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        }
+      }
     },
     {
       "name": "steerRun",

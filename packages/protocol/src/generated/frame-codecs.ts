@@ -162,7 +162,7 @@ function _pcDecodeF32(buf: Uint8Array, offset: number): { value: number; bytesRe
 
 import { createComplexCodec, createSchemaPostcardCodec } from '@rustra/types';
 import type { FrameCodec, RustraError, ComplexSchema } from '@rustra/types';
-import type { ActiveWorkerOutput, AddTaskInput, Array_of_EventOutput, Array_of_RunListOutput, AttentionKind, AttentionSnapshotOutput, CheckReceipt, CheckResultInput, ClaimRunnableTasksInput, CleanupRunInput, CleanupRunOutput, CompareTracesInput, CompareTracesOutput, CompletionCheckInput, ComputeClass, ConfigureRunInput, CreateRunInput, DecisionInput, DependencyResultOutput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, EventOutput, ExecutionLeaseInput, GetTraceInput, GetTraceOutput, ListRunsInput, OperationOutput, PolicyEvaluationOutput, PrepareRunInput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RunInput, RunListOutput, RunPlanOutput, RunState, SkippedArtifactOutput, SnapshotOutput, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, TaskKind, TaskSnapshotOutput, TaskSpecInput, TaskState, TraceComparison, TraceRanking, TraceReportEntry, TraceScore, TraceSummary, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
+import type { ActiveWorkerOutput, AddTaskInput, Array_of_EventOutput, Array_of_RunListOutput, AttentionKind, AttentionSnapshotOutput, CapabilityRequirementsInput, CheckReceipt, CheckResultInput, ClaimRunnableTasksInput, CleanupRunInput, CleanupRunOutput, CompareTracesInput, CompareTracesOutput, CompletionCheckInput, ComputeCandidateInput, ComputeCapabilitiesInput, ComputeClass, ConfigureRunInput, CreateRunInput, DecisionInput, DependencyResultOutput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, EventOutput, ExecutionLeaseInput, GetTraceInput, GetTraceOutput, ListRunsInput, OperationOutput, PolicyEvaluationOutput, PrepareRunInput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RoutingRisk, RunInput, RunListOutput, RunPlanOutput, RunState, SelectCandidateInput, SelectCandidateOutput, SkippedArtifactOutput, SnapshotOutput, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, TaskKind, TaskSnapshotOutput, TaskSpecInput, TaskState, TraceComparison, TraceRanking, TraceReportEntry, TraceScore, TraceSummary, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
 
 export const addTaskCodec: FrameCodec<AddTaskInput, OperationOutput> = {
   commandId: 4,
@@ -1136,17 +1136,15 @@ export const createRunCodec: FrameCodec<CreateRunInput, SnapshotOutput> = {
           }
         }
         {
-          const _tag = u8[offset];
-          offset += 1;
-          if (_tag === 0) {
-            _obj.activity = null;
-          } else {
-            {
-              const _v = _pcDecodeString(u8, offset);
-              _obj.activity = _v.value;
-              offset += _v.bytesRead;
-            }
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
           }
+          _obj.activities = _arr;
         }
         {
           const _tag = u8[offset];
@@ -1656,17 +1654,15 @@ export const getRunCodec: FrameCodec<RunInput, SnapshotOutput> = {
           }
         }
         {
-          const _tag = u8[offset];
-          offset += 1;
-          if (_tag === 0) {
-            _obj.activity = null;
-          } else {
-            {
-              const _v = _pcDecodeString(u8, offset);
-              _obj.activity = _v.value;
-              offset += _v.bytesRead;
-            }
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
           }
+          _obj.activities = _arr;
         }
         {
           const _tag = u8[offset];
@@ -2212,17 +2208,15 @@ export const getSnapshotCodec: FrameCodec<RunInput, SnapshotOutput> = {
           }
         }
         {
-          const _tag = u8[offset];
-          offset += 1;
-          if (_tag === 0) {
-            _obj.activity = null;
-          } else {
-            {
-              const _v = _pcDecodeString(u8, offset);
-              _obj.activity = _v.value;
-              offset += _v.bytesRead;
-            }
+          const _len = _pcDecodeVarint(u8, offset);
+          offset += _len.bytesRead;
+          const _arr: string[] = new Array(_len.value);
+          for (let _i = 0; _i < _len.value; _i++) {
+            const _v = _pcDecodeString(u8, offset);
+            _arr[_i] = _v.value;
+            offset += _v.bytesRead;
           }
+          _obj.activities = _arr;
         }
         {
           const _tag = u8[offset];
@@ -2878,7 +2872,7 @@ export const getTraceCodec: FrameCodec<GetTraceInput, GetTraceOutput> = {
   },
 };
 
-export const listRunsCodec = createSchemaPostcardCodec(37, {"title":"ListRunsInput","type":"object","required":["databasePath"],"properties":{"databasePath":{"type":"string"}}} as ComplexSchema, {"title":"Array_of_RunListOutput","type":"array","items":{"$ref":"#/definitions/RunListOutput"}} as ComplexSchema, {"TaskSpecInput":{"type":"object","required":["completionChecks","dependencies","id","kind","maxAttempts","maximumCompute","minimumCompute","preferredCompute","readScope","requirements","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"requirements":{"type":"array","items":{"type":"string"}},"persona":{"type":["string","null"]},"completionChecks":{"type":"array","items":{"$ref":"#/definitions/CompletionCheckInput"}},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"maxAttempts":{"type":"integer","format":"uint16","minimum":0}}},"TaskKind":{"type":"string","enum":["research","decision","implementation","verification","integration"]},"CompletionCheckInput":{"type":"object","required":["args","command","id","timeoutMs"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":["string","null"]},"timeoutMs":{"type":"integer","format":"uint64","minimum":0}}},"ComputeClass":{"type":"string","enum":["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"]},"SkippedArtifactOutput":{"type":"object","required":["artifact","reason"],"properties":{"artifact":{"type":"string"},"reason":{"type":"string"}}},"TraceReportEntry":{"description":"Per-run row of a benchmark report: aggregated metrics plus derived score.","type":"object","required":["runId","score","summary"],"properties":{"runId":{"type":"string"},"summary":{"$ref":"#/definitions/TraceSummary"},"score":{"$ref":"#/definitions/TraceScore"}}},"TraceSummary":{"description":"Aggregate, deterministic metrics for one run's ordered event sequence.\n\nEvery counter is derived purely from event kinds; `elapsed_ms` is the only wall-clock field and is never invented here — a caller with a clock (such as a store query joining recorded timings) may fill it in.","type":"object","properties":{"total_events":{"default":0,"type":"integer","format":"uint32","minimum":0},"tasks_created":{"default":0,"type":"integer","format":"uint32","minimum":0},"tasks_completed":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_starts":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_finishes":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_failures":{"default":0,"type":"integer","format":"uint32","minimum":0},"verification_passes":{"default":0,"type":"integer","format":"uint32","minimum":0},"verification_failures":{"default":0,"type":"integer","format":"uint32","minimum":0},"attention_created":{"default":0,"type":"integer","format":"uint32","minimum":0},"attention_resolved":{"default":0,"type":"integer","format":"uint32","minimum":0},"elapsed_ms":{"default":null,"type":["integer","null"],"format":"uint64","minimum":0}}},"TraceScore":{"description":"Deterministic comparison score for a [`TraceSummary`].\n\nEach component is per-mille (0..=1000); `total` is therefore 0..=3000.","type":"object","required":["autonomy","first_pass","reliability"],"properties":{"reliability":{"description":"Completed tasks out of created tasks.","type":"integer","format":"uint16","minimum":0},"autonomy":{"description":"Resolved attention out of created attention; a run that never needed attention scores full marks.","type":"integer","format":"uint16","minimum":0},"first_pass":{"description":"Verification passes out of verification attempts.","type":"integer","format":"uint16","minimum":0}}},"TraceComparison":{"type":"object","required":["rankings"],"properties":{"rankings":{"type":"array","items":{"$ref":"#/definitions/TraceRanking"}}}},"TraceRanking":{"type":"object","required":["label","score"],"properties":{"label":{"type":"string"},"score":{"$ref":"#/definitions/TraceScore"}}},"RunState":{"type":"string","enum":["active","pausing","paused","cancelling","attention","completed","failed","cancelled"]},"TaskSnapshotOutput":{"type":"object","required":["attempt","blockedBy","dependencies","id","kind","preferredCompute","readScope","state","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"state":{"$ref":"#/definitions/TaskState"},"attempt":{"type":"integer","format":"uint16","minimum":0},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"blockedBy":{"type":"array","items":{"type":"string"}},"lastFailure":{"type":["string","null"]},"activity":{"type":["string","null"]},"resultSummary":{"type":["string","null"]}}},"TaskState":{"type":"string","enum":["pending","ready","running","verifying","attention","blocked","done","failed","cancelled"]},"ActiveWorkerOutput":{"type":"object","required":["id","taskId"],"properties":{"id":{"type":"string"},"taskId":{"type":"string"}}},"AttentionSnapshotOutput":{"type":"object","required":["id","kind","summary"],"properties":{"id":{"type":"string"},"kind":{"$ref":"#/definitions/AttentionKind"},"summary":{"type":"string"},"taskId":{"type":["string","null"]}}},"AttentionKind":{"type":"string","enum":["question","decision","approval","conflict","failure"]},"DependencyResultOutput":{"type":"object","required":["summary","taskId","title"],"properties":{"taskId":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"}}},"CheckReceipt":{"type":"object","required":["args","command","durationMs","exitCode","id","stderr","stdout","timedOut","workingDirectory"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":"string"},"exitCode":{"type":"integer","format":"int32"},"stdout":{"type":"string"},"stderr":{"type":"string"},"timedOut":{"type":"boolean"},"durationMs":{"type":"integer","format":"uint64","minimum":0}}},"RunListOutput":{"type":"object","required":["runId","state"],"properties":{"runId":{"type":"string"},"state":{"$ref":"#/definitions/RunState"}}},"CheckResultInput":{"type":"object","required":["id","passed"],"properties":{"id":{"type":"string"},"passed":{"type":"boolean"}}},"EventOutput":{"type":"object","required":["payloadJson","sequence"],"properties":{"sequence":{"type":"integer","format":"int64"},"payloadJson":{"type":"string"}}}} as Record<string, ComplexSchema>, true)! as FrameCodec<ListRunsInput, Array_of_RunListOutput>;
+export const listRunsCodec = createSchemaPostcardCodec(37, {"title":"ListRunsInput","type":"object","required":["databasePath"],"properties":{"databasePath":{"type":"string"}}} as ComplexSchema, {"title":"Array_of_RunListOutput","type":"array","items":{"$ref":"#/definitions/RunListOutput"}} as ComplexSchema, {"TaskSpecInput":{"type":"object","required":["completionChecks","dependencies","id","kind","maxAttempts","maximumCompute","minimumCompute","preferredCompute","readScope","requirements","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"requirements":{"type":"array","items":{"type":"string"}},"persona":{"type":["string","null"]},"completionChecks":{"type":"array","items":{"$ref":"#/definitions/CompletionCheckInput"}},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"maxAttempts":{"type":"integer","format":"uint16","minimum":0}}},"TaskKind":{"type":"string","enum":["research","decision","implementation","verification","integration"]},"CompletionCheckInput":{"type":"object","required":["args","command","id","timeoutMs"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":["string","null"]},"timeoutMs":{"type":"integer","format":"uint64","minimum":0}}},"ComputeClass":{"type":"string","enum":["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"]},"SkippedArtifactOutput":{"type":"object","required":["artifact","reason"],"properties":{"artifact":{"type":"string"},"reason":{"type":"string"}}},"TraceReportEntry":{"description":"Per-run row of a benchmark report: aggregated metrics plus derived score.","type":"object","required":["runId","score","summary"],"properties":{"runId":{"type":"string"},"summary":{"$ref":"#/definitions/TraceSummary"},"score":{"$ref":"#/definitions/TraceScore"}}},"TraceSummary":{"description":"Aggregate, deterministic metrics for one run's ordered event sequence.\n\nEvery counter is derived purely from event kinds; `elapsed_ms` is the only wall-clock field and is never invented here — a caller with a clock (such as a store query joining recorded timings) may fill it in.","type":"object","properties":{"total_events":{"default":0,"type":"integer","format":"uint32","minimum":0},"tasks_created":{"default":0,"type":"integer","format":"uint32","minimum":0},"tasks_completed":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_starts":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_finishes":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_failures":{"default":0,"type":"integer","format":"uint32","minimum":0},"verification_passes":{"default":0,"type":"integer","format":"uint32","minimum":0},"verification_failures":{"default":0,"type":"integer","format":"uint32","minimum":0},"attention_created":{"default":0,"type":"integer","format":"uint32","minimum":0},"attention_resolved":{"default":0,"type":"integer","format":"uint32","minimum":0},"elapsed_ms":{"default":null,"type":["integer","null"],"format":"uint64","minimum":0}}},"TraceScore":{"description":"Deterministic comparison score for a [`TraceSummary`].\n\nEach component is per-mille (0..=1000); `total` is therefore 0..=3000.","type":"object","required":["autonomy","first_pass","reliability"],"properties":{"reliability":{"description":"Completed tasks out of created tasks.","type":"integer","format":"uint16","minimum":0},"autonomy":{"description":"Resolved attention out of created attention; a run that never needed attention scores full marks.","type":"integer","format":"uint16","minimum":0},"first_pass":{"description":"Verification passes out of verification attempts.","type":"integer","format":"uint16","minimum":0}}},"TraceComparison":{"type":"object","required":["rankings"],"properties":{"rankings":{"type":"array","items":{"$ref":"#/definitions/TraceRanking"}}}},"TraceRanking":{"type":"object","required":["label","score"],"properties":{"label":{"type":"string"},"score":{"$ref":"#/definitions/TraceScore"}}},"RunState":{"type":"string","enum":["active","pausing","paused","cancelling","attention","completed","failed","cancelled"]},"TaskSnapshotOutput":{"type":"object","required":["activities","attempt","blockedBy","dependencies","id","kind","preferredCompute","readScope","state","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"state":{"$ref":"#/definitions/TaskState"},"attempt":{"type":"integer","format":"uint16","minimum":0},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"blockedBy":{"type":"array","items":{"type":"string"}},"lastFailure":{"type":["string","null"]},"activities":{"type":"array","items":{"type":"string"}},"resultSummary":{"type":["string","null"]}}},"TaskState":{"type":"string","enum":["pending","ready","running","verifying","attention","blocked","done","failed","cancelled"]},"ActiveWorkerOutput":{"type":"object","required":["id","taskId"],"properties":{"id":{"type":"string"},"taskId":{"type":"string"}}},"AttentionSnapshotOutput":{"type":"object","required":["id","kind","summary"],"properties":{"id":{"type":"string"},"kind":{"$ref":"#/definitions/AttentionKind"},"summary":{"type":"string"},"taskId":{"type":["string","null"]}}},"AttentionKind":{"type":"string","enum":["question","decision","approval","conflict","failure"]},"DependencyResultOutput":{"type":"object","required":["summary","taskId","title"],"properties":{"taskId":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"}}},"CheckReceipt":{"type":"object","required":["args","command","durationMs","exitCode","id","stderr","stdout","timedOut","workingDirectory"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":"string"},"exitCode":{"type":"integer","format":"int32"},"stdout":{"type":"string"},"stderr":{"type":"string"},"timedOut":{"type":"boolean"},"durationMs":{"type":"integer","format":"uint64","minimum":0}}},"RunListOutput":{"type":"object","required":["runId","state"],"properties":{"runId":{"type":"string"},"state":{"$ref":"#/definitions/RunState"}}},"CheckResultInput":{"type":"object","required":["id","passed"],"properties":{"id":{"type":"string"},"passed":{"type":"boolean"}}},"ComputeCandidateInput":{"type":"object","required":["available","capabilities","computeClass","costWeight","id","latency"],"properties":{"id":{"type":"string"},"computeClass":{"$ref":"#/definitions/ComputeClass"},"capabilities":{"$ref":"#/definitions/ComputeCapabilitiesInput"},"latency":{"type":"integer","format":"uint16","minimum":0},"costWeight":{"type":"integer","format":"uint16","minimum":0},"available":{"type":"boolean"}}},"ComputeCapabilitiesInput":{"description":"Capability scores advertised for a compute candidate (loop-core `ComputeCapabilities` mirror; the core type lacks a JSON schema derive, so the bridge carries its own wire form and converts on entry).","type":"object","required":["coding","longContext","reasoning","tools","vision"],"properties":{"coding":{"type":"integer","format":"uint8","minimum":0},"reasoning":{"type":"integer","format":"uint8","minimum":0},"tools":{"type":"integer","format":"uint8","minimum":0},"vision":{"type":"integer","format":"uint8","minimum":0},"longContext":{"type":"integer","format":"uint8","minimum":0}}},"CapabilityRequirementsInput":{"type":"object","required":["capabilities","maximumCompute","minimumCompute","risk"],"properties":{"capabilities":{"$ref":"#/definitions/ComputeCapabilitiesInput"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"risk":{"$ref":"#/definitions/RoutingRisk"}}},"RoutingRisk":{"description":"Task risk driving the compute-class floor (loop-core `Risk` mirror).","type":"string","enum":["low","medium","high","critical"]},"EventOutput":{"type":"object","required":["payloadJson","sequence"],"properties":{"sequence":{"type":"integer","format":"int64"},"payloadJson":{"type":"string"}}}} as Record<string, ComplexSchema>, true)! as FrameCodec<ListRunsInput, Array_of_RunListOutput>;
 
 export const pauseRunCodec: FrameCodec<RunInput, OperationOutput> = {
   commandId: 14,
@@ -4021,6 +4015,115 @@ export const resumeRunCodec: FrameCodec<RunInput, OperationOutput> = {
   },
 };
 
+export const selectCandidateCodec: FrameCodec<SelectCandidateInput, SelectCandidateOutput> = {
+  commandId: 38,
+  execution: "sync",
+
+  encode(args: SelectCandidateInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(SelectCandidateInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 38, true);
+    parts.push(cmdId);
+    {
+      const _arr = args.candidates;
+      parts.push(_pcEncodeVarint(_arr.length));
+      for (let _i = 0; _i < _arr.length; _i++) {
+        parts.push(_pcEncodeString(_arr[_i].id));
+        {
+          const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+          const _idx = _variants.indexOf(_arr[_i].computeClass);
+          if (_idx < 0) throw new Error('invalid enum value for computeClass: ' + _arr[_i].computeClass);
+          parts.push(_pcEncodeVarint(_idx));
+        }
+        parts.push(_pcEncodeVarint(_arr[_i].capabilities.coding));
+        parts.push(_pcEncodeVarint(_arr[_i].capabilities.reasoning));
+        parts.push(_pcEncodeVarint(_arr[_i].capabilities.tools));
+        parts.push(_pcEncodeVarint(_arr[_i].capabilities.vision));
+        parts.push(_pcEncodeVarint(_arr[_i].capabilities.longContext));
+        parts.push(_pcEncodeVarint(_arr[_i].latency));
+        parts.push(_pcEncodeVarint(_arr[_i].costWeight));
+        parts.push(new Uint8Array([_arr[_i].available ? 1 : 0]));
+      }
+    }
+    {
+      const _arr = args.eligibleCandidateIds;
+      parts.push(_pcEncodeVarint(_arr.length));
+      for (let _i = 0; _i < _arr.length; _i++) {
+        parts.push(_pcEncodeString(_arr[_i]));
+      }
+    }
+    parts.push(_pcEncodeVarint(args.requirements.capabilities.coding));
+    parts.push(_pcEncodeVarint(args.requirements.capabilities.reasoning));
+    parts.push(_pcEncodeVarint(args.requirements.capabilities.tools));
+    parts.push(_pcEncodeVarint(args.requirements.capabilities.vision));
+    parts.push(_pcEncodeVarint(args.requirements.capabilities.longContext));
+    {
+      const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+      const _idx = _variants.indexOf(args.requirements.minimumCompute);
+      if (_idx < 0) throw new Error('invalid enum value for minimumCompute: ' + args.requirements.minimumCompute);
+      parts.push(_pcEncodeVarint(_idx));
+    }
+    {
+      const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+      const _idx = _variants.indexOf(args.requirements.maximumCompute);
+      if (_idx < 0) throw new Error('invalid enum value for maximumCompute: ' + args.requirements.maximumCompute);
+      parts.push(_pcEncodeVarint(_idx));
+    }
+    {
+      const _variants = ["low","medium","high","critical"] as const;
+      const _idx = _variants.indexOf(args.requirements.risk);
+      if (_idx < 0) throw new Error('invalid enum value for risk: ' + args.requirements.risk);
+      parts.push(_pcEncodeVarint(_idx));
+    }
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: SelectCandidateOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<SelectCandidateOutput> = {};
+    {
+      const _v = _pcDecodeString(u8, offset);
+      result.candidateId = _v.value;
+      offset += _v.bytesRead;
+    }
+    {
+      const _v = _pcDecodeVarint(u8, offset);
+      offset += _v.bytesRead;
+      const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+      result.computeClass = _variants[_v.value];
+    }
+    return { ok: true, result: result as SelectCandidateOutput };
+  },
+};
+
 export const steerRunCodec: FrameCodec<SteerRunInput, OperationOutput> = {
   commandId: 32,
   execution: "sync",
@@ -4296,7 +4399,7 @@ export const submitPlanCodec: FrameCodec<SubmitPlanInput, SubmitPlanOutput> = {
   },
 };
 
-export const subscribeEventsCodec = createSchemaPostcardCodec(19, {"title":"SubscribeEventsInput","type":"object","required":["afterSequence","databasePath","limit","runId"],"properties":{"databasePath":{"type":"string"},"runId":{"type":"string"},"afterSequence":{"type":"integer","format":"int64"},"limit":{"type":"integer","format":"uint16","minimum":0}}} as ComplexSchema, {"title":"Array_of_EventOutput","type":"array","items":{"$ref":"#/definitions/EventOutput"}} as ComplexSchema, {"TaskSpecInput":{"type":"object","required":["completionChecks","dependencies","id","kind","maxAttempts","maximumCompute","minimumCompute","preferredCompute","readScope","requirements","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"requirements":{"type":"array","items":{"type":"string"}},"persona":{"type":["string","null"]},"completionChecks":{"type":"array","items":{"$ref":"#/definitions/CompletionCheckInput"}},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"maxAttempts":{"type":"integer","format":"uint16","minimum":0}}},"TaskKind":{"type":"string","enum":["research","decision","implementation","verification","integration"]},"CompletionCheckInput":{"type":"object","required":["args","command","id","timeoutMs"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":["string","null"]},"timeoutMs":{"type":"integer","format":"uint64","minimum":0}}},"ComputeClass":{"type":"string","enum":["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"]},"SkippedArtifactOutput":{"type":"object","required":["artifact","reason"],"properties":{"artifact":{"type":"string"},"reason":{"type":"string"}}},"TraceReportEntry":{"description":"Per-run row of a benchmark report: aggregated metrics plus derived score.","type":"object","required":["runId","score","summary"],"properties":{"runId":{"type":"string"},"summary":{"$ref":"#/definitions/TraceSummary"},"score":{"$ref":"#/definitions/TraceScore"}}},"TraceSummary":{"description":"Aggregate, deterministic metrics for one run's ordered event sequence.\n\nEvery counter is derived purely from event kinds; `elapsed_ms` is the only wall-clock field and is never invented here — a caller with a clock (such as a store query joining recorded timings) may fill it in.","type":"object","properties":{"total_events":{"default":0,"type":"integer","format":"uint32","minimum":0},"tasks_created":{"default":0,"type":"integer","format":"uint32","minimum":0},"tasks_completed":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_starts":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_finishes":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_failures":{"default":0,"type":"integer","format":"uint32","minimum":0},"verification_passes":{"default":0,"type":"integer","format":"uint32","minimum":0},"verification_failures":{"default":0,"type":"integer","format":"uint32","minimum":0},"attention_created":{"default":0,"type":"integer","format":"uint32","minimum":0},"attention_resolved":{"default":0,"type":"integer","format":"uint32","minimum":0},"elapsed_ms":{"default":null,"type":["integer","null"],"format":"uint64","minimum":0}}},"TraceScore":{"description":"Deterministic comparison score for a [`TraceSummary`].\n\nEach component is per-mille (0..=1000); `total` is therefore 0..=3000.","type":"object","required":["autonomy","first_pass","reliability"],"properties":{"reliability":{"description":"Completed tasks out of created tasks.","type":"integer","format":"uint16","minimum":0},"autonomy":{"description":"Resolved attention out of created attention; a run that never needed attention scores full marks.","type":"integer","format":"uint16","minimum":0},"first_pass":{"description":"Verification passes out of verification attempts.","type":"integer","format":"uint16","minimum":0}}},"TraceComparison":{"type":"object","required":["rankings"],"properties":{"rankings":{"type":"array","items":{"$ref":"#/definitions/TraceRanking"}}}},"TraceRanking":{"type":"object","required":["label","score"],"properties":{"label":{"type":"string"},"score":{"$ref":"#/definitions/TraceScore"}}},"RunState":{"type":"string","enum":["active","pausing","paused","cancelling","attention","completed","failed","cancelled"]},"TaskSnapshotOutput":{"type":"object","required":["attempt","blockedBy","dependencies","id","kind","preferredCompute","readScope","state","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"state":{"$ref":"#/definitions/TaskState"},"attempt":{"type":"integer","format":"uint16","minimum":0},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"blockedBy":{"type":"array","items":{"type":"string"}},"lastFailure":{"type":["string","null"]},"activity":{"type":["string","null"]},"resultSummary":{"type":["string","null"]}}},"TaskState":{"type":"string","enum":["pending","ready","running","verifying","attention","blocked","done","failed","cancelled"]},"ActiveWorkerOutput":{"type":"object","required":["id","taskId"],"properties":{"id":{"type":"string"},"taskId":{"type":"string"}}},"AttentionSnapshotOutput":{"type":"object","required":["id","kind","summary"],"properties":{"id":{"type":"string"},"kind":{"$ref":"#/definitions/AttentionKind"},"summary":{"type":"string"},"taskId":{"type":["string","null"]}}},"AttentionKind":{"type":"string","enum":["question","decision","approval","conflict","failure"]},"DependencyResultOutput":{"type":"object","required":["summary","taskId","title"],"properties":{"taskId":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"}}},"CheckReceipt":{"type":"object","required":["args","command","durationMs","exitCode","id","stderr","stdout","timedOut","workingDirectory"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":"string"},"exitCode":{"type":"integer","format":"int32"},"stdout":{"type":"string"},"stderr":{"type":"string"},"timedOut":{"type":"boolean"},"durationMs":{"type":"integer","format":"uint64","minimum":0}}},"RunListOutput":{"type":"object","required":["runId","state"],"properties":{"runId":{"type":"string"},"state":{"$ref":"#/definitions/RunState"}}},"CheckResultInput":{"type":"object","required":["id","passed"],"properties":{"id":{"type":"string"},"passed":{"type":"boolean"}}},"EventOutput":{"type":"object","required":["payloadJson","sequence"],"properties":{"sequence":{"type":"integer","format":"int64"},"payloadJson":{"type":"string"}}}} as Record<string, ComplexSchema>, true)! as FrameCodec<SubscribeEventsInput, Array_of_EventOutput>;
+export const subscribeEventsCodec = createSchemaPostcardCodec(19, {"title":"SubscribeEventsInput","type":"object","required":["afterSequence","databasePath","limit","runId"],"properties":{"databasePath":{"type":"string"},"runId":{"type":"string"},"afterSequence":{"type":"integer","format":"int64"},"limit":{"type":"integer","format":"uint16","minimum":0}}} as ComplexSchema, {"title":"Array_of_EventOutput","type":"array","items":{"$ref":"#/definitions/EventOutput"}} as ComplexSchema, {"TaskSpecInput":{"type":"object","required":["completionChecks","dependencies","id","kind","maxAttempts","maximumCompute","minimumCompute","preferredCompute","readScope","requirements","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"requirements":{"type":"array","items":{"type":"string"}},"persona":{"type":["string","null"]},"completionChecks":{"type":"array","items":{"$ref":"#/definitions/CompletionCheckInput"}},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"maxAttempts":{"type":"integer","format":"uint16","minimum":0}}},"TaskKind":{"type":"string","enum":["research","decision","implementation","verification","integration"]},"CompletionCheckInput":{"type":"object","required":["args","command","id","timeoutMs"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":["string","null"]},"timeoutMs":{"type":"integer","format":"uint64","minimum":0}}},"ComputeClass":{"type":"string","enum":["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"]},"SkippedArtifactOutput":{"type":"object","required":["artifact","reason"],"properties":{"artifact":{"type":"string"},"reason":{"type":"string"}}},"TraceReportEntry":{"description":"Per-run row of a benchmark report: aggregated metrics plus derived score.","type":"object","required":["runId","score","summary"],"properties":{"runId":{"type":"string"},"summary":{"$ref":"#/definitions/TraceSummary"},"score":{"$ref":"#/definitions/TraceScore"}}},"TraceSummary":{"description":"Aggregate, deterministic metrics for one run's ordered event sequence.\n\nEvery counter is derived purely from event kinds; `elapsed_ms` is the only wall-clock field and is never invented here — a caller with a clock (such as a store query joining recorded timings) may fill it in.","type":"object","properties":{"total_events":{"default":0,"type":"integer","format":"uint32","minimum":0},"tasks_created":{"default":0,"type":"integer","format":"uint32","minimum":0},"tasks_completed":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_starts":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_finishes":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_failures":{"default":0,"type":"integer","format":"uint32","minimum":0},"verification_passes":{"default":0,"type":"integer","format":"uint32","minimum":0},"verification_failures":{"default":0,"type":"integer","format":"uint32","minimum":0},"attention_created":{"default":0,"type":"integer","format":"uint32","minimum":0},"attention_resolved":{"default":0,"type":"integer","format":"uint32","minimum":0},"elapsed_ms":{"default":null,"type":["integer","null"],"format":"uint64","minimum":0}}},"TraceScore":{"description":"Deterministic comparison score for a [`TraceSummary`].\n\nEach component is per-mille (0..=1000); `total` is therefore 0..=3000.","type":"object","required":["autonomy","first_pass","reliability"],"properties":{"reliability":{"description":"Completed tasks out of created tasks.","type":"integer","format":"uint16","minimum":0},"autonomy":{"description":"Resolved attention out of created attention; a run that never needed attention scores full marks.","type":"integer","format":"uint16","minimum":0},"first_pass":{"description":"Verification passes out of verification attempts.","type":"integer","format":"uint16","minimum":0}}},"TraceComparison":{"type":"object","required":["rankings"],"properties":{"rankings":{"type":"array","items":{"$ref":"#/definitions/TraceRanking"}}}},"TraceRanking":{"type":"object","required":["label","score"],"properties":{"label":{"type":"string"},"score":{"$ref":"#/definitions/TraceScore"}}},"RunState":{"type":"string","enum":["active","pausing","paused","cancelling","attention","completed","failed","cancelled"]},"TaskSnapshotOutput":{"type":"object","required":["activities","attempt","blockedBy","dependencies","id","kind","preferredCompute","readScope","state","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"state":{"$ref":"#/definitions/TaskState"},"attempt":{"type":"integer","format":"uint16","minimum":0},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"blockedBy":{"type":"array","items":{"type":"string"}},"lastFailure":{"type":["string","null"]},"activities":{"type":"array","items":{"type":"string"}},"resultSummary":{"type":["string","null"]}}},"TaskState":{"type":"string","enum":["pending","ready","running","verifying","attention","blocked","done","failed","cancelled"]},"ActiveWorkerOutput":{"type":"object","required":["id","taskId"],"properties":{"id":{"type":"string"},"taskId":{"type":"string"}}},"AttentionSnapshotOutput":{"type":"object","required":["id","kind","summary"],"properties":{"id":{"type":"string"},"kind":{"$ref":"#/definitions/AttentionKind"},"summary":{"type":"string"},"taskId":{"type":["string","null"]}}},"AttentionKind":{"type":"string","enum":["question","decision","approval","conflict","failure"]},"DependencyResultOutput":{"type":"object","required":["summary","taskId","title"],"properties":{"taskId":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"}}},"CheckReceipt":{"type":"object","required":["args","command","durationMs","exitCode","id","stderr","stdout","timedOut","workingDirectory"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":"string"},"exitCode":{"type":"integer","format":"int32"},"stdout":{"type":"string"},"stderr":{"type":"string"},"timedOut":{"type":"boolean"},"durationMs":{"type":"integer","format":"uint64","minimum":0}}},"RunListOutput":{"type":"object","required":["runId","state"],"properties":{"runId":{"type":"string"},"state":{"$ref":"#/definitions/RunState"}}},"CheckResultInput":{"type":"object","required":["id","passed"],"properties":{"id":{"type":"string"},"passed":{"type":"boolean"}}},"ComputeCandidateInput":{"type":"object","required":["available","capabilities","computeClass","costWeight","id","latency"],"properties":{"id":{"type":"string"},"computeClass":{"$ref":"#/definitions/ComputeClass"},"capabilities":{"$ref":"#/definitions/ComputeCapabilitiesInput"},"latency":{"type":"integer","format":"uint16","minimum":0},"costWeight":{"type":"integer","format":"uint16","minimum":0},"available":{"type":"boolean"}}},"ComputeCapabilitiesInput":{"description":"Capability scores advertised for a compute candidate (loop-core `ComputeCapabilities` mirror; the core type lacks a JSON schema derive, so the bridge carries its own wire form and converts on entry).","type":"object","required":["coding","longContext","reasoning","tools","vision"],"properties":{"coding":{"type":"integer","format":"uint8","minimum":0},"reasoning":{"type":"integer","format":"uint8","minimum":0},"tools":{"type":"integer","format":"uint8","minimum":0},"vision":{"type":"integer","format":"uint8","minimum":0},"longContext":{"type":"integer","format":"uint8","minimum":0}}},"CapabilityRequirementsInput":{"type":"object","required":["capabilities","maximumCompute","minimumCompute","risk"],"properties":{"capabilities":{"$ref":"#/definitions/ComputeCapabilitiesInput"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"risk":{"$ref":"#/definitions/RoutingRisk"}}},"RoutingRisk":{"description":"Task risk driving the compute-class floor (loop-core `Risk` mirror).","type":"string","enum":["low","medium","high","critical"]},"EventOutput":{"type":"object","required":["payloadJson","sequence"],"properties":{"sequence":{"type":"integer","format":"int64"},"payloadJson":{"type":"string"}}}} as Record<string, ComplexSchema>, true)! as FrameCodec<SubscribeEventsInput, Array_of_EventOutput>;
 
 export const updateTaskCodec: FrameCodec<UpdateTaskInput, OperationOutput> = {
   commandId: 5,

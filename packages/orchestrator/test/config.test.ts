@@ -15,15 +15,18 @@ test("loads the repository configuration into typed runtime data", () => {
   });
 
   expect(config.databasePath).toBe("/tmp/loop-config-test.sqlite");
-  expect(config.scheduler.maxWorkers).toBe(3);
+  expect(config.scheduler.maxWorkers).toBe(6);
   expect(config.scheduler.maxFrontierWorkers).toBe(1);
-  expect(config.routing.defaultComputeClass).toBe("fast");
+  expect(config.routing.defaultComputeClass).toBe("balanced");
   expect(config.output).toEqual({
     statusLineLimit: 8,
     attentionLineLimit: 6,
     findingsLineLimit: 5,
     listLineLimit: 8,
     lineTextLimit: 160,
+    workerVisibility: "off",
+    workerActivityLines: 5,
+    workerPaneLimit: 4,
   });
   expect(config.lead).toEqual({ command: "pi", provider: "zai", model: "glm-5.3-flashx" });
   expect(config.providers.codex?.command).toBe("codex");
@@ -38,11 +41,14 @@ test("loads the repository configuration into typed runtime data", () => {
   expect(registry.get("gpt-5.6-luna").computeClass).toBe("balanced");
   expect(registry.get("gpt-5.6-terra").computeClass).toBe("strong");
   expect(registry.get("gpt-5.6-sol").computeClass).toBe("frontier");
-  // Registry orders by cost_weight + latency, ties broken by id: sol (4+3)
-  // ties gemini-3.1-pro-low (4+3) and sorts after it lexicographically.
+  // Registry orders by cost_weight + latency, ties broken by id: all four
+  // frontier models tie at 4+3 and sort lexicographically (the restored
+  // gpt-6-luna/sol lanes mirror the codex fallback figures).
   expect(registry.forComputeClass("frontier").map((model) => model.id)).toEqual([
     "gemini-3.1-pro-low",
     "gpt-5.6-sol",
+    "gpt-6-sol",
+    "openai-codex/gpt-6-sol",
   ]);
 });
 
@@ -108,6 +114,9 @@ test("preserves custom output limits", () => {
     findingsLineLimit: 4,
     listLineLimit: 6,
     lineTextLimit: 120,
+    workerVisibility: "panes",
+    workerActivityLines: 3,
+    workerPaneLimit: 2,
   }));
 
   expect(loadLoopConfig({ configDirectory: directory }).output).toEqual({
@@ -116,7 +125,48 @@ test("preserves custom output limits", () => {
     findingsLineLimit: 4,
     listLineLimit: 6,
     lineTextLimit: 120,
+    workerVisibility: "panes",
+    workerActivityLines: 3,
+    workerPaneLimit: 2,
   });
+});
+
+test("worker visibility defaults to off and clamps the activity budget to the stored cap", () => {
+  const directory = configurationDirectory(policy(2, 1));
+  const output = loadLoopConfig({ configDirectory: directory }).output;
+  expect(output.workerVisibility).toBe("off");
+  expect(output.workerActivityLines).toBe(5);
+  expect(output.workerPaneLimit).toBe(4);
+
+  const overclamped = configurationDirectory(policy(2, 1, {
+    statusLineLimit: 8,
+    attentionLineLimit: 6,
+    findingsLineLimit: 5,
+    listLineLimit: 8,
+    lineTextLimit: 160,
+    workerVisibility: "watch",
+    workerActivityLines: 99,
+    workerPaneLimit: 4,
+  }));
+  expect(loadLoopConfig({ configDirectory: overclamped }).output.workerActivityLines).toBe(8);
+});
+
+ test.each([
+  ["worker_visibility", "\"both\""],
+  ["worker_activity_lines", "0"],
+  ["worker_pane_limit", "-3"],
+])("rejects invalid worker visibility policy %s=%s", (field, value) => {
+  const output = [
+    "status_line_limit = 8",
+    "attention_line_limit = 6",
+    "findings_line_limit = 5",
+    "list_line_limit = 8",
+    "line_text_limit = 160",
+    `${field} = ${value}`,
+  ];
+  const directory = configurationDirectory(`${policy(2, 1).split("[output]")[0]}[output]\n${output.join("\n")}\n`);
+
+  expect(() => loadLoopConfig({ configDirectory: directory })).toThrow();
 });
 
 test.each([
@@ -156,7 +206,16 @@ cost_weight = 1
 function policy(
   maxWorkers: number,
   maxFrontierWorkers: number,
-  output = {
+  output: {
+    statusLineLimit: number;
+    attentionLineLimit: number;
+    findingsLineLimit: number;
+    listLineLimit: number;
+    lineTextLimit: number;
+    workerVisibility?: "off" | "watch" | "panes";
+    workerActivityLines?: number;
+    workerPaneLimit?: number;
+  } = {
     statusLineLimit: 8,
     attentionLineLimit: 6,
     findingsLineLimit: 5,
@@ -181,7 +240,10 @@ attention_line_limit = ${output.attentionLineLimit}
 findings_line_limit = ${output.findingsLineLimit}
 list_line_limit = ${output.listLineLimit}
 line_text_limit = ${output.lineTextLimit}
-`;
+${output.workerVisibility === undefined ? "" : `worker_visibility = "${output.workerVisibility}"
+`}${output.workerActivityLines === undefined ? "" : `worker_activity_lines = ${output.workerActivityLines}
+`}${output.workerPaneLimit === undefined ? "" : `worker_pane_limit = ${output.workerPaneLimit}
+`}`;
 }
 
 function configurationDirectory(policyText: string): string {

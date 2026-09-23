@@ -6,7 +6,7 @@
 // DO NOT EDIT — changes will be overwritten and fail codegen --check.
 // ────────────────────────────────────────────────────────────
 
-import type { AddTaskInput, Array_of_EventOutput, Array_of_RunListOutput, ClaimRunnableTasksInput, CleanupRunInput, CleanupRunOutput, CompareTracesInput, CompareTracesOutput, ConfigureRunInput, CreateRunInput, DecisionInput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, ExecutionLeaseInput, GetTraceInput, GetTraceOutput, ListRunsInput, OperationOutput, PolicyEvaluationOutput, PrepareRunInput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RunInput, RunPlanOutput, SnapshotOutput, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
+import type { AddTaskInput, Array_of_EventOutput, Array_of_RunListOutput, ClaimRunnableTasksInput, CleanupRunInput, CleanupRunOutput, CompareTracesInput, CompareTracesOutput, ConfigureRunInput, CreateRunInput, DecisionInput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, ExecutionLeaseInput, GetTraceInput, GetTraceOutput, ListRunsInput, OperationOutput, PolicyEvaluationOutput, PrepareRunInput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RunInput, RunPlanOutput, SelectCandidateInput, SelectCandidateOutput, SnapshotOutput, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
 import { createGeneratedFields2, invokeGenerated, invokeGeneratedFields1, invokeGeneratedFields3 } from '@rustra/types';
 import type { InvokeOptions } from '@rustra/types';
 
@@ -139,6 +139,11 @@ export function resolveAttention(input: ResolveAttentionInput, options?: InvokeO
 resolveAttention.commandId = 'resolveAttention';
 
 export const resumeRun = createGeneratedFields2<RunInput, OperationOutput>(17, 'resumeRun', "databasePath", "runId", 'resumeRun');
+
+export function selectCandidate(input: SelectCandidateInput, options?: InvokeOptions): Promise<SelectCandidateOutput> {
+  return invokeGenerated<SelectCandidateOutput>(38, 'selectCandidate', input, options);
+}
+selectCandidate.commandId = 'selectCandidate';
 
 export function steerRun(input: SteerRunInput, options?: InvokeOptions): Promise<OperationOutput> {
   return invokeGenerated<OperationOutput>(32, 'steerRun', input, options);

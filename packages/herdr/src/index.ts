@@ -1,3 +1,4 @@
+export * from "./bounded-sender";
 export * from "./client";
 export * from "./pane";
 export * from "./worker";

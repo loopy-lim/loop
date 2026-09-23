@@ -1,16 +1,23 @@
 import type { RunListOutput, SnapshotOutput, TaskContextOutput } from "@loop/protocol";
 
-import { compactLines, type OutputLimits } from "./compact";
+import { compactLines, compactItems, singleLine, type OutputLimits } from "./compact";
+
+/** Options for the live worker-activity feed (docs/decisions/2026-09-23-worker-visibility.md D3/D5). */
+export interface SnapshotRenderOptions {
+  /** Per-worker history lines shown in the watch feed; 0/undefined hides the feed section. */
+  workerActivityLines?: number;
+}
 
 export function renderSnapshot(
   command: string,
   snapshot: SnapshotOutput,
   limits: OutputLimits,
+  options: SnapshotRenderOptions = {},
 ): string {
   if (command === "graph") return renderGraph(snapshot, limits);
   if (command === "workers") return renderWorkers(snapshot, limits);
   if (command === "attention") return renderAttention(snapshot, limits);
-  return renderStatus(snapshot, limits);
+  return renderStatus(snapshot, limits, options);
 }
 
 export function renderRuns(runs: RunListOutput[], limits: OutputLimits): string {
@@ -114,7 +121,7 @@ function renderAttention(snapshot: SnapshotOutput, limits: OutputLimits): string
   }).join("\n");
 }
 
-function renderStatus(snapshot: SnapshotOutput, limits: OutputLimits): string {
+function renderStatus(snapshot: SnapshotOutput, limits: OutputLimits, options: SnapshotRenderOptions = {}): string {
   const done = snapshot.tasks.filter((task) => task.state === "done").length;
   const taskLines = [...snapshot.tasks].sort((left, right) => {
     return taskPriority(left.state) - taskPriority(right.state);
@@ -131,7 +138,7 @@ function renderStatus(snapshot: SnapshotOutput, limits: OutputLimits): string {
     lineTextLimit: limits.lineTextLimit,
     overflow: (omitted) => `… ${omitted} more task findings`,
   });
-  return compactLines([
+  const status = compactLines([
     `Run ${snapshot.runId}`,
     `State: ${snapshot.state}`,
     `Tasks: ${done}/${snapshot.tasks.length} · Workers: ${snapshot.activeWorkers.length} · Attention: ${snapshot.openAttentionIds.length}`,
@@ -141,13 +148,42 @@ function renderStatus(snapshot: SnapshotOutput, limits: OutputLimits): string {
     lineTextLimit: limits.lineTextLimit,
     overflow: (omitted) => `… ${omitted} more status lines`,
   }).join("\n");
+  const feed = renderActivityFeed(snapshot, limits, options);
+  return feed ? `${status}\n${feed}` : status;
+}
+
+/**
+ * Live worker-activity section for `loop watch` (D3): the most recent history
+ * lines under each running worker's identity, bounded by the presentation
+ * budget (workerActivityLines per worker, findingsLineLimit workers) and the
+ * shared line-text clamp. One-shot `loop status` omits the section.
+ */
+function renderActivityFeed(snapshot: SnapshotOutput, limits: OutputLimits, options: SnapshotRenderOptions): string {
+  const budget = options.workerActivityLines ?? 0;
+  if (budget <= 0) return "";
+  const running = snapshot.tasks.filter((task) => task.state === "running" && task.activities.length > 0);
+  if (running.length === 0) return "";
+  const blocks = running.map((task) => {
+    const recent = task.activities.slice(-budget);
+    return [
+      `${task.id} activity:`,
+      ...recent.map((line) => `  │ ${singleLine(line, limits.lineTextLimit)}`),
+    ];
+  });
+  const visible = compactItems(blocks, limits.findingsLineLimit);
+  const lines = visible.items.flat();
+  if (visible.omitted > 0) {
+    lines.push(`… ${visible.omitted} more workers with activity`);
+  }
+  return lines.join("\n");
 }
 
 function taskDetails(task: SnapshotOutput["tasks"][number]): string[] {
+  const latestActivity = task.activities.at(-1);
   return [
     ...(task.blockedBy.length > 0 ? [`blocked: ${task.blockedBy.join(", ")}`] : []),
     ...(task.lastFailure ? [`failure: ${task.lastFailure}`] : []),
-    ...(task.activity ? [`activity: ${task.activity}`] : []),
+    ...(latestActivity ? [`activity: ${latestActivity}`] : []),
     ...(task.resultSummary ? [`result: ${task.resultSummary}`] : []),
   ];
 }

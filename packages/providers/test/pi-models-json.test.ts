@@ -36,6 +36,13 @@ function zaiCatalog(models: string[]): { provider: string; id: string }[] {
   return models.map((id) => ({ provider: "zai", id }));
 }
 
+/** pi's built-in openai-codex catalog gpt-6 ids (pi 0.87.1; OK-LUNA-PI / OK-SOL-PI). */
+const BUILT_IN_OPENAI_CODEX_IDS = ["gpt-6-luna", "gpt-6-sol"];
+
+function openaiCodexCatalog(models: string[]): { provider: string; id: string }[] {
+  return models.map((id) => ({ provider: "openai-codex", id }));
+}
+
 test("pi model patterns split into provider, id, and thinking suffix", () => {
   expect(parsePiModelPattern("zai/glm-5.3-flashx:high")).toEqual({
     provider: "zai",
@@ -244,6 +251,19 @@ test("regression: provisioned patterns resolve exactly instead of pi's custom-mo
     id: "glm-5.3-flash",
   });
 
+  // Unlike flashx, the openai-codex gpt-6 ids ship in pi's built-in catalog,
+  // so they exact-match without provisioning (config declares no [pi.models]
+  // metadata for them, per the 2026-09-22 model-environment decision).
+  const codexBuiltInOnly = openaiCodexCatalog(BUILT_IN_OPENAI_CODEX_IDS);
+  expect(findExactCatalogMatch("openai-codex/gpt-6-luna", codexBuiltInOnly)).toEqual({
+    provider: "openai-codex",
+    id: "gpt-6-luna",
+  });
+  expect(findExactCatalogMatch("openai-codex/gpt-6-sol", codexBuiltInOnly)).toEqual({
+    provider: "openai-codex",
+    id: "gpt-6-sol",
+  });
+
   // Post-fix behavior: the synced fragment closes every Loop pattern.
   const fragment = buildModelsJsonFragment(
     piCatalogFromModelsToml(document),
@@ -277,9 +297,36 @@ test("regression: provisioned patterns resolve exactly instead of pi's custom-mo
     provider: "zai",
     id: "glm-5.3-flash",
   });
-  // Every pi pattern declared in models.toml resolves against the merged catalog.
+  // No [pi.models] metadata is declared for the openai-codex ids, so the
+  // fragment must stay empty for that provider (an { id }-only upsert could
+  // reset a built-in catalog entry's metadata).
+  expect(fragment.providers["openai-codex"]).toBeUndefined();
+  const mergedCodex = openaiCodexCatalog([
+    ...BUILT_IN_OPENAI_CODEX_IDS,
+    ...(fragment.providers["openai-codex"]?.models ?? []).map((model) => model.id),
+  ]);
+  // Built-in openai-codex entries stay exact-matched through the merge.
+  expect(findExactCatalogMatch("openai-codex/gpt-6-luna", mergedCodex)).toEqual({
+    provider: "openai-codex",
+    id: "gpt-6-luna",
+  });
+  expect(findExactCatalogMatch("openai-codex/gpt-6-sol", mergedCodex)).toEqual({
+    provider: "openai-codex",
+    id: "gpt-6-sol",
+  });
+
+  // Every pi pattern declared in models.toml resolves exactly against its
+  // own provider's merged catalog (built-ins plus that provider's fragment).
+  const mergedByProvider: Record<string, { provider: string; id: string }[]> = {
+    zai: merged,
+    "openai-codex": mergedCodex,
+  };
   for (const source of piCatalogSources(document)) {
-    const pattern = source.provider === "zai" ? `${source.provider}/${source.id}` : source.id;
-    expect(findExactCatalogMatch(pattern, merged)).toBeDefined();
+    const catalog = mergedByProvider[source.provider];
+    expect(catalog).toBeDefined();
+    expect(findExactCatalogMatch(`${source.provider}/${source.id}`, catalog)).toEqual({
+      provider: source.provider,
+      id: source.id,
+    });
   }
 });

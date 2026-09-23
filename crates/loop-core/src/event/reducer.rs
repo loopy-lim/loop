@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -59,8 +59,14 @@ pub struct RunProjection {
     pub guidance: Vec<Guidance>,
     pub outputs: BTreeMap<TaskId, String>,
     pub checks: BTreeMap<TaskId, Vec<CheckReceipt>>,
-    pub activities: BTreeMap<TaskId, String>,
+    pub activities: BTreeMap<TaskId, VecDeque<String>>,
 }
+
+/// Stored history cap for per-task worker activity. This is a deterministic
+/// core policy (element cardinality only — no adapter, pane, or viewer
+/// concepts); presentation budgets (how many lines a viewer shows) live
+/// outside core.
+pub const ACTIVITY_HISTORY_LIMIT: usize = 8;
 
 impl RunProjection {
     pub fn apply(&mut self, event: &Event) -> Result<(), ProjectionError> {
@@ -105,7 +111,11 @@ impl RunProjection {
             }
             EventKind::TaskActivityRecorded { task_id, activity } => {
                 self.task_mut(task_id)?;
-                self.activities.insert(task_id.clone(), activity.clone());
+                let history = self.activities.entry(task_id.clone()).or_default();
+                if history.len() >= ACTIVITY_HISTORY_LIMIT {
+                    history.pop_front();
+                }
+                history.push_back(activity.clone());
             }
             EventKind::RunCreated => {
                 if self.run_id.is_some() {

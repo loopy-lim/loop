@@ -10,7 +10,7 @@ import {
   resolveConfigDirectory,
   type LoopConfig,
 } from "@loop/orchestrator/config";
-import { compactLines, renderSnapshot, renderTaskContext, type OutputLimits } from "@loop/presentation";
+import { compactLines, renderSnapshot, renderTaskContext, type OutputLimits, type SnapshotRenderOptions } from "@loop/presentation";
 import { observeRun, spawnOwner } from "./dispatcher";
 import type { BenchmarkReport } from "@loop/orchestrator";
 import type { ProviderRegistry } from "@loop/providers";
@@ -179,7 +179,12 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
         await launchOwner(parsed, config, runId, plan.workingDirectory, options);
       }
       if (parsed.command === "watch") {
-        await observeRun({ snapshot: () => protocol.getSnapshot(input), onSnapshot: snapshot => io.stdout(parsed.json ? JSON.stringify(snapshot) + "\n" : "\x1b[2J\x1b[H" + formatSnapshot("status", snapshot, config.output)) });
+        // D3/D5: the live worker-activity feed is a watch-only section, gated
+        // by the policy visibility switch ("off" keeps watch byte-identical).
+        const feedOptions: SnapshotRenderOptions | undefined = config.output.workerVisibility === "off"
+          ? undefined
+          : { workerActivityLines: config.output.workerActivityLines };
+        await observeRun({ snapshot: () => protocol.getSnapshot(input), onSnapshot: snapshot => io.stdout(parsed.json ? JSON.stringify(snapshot) + "\n" : "\x1b[2J\x1b[H" + formatSnapshot("status", snapshot, config.output, feedOptions)) });
       } else {
         const snapshot = await protocol.getSnapshot(input);
         if (parsed.json) io.stdout(`${JSON.stringify(snapshot)}\n`);
@@ -244,8 +249,9 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
       const { buildProviderRegistry, LoopRuntime } = await import("@loop/orchestrator");
       const plan = payload ?? await protocol.getRunPlan(input);
       const runtime = new LoopRuntime({ control: protocol, databasePath: config.databasePath,
-        providers: buildProviderRegistry({ config, projectRoot: plan.workingDirectory }),
-        maxWorkers: config.scheduler.maxWorkers, maxFrontierWorkers: config.scheduler.maxFrontierWorkers });
+        providers: buildProviderRegistry({ config, projectRoot: plan.workingDirectory, activityRecorder: protocol }),
+        maxWorkers: config.scheduler.maxWorkers, maxFrontierWorkers: config.scheduler.maxFrontierWorkers,
+        workerVisibility: config.output.workerVisibility });
       if (payload) {
         await runtime.prepare(payload);
         const owner = await launchOwner(parsed, config, runId, plan.workingDirectory, options);
@@ -512,8 +518,8 @@ function prepareBridgeEnvironment(): void {
   if (existsSync(adjacent)) process.env.RUSTRA_BUN_LIBRARY = adjacent;
 }
 
-export function formatSnapshot(command: string, snapshot: SnapshotOutput, limits: OutputLimits): string {
-  return renderSnapshot(command, snapshot, limits).replace("Next: /loop", "Next: loop") + "\n";
+export function formatSnapshot(command: string, snapshot: SnapshotOutput, limits: OutputLimits, options?: SnapshotRenderOptions): string {
+  return renderSnapshot(command, snapshot, limits, options).replace("Next: /loop", "Next: loop") + "\n";
 }
 
 export function formatCleanupSnapshot(

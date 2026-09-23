@@ -256,7 +256,7 @@ test("human CLI renderers share line limits and exact overflow summaries", () =>
     intent: "", workingDirectory: "/project", guidance: [], attention: [], lastSequence: 1,
     runId: "render-run",
     state: "active",
-    tasks: Array.from({ length: 7 }, (_, index) => ({ id: `task-${index + 1}`, title: "task", kind: "research", state: "ready", preferredCompute: "fast", attempt: 0, dependencies: [], readScope: [], writeScope: [], blockedBy: [] })),
+    tasks: Array.from({ length: 7 }, (_, index) => ({ id: `task-${index + 1}`, title: "task", kind: "research", state: "ready", preferredCompute: "fast", attempt: 0, dependencies: [], readScope: [], writeScope: [], blockedBy: [], activities: [] })),
     activeWorkers: Array.from({ length: 7 }, (_, index) => ({
       id: `worker-${index + 1}`,
       taskId: `task-${index + 1}`,
@@ -301,6 +301,63 @@ test("human CLI renderers share line limits and exact overflow summaries", () =>
   ]);
 });
 
+test("watch feed renders bounded per-worker activity history while status stays byte-identical", () => {
+  const limits = {
+    statusLineLimit: 8,
+    attentionLineLimit: 4,
+    findingsLineLimit: 5,
+    listLineLimit: 4,
+    lineTextLimit: 160,
+  };
+  const snapshot: protocol.SnapshotOutput = {
+    intent: "", workingDirectory: "/project", guidance: [], attention: [], lastSequence: 4,
+    runId: "feed-run",
+    state: "active",
+    tasks: [
+      {
+        id: "t-live", title: "Live task", kind: "research", state: "running",
+        preferredCompute: "fast", attempt: 0, dependencies: [], readScope: [], writeScope: [],
+        blockedBy: [],
+        activities: [
+          "[lifecycle] starting t-live",
+          "[message] step one",
+          "[message] step two",
+          "[message] step three",
+        ],
+      },
+      {
+        id: "t-done", title: "Done task", kind: "research", state: "done",
+        preferredCompute: "fast", attempt: 0, dependencies: [], readScope: [], writeScope: [],
+        blockedBy: [],
+        activities: ["[lifecycle] starting t-done", "[result] finished"],
+        resultSummary: "finished",
+      },
+    ],
+    activeWorkers: [{ id: "w-1", taskId: "t-live" }],
+    openAttentionIds: [],
+  };
+
+  // Without the feed option (worker_visibility "off") the render matches the
+  // historical behavior: a single latest-activity detail line, no feed section.
+  const plain = formatSnapshot("status", snapshot, limits);
+  expect(plain).toContain("activity: [message] step three");
+  expect(plain).not.toContain("t-live activity:");
+  expect(plain).not.toContain("\u2502");
+
+  // With the feed option (watch + visibility on) the running worker shows its
+  // most recent history lines; the tail respects the per-worker budget.
+  const feed = formatSnapshot("status", snapshot, limits, { workerActivityLines: 2 });
+  const feedLines = feed.trim().split("\n");
+  expect(feedLines).toContain("t-live activity:");
+  expect(feedLines).toContain("  \u2502 [message] step two");
+  expect(feedLines).toContain("  \u2502 [message] step three");
+  expect(feedLines).not.toContain("  \u2502 [lifecycle] starting t-live");
+  expect(feedLines).not.toContain("  \u2502 [message] step one");
+  // Done tasks never grow a feed block; their result stays in the task line.
+  expect(feedLines).not.toContain("t-done activity:");
+  expect(feed).toContain("activity: [result] finished");
+});
+
 test("human models output is a bounded list while JSON remains complete", async () => {
   const human = output();
   const json = output();
@@ -314,7 +371,7 @@ test("human models output is a bounded list while JSON remains complete", async 
   expect(human.stdout()).not.toContain("[{");
   expect(human.stdout()).not.toContain("}]");
   expect(human.stdout()).toContain("fast · zai/glm-5.3-flashx");
-  expect(JSON.parse(json.stdout())).toHaveLength(12);
+  expect(JSON.parse(json.stdout())).toHaveLength(16);
 });
 
 function output(): {

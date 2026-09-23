@@ -6,7 +6,9 @@ import type { TaskSpecInput } from "@loop/protocol";
 import type { AgentProvider, ProviderRegistry } from "@loop/providers";
 import { CompletionVerifier, NodeCompletionRunner } from "./completion";
 import { cleanupRun, type CleanupRunReport, type CleanupRunRequest } from "./cleanup";
+import type { WorkerVisibility } from "./config";
 import type { OrchestrationControl } from "./control";
+import type { PersonaRegistry } from "./persona";
 import { executeTask, type TaskExecution } from "./task-execution";
 import { redact } from "./redact";
 
@@ -18,6 +20,8 @@ interface OrchestratorOptions {
   maxFrontierWorkers?: number;
   completionVerifier?: CompletionVerifier;
   herdr?: HerdrWorkerRuntime;
+  personas?: PersonaRegistry;
+  workerVisibility?: WorkerVisibility;
 }
 export interface RunRequest {
   databasePath: string;
@@ -44,6 +48,8 @@ export class Orchestrator {
   readonly #maxFrontierWorkers: number;
   readonly #completionVerifier: CompletionVerifier;
   readonly #herdr?: HerdrWorkerRuntime;
+  readonly #personas: PersonaRegistry;
+  readonly #workerVisibility: WorkerVisibility;
   constructor(options: OrchestratorOptions) {
     this.#control = options.control;
     this.#providers = options.providers;
@@ -51,6 +57,8 @@ export class Orchestrator {
     this.#maxFrontierWorkers = Math.max(1, options.maxFrontierWorkers ?? 1);
     this.#completionVerifier = options.completionVerifier ?? new CompletionVerifier(new NodeCompletionRunner());
     this.#herdr = options.herdr;
+    this.#personas = options.personas ?? {};
+    this.#workerVisibility = options.workerVisibility ?? "off";
   }
   cleanupRun(request: CleanupRunRequest): Promise<CleanupRunReport> {
     return cleanupRun(this.#control, { ...request, herdr: request.herdr ?? this.#herdr });
@@ -91,6 +99,14 @@ export class Orchestrator {
       if (!(await lease()).accepted) return summary;
     }
     const executionInput = { ...input, executionOwner: owner };
+    // Options that never vary across scheduled tasks, assembled once.
+    const taskExecutionOptions = {
+      input: executionInput,
+      control: this.#control,
+      verifier: this.#completionVerifier,
+      personas: this.#personas,
+      recordRawActivity: this.#workerVisibility === "off",
+    };
     const active = new Map<string, TaskExecution>();
     let leaseLost = false;
     let heartbeatRunning = false;
@@ -176,7 +192,7 @@ export class Orchestrator {
             throw error;
           }
           summary.startedAt[taskId] = Date.now();
-          active.set(taskId, executeTask({ input: executionInput, context, workerId, provider, control: this.#control, verifier: this.#completionVerifier }));
+          active.set(taskId, executeTask({ ...taskExecutionOptions, context, workerId, provider }));
         }
         if (leaseLost) throw new Error("execution ownership was lost");
         if (active.size === 0) {

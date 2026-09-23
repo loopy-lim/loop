@@ -186,7 +186,7 @@ pub struct TaskSnapshotOutput {
     pub write_scope: Vec<String>,
     pub blocked_by: Vec<String>,
     pub last_failure: Option<String>,
-    pub activity: Option<String>,
+    pub activities: Vec<String>,
     pub result_summary: Option<String>,
 }
 
@@ -927,6 +927,122 @@ fn run_trace_summary(database_path: &str, run_id: &str) -> Result<TraceSummary> 
     Ok(summary)
 }
 
+/// Capability scores advertised for a compute candidate (loop-core
+/// `ComputeCapabilities` mirror; the core type lacks a JSON schema derive,
+/// so the bridge carries its own wire form and converts on entry).
+#[bridge_type]
+pub struct ComputeCapabilitiesInput {
+    pub coding: u8,
+    pub reasoning: u8,
+    pub tools: u8,
+    pub vision: u8,
+    pub long_context: u8,
+}
+
+/// Task risk driving the compute-class floor (loop-core `Risk` mirror).
+#[bridge_type]
+pub enum RoutingRisk {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+#[bridge_type]
+pub struct ComputeCandidateInput {
+    pub id: String,
+    pub compute_class: ComputeClass,
+    pub capabilities: ComputeCapabilitiesInput,
+    pub latency: u16,
+    pub cost_weight: u16,
+    pub available: bool,
+}
+
+#[bridge_type]
+pub struct CapabilityRequirementsInput {
+    pub capabilities: ComputeCapabilitiesInput,
+    pub minimum_compute: ComputeClass,
+    pub maximum_compute: ComputeClass,
+    pub risk: RoutingRisk,
+}
+
+#[bridge_type]
+pub struct SelectCandidateInput {
+    pub candidates: Vec<ComputeCandidateInput>,
+    pub eligible_candidate_ids: Vec<String>,
+    pub requirements: CapabilityRequirementsInput,
+}
+
+#[bridge_type]
+pub struct SelectCandidateOutput {
+    pub candidate_id: String,
+    pub compute_class: ComputeClass,
+}
+
+impl From<ComputeCapabilitiesInput> for loop_core::policy::ComputeCapabilities {
+    fn from(input: ComputeCapabilitiesInput) -> Self {
+        Self::new(
+            input.coding,
+            input.reasoning,
+            input.tools,
+            input.vision,
+            input.long_context,
+        )
+    }
+}
+
+impl From<RoutingRisk> for loop_core::policy::Risk {
+    fn from(risk: RoutingRisk) -> Self {
+        match risk {
+            RoutingRisk::Low => Self::Low,
+            RoutingRisk::Medium => Self::Medium,
+            RoutingRisk::High => Self::High,
+            RoutingRisk::Critical => Self::Critical,
+        }
+    }
+}
+
+impl From<ComputeCandidateInput> for loop_core::policy::ComputeCandidate {
+    fn from(input: ComputeCandidateInput) -> Self {
+        let mut candidate = Self::new(
+            input.id,
+            input.compute_class,
+            input.capabilities.into(),
+            input.latency,
+            input.cost_weight,
+        );
+        candidate.available = input.available;
+        candidate
+    }
+}
+
+#[command]
+pub fn select_candidate(input: SelectCandidateInput) -> Result<SelectCandidateOutput> {
+    let requirements = loop_core::policy::CapabilityRequirements::new(
+        input.requirements.capabilities.coding,
+        input.requirements.capabilities.reasoning,
+        input.requirements.capabilities.tools,
+        input.requirements.capabilities.vision,
+        input.requirements.capabilities.long_context,
+    )
+    .with_compute_range(
+        input.requirements.minimum_compute,
+        input.requirements.maximum_compute,
+    )
+    .with_risk(input.requirements.risk.into());
+    let candidates: Vec<loop_core::policy::ComputeCandidate> =
+        input.candidates.into_iter().map(Into::into).collect();
+    let eligible_candidate_ids: std::collections::BTreeSet<String> =
+        input.eligible_candidate_ids.into_iter().collect();
+    let selected =
+        loop_core::policy::select_candidate(&candidates, &eligible_candidate_ids, &requirements)
+            .map_err(|error| bridge_error("no_sufficient_candidate", error))?;
+    Ok(SelectCandidateOutput {
+        candidate_id: selected.id.clone(),
+        compute_class: selected.compute_class,
+    })
+}
+
 #[command]
 pub fn get_trace(input: GetTraceInput) -> Result<GetTraceOutput> {
     let run_id = input.run_id.clone();
@@ -1128,7 +1244,11 @@ fn snapshot(store: &SqliteStore, run_id: &str) -> Result<SnapshotOutput> {
                 .map(ToString::to_string)
                 .collect(),
             last_failure: projection.failures.get(&task.id).cloned(),
-            activity: projection.activities.get(&task.id).cloned(),
+            activities: projection
+                .activities
+                .get(&task.id)
+                .map(|history| history.iter().cloned().collect())
+                .unwrap_or_default(),
             result_summary: projection.outputs.get(&task.id).cloned(),
         })
         .collect();
@@ -1193,36 +1313,177 @@ pub(crate) fn task_from_input(input: TaskSpecInput) -> Result<Task> {
 pub fn loop_package() -> &'static Package {
     static PACKAGE: OnceLock<Package> = OnceLock::new();
     PACKAGE.get_or_init(|| {
-        let package = crate::execution::register_execution(register!(
-            Package::builder("loop.orchestration"),
-            create_run,
-            get_run,
-            submit_plan,
-            add_task,
-            update_task,
-            claim_runnable_tasks,
-            record_worker_started,
-            record_worker_result,
-            record_verification,
-            record_decision,
-            request_attention,
-            resolve_attention,
-            cancel_run,
-            pause_run,
-            confirm_paused,
-            record_worker_stopped,
-            resume_run,
-            get_snapshot,
-            subscribe_events,
-            cleanup_run,
-            evaluate_worktree_removal,
-            evaluate_surface_removal,
-            get_trace,
-            compare_traces
-        ))
+        let package = register!(
+            crate::execution::register_execution(register!(
+                Package::builder("loop.orchestration"),
+                create_run,
+                get_run,
+                submit_plan,
+                add_task,
+                update_task,
+                claim_runnable_tasks,
+                record_worker_started,
+                record_worker_result,
+                record_verification,
+                record_decision,
+                request_attention,
+                resolve_attention,
+                cancel_run,
+                pause_run,
+                confirm_paused,
+                record_worker_stopped,
+                resume_run,
+                get_snapshot,
+                subscribe_events,
+                cleanup_run,
+                evaluate_worktree_removal,
+                evaluate_surface_removal,
+                get_trace,
+                compare_traces
+            )),
+            // Registered after the execution module so existing command ids
+            // stay stable (additive exposure of the routing decision).
+            select_candidate
+        )
         .event::<RunChangedEvent>("loop.run_changed")
         .build();
         package.register_ffi_with_default(FfiFormat::Json);
         package
     })
+}
+
+#[cfg(test)]
+mod routing_tests {
+    use super::*;
+
+    fn candidate(id: &str, compute_class: ComputeClass, cost_weight: u16) -> ComputeCandidateInput {
+        ComputeCandidateInput {
+            id: id.into(),
+            compute_class,
+            capabilities: ComputeCapabilitiesInput {
+                coding: 0,
+                reasoning: 0,
+                tools: 1,
+                vision: 0,
+                long_context: 0,
+            },
+            latency: 0,
+            cost_weight,
+            available: true,
+        }
+    }
+
+    fn requirements(
+        minimum: ComputeClass,
+        maximum: ComputeClass,
+        risk: RoutingRisk,
+    ) -> CapabilityRequirementsInput {
+        CapabilityRequirementsInput {
+            capabilities: ComputeCapabilitiesInput {
+                coding: 0,
+                reasoning: 0,
+                tools: 0,
+                vision: 0,
+                long_context: 0,
+            },
+            minimum_compute: minimum,
+            maximum_compute: maximum,
+            risk,
+        }
+    }
+
+    fn eligible(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|id| id.to_string()).collect()
+    }
+
+    #[test]
+    fn select_candidate_prefers_the_cheapest_eligible_candidate() {
+        let output = select_candidate(SelectCandidateInput {
+            candidates: vec![
+                candidate("expensive", ComputeClass::Fast, 90),
+                candidate("cheap", ComputeClass::Fast, 10),
+            ],
+            eligible_candidate_ids: eligible(&["expensive", "cheap"]),
+            requirements: requirements(ComputeClass::Fast, ComputeClass::Strong, RoutingRisk::Low),
+        })
+        .unwrap();
+        assert_eq!(output.candidate_id, "cheap");
+        assert_eq!(output.compute_class, ComputeClass::Fast);
+    }
+
+    #[test]
+    fn select_candidate_applies_the_risk_floor() {
+        let output = select_candidate(SelectCandidateInput {
+            candidates: vec![
+                candidate("tiny", ComputeClass::Tiny, 1),
+                candidate("strong", ComputeClass::Strong, 50),
+            ],
+            eligible_candidate_ids: eligible(&["tiny", "strong"]),
+            requirements: requirements(
+                ComputeClass::Tiny,
+                ComputeClass::Frontier,
+                RoutingRisk::High,
+            ),
+        })
+        .unwrap();
+        // High risk floors the effective minimum at Strong, so the cheap
+        // tiny candidate is rejected by the loop-core decision.
+        assert_eq!(output.candidate_id, "strong");
+    }
+
+    #[test]
+    fn select_candidate_respects_maximum_compute_and_eligibility() {
+        let output = select_candidate(SelectCandidateInput {
+            candidates: vec![
+                candidate("frontier", ComputeClass::Frontier, 1),
+                candidate("eligible-strong", ComputeClass::Strong, 40),
+                candidate("ineligible-fast", ComputeClass::Fast, 1),
+            ],
+            eligible_candidate_ids: eligible(&["frontier", "eligible-strong"]),
+            requirements: requirements(ComputeClass::Tiny, ComputeClass::Strong, RoutingRisk::Low),
+        })
+        .unwrap();
+        assert_eq!(output.candidate_id, "eligible-strong");
+    }
+
+    #[test]
+    fn select_candidate_enforces_capability_requirements() {
+        let mut sighted = candidate("sighted", ComputeClass::Fast, 20);
+        sighted.capabilities.vision = 1;
+        let output = select_candidate(SelectCandidateInput {
+            candidates: vec![candidate("blind", ComputeClass::Fast, 1), sighted],
+            eligible_candidate_ids: eligible(&["blind", "sighted"]),
+            requirements: CapabilityRequirementsInput {
+                capabilities: ComputeCapabilitiesInput {
+                    coding: 0,
+                    reasoning: 0,
+                    tools: 0,
+                    vision: 1,
+                    long_context: 0,
+                },
+                minimum_compute: ComputeClass::Fast,
+                maximum_compute: ComputeClass::Strong,
+                risk: RoutingRisk::Low,
+            },
+        })
+        .unwrap();
+        assert_eq!(output.candidate_id, "sighted");
+    }
+
+    #[test]
+    fn select_candidate_rejects_when_no_candidate_qualifies() {
+        let mut offline = candidate("offline", ComputeClass::Fast, 1);
+        offline.available = false;
+        let error = select_candidate(SelectCandidateInput {
+            candidates: vec![offline],
+            eligible_candidate_ids: eligible(&["offline"]),
+            requirements: requirements(ComputeClass::Fast, ComputeClass::Strong, RoutingRisk::Low),
+        })
+        .unwrap_err();
+        assert_eq!(error.code(), "no_sufficient_candidate");
+        assert_eq!(
+            error.message(),
+            "no eligible compute candidate satisfies task constraints"
+        );
+    }
 }

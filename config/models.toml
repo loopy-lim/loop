@@ -1,7 +1,10 @@
 # Business logic selects compute classes. Concrete provider/model identifiers live here.
-# Mixed routing (2026-09-22): pi carries the zai volume classes (pi pattern
-# syntax "zai/glm-5.3-flashx", ":<thinking>"), codex exec carries gpt-5.6
-# luna/terra/sol (smoke-verified), and antigravity gemini remains fallback.
+# Mixed routing (2026-09-23): pi carries the zai volume classes (pi pattern
+# syntax "zai/glm-5.3-flashx", ":<thinking>") plus the gpt-6 luna/sol primary
+# lane (openai-codex, ChatGPT native login; smoke evidence OK-LUNA-PI /
+# OK-SOL-PI on pi 0.87.1), codex exec retains the gpt-5.6 luna/terra/sol line
+# plus gpt-6 fallback (smoke-verified), and antigravity gemini remains
+# fallback.
 
 # pi catalog provisioning (2026-09-22 model-environment decision): ids below
 # that are missing from pi's built-in catalogs are synced into pi's
@@ -84,6 +87,27 @@ capabilities = { coding = 3, reasoning = 3, tools = 2, vision = 0, long_context 
 latency = 1
 cost_weight = 2
 
+# gpt-6 luna/sol primary lane: pi's openai-codex provider with ChatGPT native
+# login (smoke evidence OK-LUNA-PI / OK-SOL-PI, pi 0.87.1). Both ids ship in
+# pi 0.87.1's built-in catalog, so per the 2026-09-22 model-environment
+# decision no [pi.models] metadata is declared. Figures mirror the codex-lane
+# gpt-6 fallback entries below.
+[[models]]
+id = "openai-codex/gpt-6-luna"
+provider = "pi"
+compute_class = "balanced"
+capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 0, long_context = 4 }
+latency = 2
+cost_weight = 2
+
+[[models]]
+id = "openai-codex/gpt-6-sol"
+provider = "pi"
+compute_class = "frontier"
+capabilities = { coding = 5, reasoning = 5, tools = 3, vision = 0, long_context = 5 }
+latency = 3
+cost_weight = 4
+
 # gpt-5.6 luna runs through `codex exec --json` with codex native ChatGPT login.
 [[models]]
 id = "gpt-5.6-luna"
@@ -108,6 +132,27 @@ compute_class = "frontier"
 capabilities = { coding = 5, reasoning = 5, tools = 3, vision = 0, long_context = 5 }
 latency = 3
 cost_weight = 4
+
+# gpt-6 luna/sol fallback on the codex lane (codex exec --json, ChatGPT native
+# login; smoke-verified OK-LUNA / OK-SOL on codex-cli 0.155.1). Primary gpt-6
+# traffic runs on the pi lane above; the codex entries keep frontier
+# escalation on a second lane (2026-09-23 decision).
+[[models]]
+id = "gpt-6-luna"
+provider = "codex"
+compute_class = "balanced"
+capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 0, long_context = 4 }
+latency = 2
+cost_weight = 2
+
+[[models]]
+id = "gpt-6-sol"
+provider = "codex"
+compute_class = "frontier"
+capabilities = { coding = 5, reasoning = 5, tools = 3, vision = 0, long_context = 5 }
+latency = 3
+cost_weight = 4
+
 # Antigravity 영속 드라이버 후보(agy 사용량): codex 다음 순서의 대안으로 편성된다.
 
 [[models]]

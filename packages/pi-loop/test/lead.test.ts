@@ -112,6 +112,7 @@ test("Pi updates, notify, tool result, and commands share injected output limits
       readScope: [],
       writeScope: ["src/**"],
       blockedBy: [],
+      activities: [],
     })),
   } satisfies SnapshotOutput;
   const backend = fakeBackend({
@@ -426,7 +427,7 @@ function snapshot(runId: string): SnapshotOutput {
       readScope: ["src/**"],
       writeScope: ["src/impl.ts"],
       blockedBy: [],
-      activity: "Editing renderer",
+      activities: ["Editing renderer"],
     }],
   };
 }

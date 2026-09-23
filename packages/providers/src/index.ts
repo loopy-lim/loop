@@ -4,6 +4,7 @@ export * from "./fake";
 export * from "./process";
 export * from "./process-provider";
 export * from "./herdr-agent";
+export * from "./mirror";
 export * from "./codex/adapter";
 export * from "./antigravity/adapter";
 export * from "./zai/api";

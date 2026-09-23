@@ -5,4 +5,5 @@ export * from "./config";
 export * from "./control";
 export * from "./model-registry";
 export * from "./composition";
+export * from "./persona";
 export * from "./runtime";
