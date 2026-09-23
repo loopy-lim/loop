@@ -54,6 +54,31 @@ test("starts a recognized agent in a no-focus Herdr pane and submits its task", 
   ]);
 });
 
+test("labels the worker tab with taskId·kind·attempt while the identifier keeps the worker name", async () => {
+  const runner = scriptedRunner();
+  const runtime = new HerdrWorkerRuntime({ runner });
+
+  const worker = await runtime.start({
+    projectRoot: "/project",
+    runId: "run-1",
+    taskId: "impl-protocol-unify",
+    workerName: "run-1-impl-protocol-unify",
+    label: { kind: "implementation", attempt: 0 },
+    worktree: "/project",
+    execution: { type: "agent", kind: "pi", args: [] },
+    prompt: "",
+  });
+
+  // Identity (workerId/agentName, the session resume handle) is unchanged.
+  expect(worker.workerId).toBe("loop-run-1-impl-protocol-unify");
+  expect(worker.agentName).toBe("loop-run-1-impl-protocol-unify");
+  // Display surfaces carry the taskId vocabulary instead.
+  const tabCreate = runner.calls.find((args) => args[0] === "tab" && args[1] === "create");
+  expect(tabCreate?.[tabCreate.indexOf("--label") + 1]).toBe("impl-protocol-unify·impl·a0");
+  expect(runner.calls).toContainEqual(["pane", "rename", "w1:p2", "impl-protocol-unify·impl·a0"]);
+  expect(runner.calls).toContainEqual(["agent", "start", "loop-run-1-impl-protocol-unify", "--kind", "pi", "--pane", "w1:p2"]);
+});
+
 test("propagates prompt delivery failures and closes only the new worker tab", async () => {
   const calls: string[][] = [];
   const runner: HerdrRunner = {
@@ -595,4 +620,21 @@ test("purgeLeakedWorkspaces skips deletion on dry run", async () => {
   const removed = await runtime.purgeLeakedWorkspaces(true);
   expect(removed).toEqual(["w2"]);
   expect(calls.some(c => c[0] === "workspace" && c[1] === "close")).toBe(false);
+});
+
+test("runInPane hosts the steer relay process via pane run", async () => {
+  const calls: string[][] = [];
+  const runner: HerdrRunner = {
+    async run(_cmd, args) {
+      calls.push(args);
+      return result({ result: {} });
+    },
+  };
+  const runtime = new HerdrWorkerRuntime({ runner });
+
+  await runtime.runInPane("w1:p9", "bun", ["/repo/packages/cli/src/main.ts", "__steer-relay", "run-9", "t-1", "--database", "/tmp/loop.sqlite"]);
+
+  expect(calls).toEqual([
+    ["pane", "run", "w1:p9", "bun", "/repo/packages/cli/src/main.ts", "__steer-relay", "run-9", "t-1", "--database", "/tmp/loop.sqlite"],
+  ]);
 });

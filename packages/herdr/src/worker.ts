@@ -7,11 +7,22 @@ export interface HerdrCaller {
   paneId: string;
 }
 
+/**
+ * Display-label ingredients, orthogonal to `workerName`: the worker identity
+ * (agent session resume id) keeps the stable `workerName` form while tabs and
+ * panes show the human-readable `<taskId>·<kind>·a<attempt>` rule.
+ */
+export interface HerdrWorkerLabel {
+  kind: string;
+  attempt: number;
+}
+
 export interface HerdrWorkerInput {
   projectRoot: string;
   runId: string;
   taskId: string;
   workerName?: string;
+  label?: HerdrWorkerLabel;
   worktree: string;
   caller?: HerdrCaller;
   execution: HerdrExecution;

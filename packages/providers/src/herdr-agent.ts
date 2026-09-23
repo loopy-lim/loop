@@ -87,6 +87,7 @@ export class HerdrAgentProvider implements AgentProvider {
       runId: input.runId,
       taskId: input.taskId,
       workerName: `${input.runId}-${input.taskId}`,
+      label: { kind: input.kind, attempt: input.attempt },
       worktree: input.workingDirectory ?? this.#projectRoot,
       execution: { type: "agent", kind: this.#kind, args: this.#args },
       prompt: buildWorkerPrompt(input),

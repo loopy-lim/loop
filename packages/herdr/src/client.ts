@@ -120,6 +120,11 @@ export class HerdrWorkerRuntime {
     assertWorktreeInsideProject(input.projectRoot, input.worktree);
     const parent = input.caller ?? (await this.#ensureWorkspace(input));
     const workerId = workerName(input.workerName ?? input.taskId);
+    // Identity and display stay separate: the tab/pane label follows the
+    // taskId vocabulary while workerId/agentName keep the stable worker name.
+    const label = input.label
+      ? workerLabel({ taskId: input.taskId, kind: input.label.kind, attempt: input.label.attempt })
+      : workerId;
     // Workers live in their own tab of the same workspace: same space,
     // one tab per worker, no split-screen clutter, no focus stealing.
     const tab = await this.#run([
@@ -130,12 +135,12 @@ export class HerdrWorkerRuntime {
       "--cwd",
       input.worktree,
       "--label",
-      workerId,
+      label,
       "--no-focus",
     ]);
     const paneId = requiredString(tab, ["result", "root_pane", "pane_id"]);
     const tabId = requiredString(tab, ["result", "tab", "tab_id"]);
-    await this.#run(["pane", "rename", paneId, workerId]);
+    await this.#run(["pane", "rename", paneId, label]);
     if (this.#workspaces.has(input.runId)) {
       this.#workspaces.get(input.runId)!.tabIds.add(tabId);
     }
@@ -160,10 +165,14 @@ export class HerdrWorkerRuntime {
   /**
    * Creates a passive pane inside the run's workspace for mirroring worker
    * output. The pane hosts no process — it is a pure viewer surface whose
-   * lifetime is owned by the caller (closePane on worker finish).
+   * lifetime is owned by the caller (closePane on worker finish). The label
+   * is derived from taskId (`mirror·<taskId>`) so mirror panels share the
+   * worker-tab vocabulary; the caller-provided label is accepted for
+   * PaneMirrorHost compatibility only.
    */
-  async createPane(runId: string, taskId: string, projectRoot: string, worktree: string, label: string): Promise<HerdrWorkerHandle> {
+  async createPane(runId: string, taskId: string, projectRoot: string, worktree: string, _label?: string): Promise<HerdrWorkerHandle> {
     assertWorktreeInsideProject(projectRoot, worktree);
+    const label = mirrorPaneLabel(taskId);
     const parent = await this.#ensureWorkspace({
       runId,
       taskId,
@@ -194,6 +203,15 @@ export class HerdrWorkerRuntime {
 
   async sendText(paneId: string, text: string): Promise<void> {
     await this.#run(["pane", "send-text", paneId, text]);
+  }
+
+  /**
+   * Hosts the steer relay as the pane's process (`herdr pane run`), so typed
+   * lines reach the relay's stdin while its stdout lands on the pane display.
+   * The relay's lifetime is the pane lifetime: closing the pane ends it.
+   */
+  async runInPane(paneId: string, command: string, args: string[]): Promise<void> {
+    await this.#run(["pane", "run", paneId, command, ...args]);
   }
 
   attach(handle: HerdrWorkerHandle): HerdrWorkerHandle {
@@ -502,6 +520,60 @@ function workerName(taskId: string): string {
   if (name.length <= 32) return name;
   const suffix = createHash("sha256").update(name).digest("hex").slice(0, 8);
   return `${name.slice(0, 23)}-${suffix}`;
+}
+
+/** Herdr caps agent names at 32 characters; display labels share that budget. */
+const LABEL_LIMIT = 32;
+
+const KIND_ALIASES: Record<string, string> = {
+  implementation: "impl",
+  research: "research",
+  decision: "decision",
+  verification: "verify",
+  integration: "integration",
+};
+
+export interface WorkerLabelInput {
+  taskId: string;
+  kind: string;
+  attempt: number;
+}
+
+/**
+ * Single source of the worker display-label rule:
+ * `<taskId>·<kind>·a<attempt>` — e.g. `impl-protocol-unify·impl·a0`,
+ * `fact-simplify-audit·research·a1`. When the label exceeds Herdr's limit the
+ * taskId is preserved first (truncated last); the kind alias and attempt
+ * suffix always survive intact. Display-only: identity remains `workerName`.
+ */
+export function workerLabel(input: WorkerLabelInput): string {
+  const taskId = input.taskId.trim() || "task";
+  const suffix = `·${kindAlias(input.kind)}·a${Math.max(0, input.attempt)}`;
+  const head = taskId.length + suffix.length <= LABEL_LIMIT
+    ? taskId
+    : taskId.slice(0, Math.max(1, LABEL_LIMIT - suffix.length));
+  return `${head}${suffix}`;
+}
+
+/**
+ * Mirror passive panes carry the same taskId vocabulary as worker tabs:
+ * `mirror·<taskId>`, capped at Herdr's label budget the same way.
+ */
+export function mirrorPaneLabel(taskId: string): string {
+  const head = taskId.trim() || "task";
+  const prefix = "mirror·";
+  const trimmed = head.length + prefix.length <= LABEL_LIMIT
+    ? head
+    : head.slice(0, Math.max(1, LABEL_LIMIT - prefix.length));
+  return `${prefix}${trimmed}`;
+}
+
+function kindAlias(kind: string): string {
+  const canonical = kind.trim().toLowerCase();
+  const alias = KIND_ALIASES[canonical];
+  if (alias) return alias;
+  const slug = canonical.replace(/[^a-z0-9_-]+/g, "").slice(0, 8);
+  return slug || "work";
 }
 
 function validateHandle(handle: HerdrWorkerHandle): void {

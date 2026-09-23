@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { HerdrWorkerRuntime, type HerdrRunner, type HerdrResult } from "@loop/herdr";
+import { HerdrWorkerRuntime, encodeDisplayFrame, parsePaneLine, type HerdrRunner, type HerdrResult } from "@loop/herdr";
 
 import {
   FakeProvider,
@@ -209,10 +209,18 @@ describe("PaneMirrorSink", () => {
     const created: Array<{ tabId: string; paneId: string; label: string; worktree: string }> = [];
     const closed: string[] = [];
     const sent: Array<{ paneId: string; text: string }> = [];
+    const hosted: Array<{ paneId: string; command: string; args: string[] }> = [];
+    const relays: Array<{ paneId: string; exited: boolean }> = [];
+    let failRunInPane = false;
     const host = {
       created,
       closed,
       sent,
+      hosted,
+      relays,
+      setFailRunInPane(value: boolean) {
+        failRunInPane = value;
+      },
       async createPane(runId: string, taskId: string, projectRoot: string, worktree: string, label: string) {
         const pane = { tabId: `tab-${created.length + 1}`, paneId: `pane-${created.length + 1}`, label, worktree };
         void runId; void taskId; void projectRoot;
@@ -221,9 +229,19 @@ describe("PaneMirrorSink", () => {
       },
       async closePane(tabId: string) {
         closed.push(tabId);
+        // Hosting model: closing the pane ends the relay process hosted in it.
+        const paneId = created.find((pane) => pane.tabId === tabId)?.paneId;
+        for (const relay of relays) {
+          if (relay.paneId === paneId) relay.exited = true;
+        }
       },
       async sendText(paneId: string, text: string) {
         sent.push({ paneId, text });
+      },
+      async runInPane(paneId: string, command: string, args: string[]) {
+        if (failRunInPane) throw new Error("pane run failed");
+        hosted.push({ paneId, command, args });
+        relays.push({ paneId, exited: false });
       },
     };
     return host;
@@ -303,6 +321,104 @@ describe("PaneMirrorSink", () => {
     expect(inner.closed).toEqual(["tab-1"]);
   });
 
+  test("relay is hosted in the pane and mirror lines are framed for it", async () => {
+    const host = fakeHost();
+    const built: Array<{ runId: string; taskId: string; paneId: string; tabId: string }> = [];
+    const sink = new PaneMirrorSink({
+      host,
+      projectRoot: "/project",
+      environment: herdrEnv,
+      intervalMs: 5,
+      relay: (assignment) => {
+        built.push(assignment);
+        return { command: "loop", args: ["__steer-relay", assignment.runId, assignment.taskId] };
+      },
+    });
+
+    await sink.onWorkerStart({ providerId: "codex:x", workerId: "w1", runId: "run-9", taskId: "t-1" });
+    expect(host.hosted).toEqual([
+      { paneId: "pane-1", command: "loop", args: ["__steer-relay", "run-9", "t-1"] },
+    ]);
+    expect(built).toEqual([{ runId: "run-9", taskId: "t-1", paneId: "pane-1", tabId: "tab-1" }]);
+
+    await sink.publish("w1", "[message] hello");
+    await sink.onWorkerFinish("w1");
+    expect(host.closed).toEqual(["tab-1"]);
+
+    const flushed = host.sent.map((entry) => entry.text).join("");
+    expect(flushed).toContain(encodeDisplayFrame("[message] hello"));
+    // Every framed line decodes back to the rendered mirror line.
+    const decoded = flushed.trim().split("\n").map((line) => parsePaneLine(line));
+    expect(decoded).toContainEqual({ kind: "display", text: "[message] hello" });
+  });
+
+  test("relay spawn failure degrades silently to plain v1 mirroring", async () => {
+    const host = fakeHost();
+    host.setFailRunInPane(true);
+    const sink = new PaneMirrorSink({
+      host,
+      projectRoot: "/project",
+      environment: herdrEnv,
+      intervalMs: 5,
+      relay: () => ({ command: "loop", args: ["__steer-relay"] }),
+    });
+
+    await sink.onWorkerStart({ providerId: "codex:x", workerId: "w1", runId: "run", taskId: "t-1" });
+    await sink.publish("w1", "[message] plain");
+    await sink.onWorkerFinish("w1");
+
+    expect(host.hosted).toEqual([]);
+    const flushed = host.sent.map((entry) => entry.text).join("");
+    expect(flushed).toContain("[message] plain");
+    expect(flushed).not.toContain("loopDisplay");
+  });
+
+  test("the relay dies with the pane: worker finish closes the pane and ends the relay", async () => {
+    const host = fakeHost();
+    const sink = new PaneMirrorSink({
+      host,
+      projectRoot: "/project",
+      environment: herdrEnv,
+      relay: () => ({ command: "loop", args: ["__steer-relay", "run", "t-1"] }),
+    });
+
+    await sink.onWorkerStart({ providerId: "codex:x", workerId: "w1", runId: "run", taskId: "t-1" });
+    expect(host.relays).toEqual([{ paneId: "pane-1", exited: false }]);
+
+    await sink.onWorkerFinish("w1");
+    expect(host.relays).toEqual([{ paneId: "pane-1", exited: true }]);
+  });
+
+  test("without a relay builder the pane stays plain and nothing is hosted (v1 identical)", async () => {
+    const host = fakeHost();
+    const sink = new PaneMirrorSink({ host, projectRoot: "/project", environment: herdrEnv, intervalMs: 5 });
+    await sink.onWorkerStart({ providerId: "codex:x", workerId: "w1", runId: "run", taskId: "t-1" });
+    await sink.publish("w1", "[message] plain");
+    await sink.onWorkerFinish("w1");
+
+    expect(host.hosted).toEqual([]);
+    const flushed = host.sent.map((entry) => entry.text).join("");
+    expect(flushed).toContain("[message] plain");
+    expect(flushed).not.toContain("loopDisplay");
+  });
+
+  test("headless environments never create panes or host relays (fail-open)", async () => {
+    const host = fakeHost();
+    const sink = new PaneMirrorSink({
+      host,
+      projectRoot: "/project",
+      environment: {},
+      relay: () => ({ command: "loop", args: ["__steer-relay"] }),
+    });
+    await sink.onWorkerStart({ providerId: "codex:x", workerId: "w1", runId: "run", taskId: "t-1" });
+    await sink.publish("w1", "[lifecycle] starting t-1");
+    await sink.onWorkerFinish("w1");
+    expect(host.created).toEqual([]);
+    expect(host.hosted).toEqual([]);
+    expect(host.sent).toEqual([]);
+    expect(host.closed).toEqual([]);
+  });
+
   test("compositeSink fans out to every sink", async () => {
     const a = new RecordingSink();
     const b = new RecordingSink();
@@ -335,8 +451,8 @@ describe("HerdrWorkerRuntime pane surface", () => {
   test("createPane, sendText, and closePane drive the passive pane lifecycle", async () => {
     const responses = new Map<string, string>([
       ["workspace create --cwd /project --label loop-run-9 --no-focus", JSON.stringify({ result: { workspace: { workspace_id: "ws-9" }, root_pane: { pane_id: "ws-9:p-root" } } })],
-      ["tab create --workspace ws-9 --cwd /project/wt --label t-1 --no-focus", JSON.stringify({ result: { root_pane: { pane_id: "ws-9:p-1" }, tab: { tab_id: "ws-9:t-1" } } })],
-      ["pane rename ws-9:p-1 t-1", "{}"],
+      ["tab create --workspace ws-9 --cwd /project/wt --label mirror·t-1 --no-focus", JSON.stringify({ result: { root_pane: { pane_id: "ws-9:p-1" }, tab: { tab_id: "ws-9:t-1" } } })],
+      ["pane rename ws-9:p-1 mirror·t-1", "{}"],
       ["pane send-text ws-9:p-1 hello\n", "{}"],
       ["tab close ws-9:t-1", "{}"],
     ]);

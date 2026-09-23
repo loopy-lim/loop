@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
+import * as readline from "node:readline";
 
 import {
   ConfigError,
@@ -238,6 +239,12 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
       ].join("\n") + "\n");
       return receipt.status === "completed" ? 0 : 1;
     }
+    if (parsed.command === "__steer-relay") {
+      const [runId, taskId] = parsed.operands;
+      if (!runId || !taskId) throw new UsageError("__steer-relay requires <run-id> <task-id>");
+      if (!parsed.databasePath) throw new UsageError("__steer-relay requires --database <path>");
+      return await runSteerRelay({ runId, taskId, databasePath: parsed.databasePath, io });
+    }
     if (parsed.command === "__execute-plan" || parsed.command === "__dispatch") {
       const payload = parsed.command === "__execute-plan" ? parseExecutionPayload(options.stdin ?? await Bun.stdin.text()) : undefined;
       const runId = payload?.runId ?? parsed.operands[0];
@@ -249,7 +256,8 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
       const { buildProviderRegistry, LoopRuntime } = await import("@loop/orchestrator");
       const plan = payload ?? await protocol.getRunPlan(input);
       const runtime = new LoopRuntime({ control: protocol, databasePath: config.databasePath,
-        providers: buildProviderRegistry({ config, projectRoot: plan.workingDirectory, activityRecorder: protocol }),
+        providers: buildProviderRegistry({ config, projectRoot: plan.workingDirectory, activityRecorder: protocol,
+          relayCommand: steerRelayCommandBuilder(parsed, config, options) }),
         maxWorkers: config.scheduler.maxWorkers, maxFrontierWorkers: config.scheduler.maxFrontierWorkers,
         workerVisibility: config.output.workerVisibility });
       if (payload) {
@@ -833,6 +841,65 @@ function redact(value: string): string {
 
 if (import.meta.main) {
   process.exitCode = await runCli(Bun.argv.slice(2));
+}
+
+/**
+ * Worker pane steer relay process (docs/decisions/2026-09-23-watch-to-steer.md).
+ * Hosted inside a worker's Herdr pane via `herdr pane run`; each typed line is
+ * delivered through the same steer backend as `loop steer` (steerRun) and
+ * confirmed with one redacted, clamped echo line. The pane close on worker
+ * finish ends stdin, so the relay exits with the worker's pane.
+ */
+async function runSteerRelay(input: { runId: string; taskId: string; databasePath: string; io: CliIo }): Promise<number> {
+  const protocol = await loadProtocol();
+  await protocol.rustra.ready();
+  const { redactProviderText } = await import("@loop/providers");
+  const { runSteerRelaySession } = await import("@loop/herdr");
+  const echo = (line: string) => input.io.stdout(`${line}\n`);
+  echo("steer relay ready — type a line to steer this worker; the relay exits when the worker finishes");
+  const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+  try {
+    await runSteerRelaySession(lines, {
+      runId: input.runId,
+      taskId: input.taskId,
+      deliver: (delivery) => protocol.steerRun({
+        databasePath: input.databasePath,
+        runId: delivery.runId,
+        taskId: delivery.taskId,
+        message: delivery.message,
+      }),
+      echo,
+      redact: (line, limit) => redactProviderText(line, limit),
+    });
+  } finally {
+    lines.close();
+  }
+  return 0;
+}
+
+/** Relay process invocation, mirroring the owner spawn layout (bun entry vs compiled binary). */
+export function buildSteerRelayCommand(input: {
+  executablePath: string;
+  sourceEntry?: string;
+  databasePath: string;
+  runId: string;
+  taskId: string;
+}): { command: string; args: string[] } {
+  const args = [
+    ...(input.sourceEntry ? [input.sourceEntry] : []),
+    "__steer-relay", input.runId, input.taskId, "--database", input.databasePath,
+  ];
+  return { command: input.executablePath, args };
+}
+
+/** Watch-to-steer: per-worker relay commands hosted inside the worker's Herdr pane. */
+function steerRelayCommandBuilder(parsed: ParsedArguments, config: LoopConfig, options: RunCliOptions) {
+  const executablePath = options.executablePath ?? process.execPath;
+  const sourceEntry = basename(executablePath).startsWith("bun") ? resolve(import.meta.dir, "main.ts") : undefined;
+  // The pane's cwd is the worktree, so the relay must receive an absolute database path.
+  const databasePath = resolve(config.databasePath);
+  return (worker: { runId: string; taskId: string }) =>
+    buildSteerRelayCommand({ executablePath, sourceEntry, databasePath, runId: worker.runId, taskId: worker.taskId });
 }
 
 function launchOwner(parsed: ParsedArguments, config: LoopConfig, runId: string, cwd: string, options: RunCliOptions) {

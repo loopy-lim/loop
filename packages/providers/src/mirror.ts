@@ -1,4 +1,4 @@
-import { BoundedPaneSender } from "@loop/herdr";
+import { BoundedPaneSender, encodeDisplayFrame, type PaneRelaySpec } from "@loop/herdr";
 
 import { redactProviderText } from "./redact";
 import type {
@@ -222,6 +222,20 @@ export interface PaneMirrorHost {
   ): Promise<{ tabId: string; paneId: string }>;
   closePane(tabId: string): Promise<void>;
   sendText(paneId: string, text: string): Promise<void>;
+  /**
+   * Hosts the steer relay as the pane's process (`herdr pane run`, watch-to-steer
+   * decision). Optional: headless fakes and older hosts may omit it, which
+   * simply skips the relay.
+   */
+  runInPane?(paneId: string, command: string, args: string[]): Promise<void>;
+}
+
+/** Worker identity the relay command is built from, plus the pane that will host it. */
+export interface PaneRelayAssignment {
+  runId: string;
+  taskId: string;
+  paneId: string;
+  tabId: string;
 }
 
 export interface PaneMirrorSinkOptions {
@@ -234,6 +248,13 @@ export interface PaneMirrorSinkOptions {
   excluded?: ReadonlySet<string>;
   /** Rate-limit between pane writes (D4: 250ms coalescing default). */
   intervalMs?: number;
+  /**
+   * Builds the per-worker steer-relay command (watch-to-steer decision); a
+   * falsy return skips the relay for that worker. The relay is hosted inside
+   * the mirror pane and shares its lifetime; spawn failures degrade silently
+   * to the plain v1 pane plus the `loop steer` CLI affordance.
+   */
+  relay?(assignment: PaneRelayAssignment): PaneRelaySpec | undefined;
 }
 
 interface PaneSender {
@@ -247,7 +268,10 @@ function createPaneSender(host: PaneMirrorHost, paneId: string, intervalMs: numb
 
 /**
  * D4 pane surface: one passive Herdr pane per worker, created on worker start
- * and closed on worker finish (pane lifetime == worker lifetime). Headless
+ * and closed on worker finish (pane lifetime == worker lifetime). When a relay
+ * builder is configured, the pane also hosts the steer relay for its whole
+ * lifetime (watch-to-steer decision): the pane close on finish ends the relay.
+ * Headless
  * environments (no HERDR_* context) disable the sink entirely — the fail-open
  * precedent from herdr lifecycle reporting. Workers beyond the pane limit fall
  * back to the watch feed only (first-come-first-served, no reassignment queue).
@@ -259,7 +283,8 @@ export class PaneMirrorSink implements MirrorSink {
   readonly #paneLimit: number;
   readonly #excluded: ReadonlySet<string>;
   readonly #intervalMs: number;
-  readonly #panes = new Map<string, { tabId: string; sender: PaneSender }>();
+  readonly #relay?: (assignment: PaneRelayAssignment) => PaneRelaySpec | undefined;
+  readonly #panes = new Map<string, { tabId: string; sender: PaneSender; framed: boolean }>();
   readonly #pending = new Set<string>();
   readonly #finished = new Set<string>();
 
@@ -270,6 +295,7 @@ export class PaneMirrorSink implements MirrorSink {
     this.#paneLimit = Math.max(1, options.paneLimit ?? 4);
     this.#excluded = options.excluded ?? new Set();
     this.#intervalMs = options.intervalMs ?? 250;
+    this.#relay = options.relay;
   }
 
   async onWorkerStart(info: MirrorSinkWorkerStartInfo): Promise<void> {
@@ -291,10 +317,17 @@ export class PaneMirrorSink implements MirrorSink {
         await this.#host.closePane(pane.tabId).catch(() => undefined);
         return;
       }
-      this.#panes.set(info.workerId, {
+      const record: { tabId: string; sender: PaneSender; framed: boolean } = {
         tabId: pane.tabId,
         sender: createPaneSender(this.#host, pane.paneId, this.#intervalMs),
-      });
+        // While a relay is configured the pane traffic is framed from the
+        // first flush; a failed spawn flips this off below. Unframed lines are
+        // only ever sent when no relay can read them, so mirror output can
+        // never be mistaken for user steer input.
+        framed: false,
+      };
+      this.#panes.set(info.workerId, record);
+      await this.#attachRelay(info, pane, record);
     } catch {
       // Pane creation failures fall back to the watch feed — never break the worker.
     } finally {
@@ -302,8 +335,28 @@ export class PaneMirrorSink implements MirrorSink {
     }
   }
 
+  /** Hosts the steer relay in the freshly created pane; any failure degrades silently to the CLI affordance. */
+  async #attachRelay(
+    info: MirrorSinkWorkerStartInfo,
+    pane: { paneId: string; tabId: string },
+    record: { framed: boolean },
+  ): Promise<void> {
+    if (!this.#relay || !this.#host.runInPane) return;
+    const spec = this.#relay({ runId: info.runId, taskId: info.taskId, paneId: pane.paneId, tabId: pane.tabId });
+    if (!spec) return;
+    try {
+      await this.#host.runInPane(pane.paneId, spec.command, spec.args);
+      record.framed = true;
+    } catch {
+      // Relay spawn failure: keep the plain v1 pane; `loop steer` stays the affordance.
+      record.framed = false;
+    }
+  }
+
   async publish(workerId: string, line: string): Promise<void> {
-    this.#panes.get(workerId)?.sender.send(line);
+    const pane = this.#panes.get(workerId);
+    if (!pane) return;
+    pane.sender.send(pane.framed ? encodeDisplayFrame(line) : line);
   }
 
   async onWorkerFinish(workerId: string): Promise<void> {

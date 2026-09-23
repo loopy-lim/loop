@@ -30,6 +30,14 @@ export interface ProviderCompositionOptions {
   herdr?: HerdrWorkerRuntime;
   /** Required for the watch feed store sink; without it no rendered lines reach the run store. */
   activityRecorder?: ActivityRecorder;
+  /**
+   * Builds the per-worker steer-relay command hosted in the worker pane
+   * (docs/decisions/2026-09-23-watch-to-steer.md). Optional: without it the
+   * panes stay plain and `loop steer` remains the steering affordance.
+   */
+  relayCommand?: (worker: { runId: string; taskId: string; paneId: string; tabId: string }) =>
+    | { command: string; args: string[] }
+    | undefined;
 }
 
 /**
@@ -156,9 +164,9 @@ export function buildProviderRegistry(options: ProviderCompositionOptions): Prov
  * D1/D4/D5 assembly: when worker visibility is enabled, adapters are wrapped in
  * the MirroringProvider decorator with the sinks appropriate to the configured
  * surface. "off" (the default) returns the providers untouched — the baseline
- * is byte-identical behavior.
+ * is byte-identical behavior. Exported for composition tests.
  */
-function wrapForVisibility(
+export function wrapForVisibility(
   providers: AgentProvider[],
   options: ProviderCompositionOptions,
   herdr: HerdrWorkerRuntime,
@@ -179,6 +187,8 @@ function wrapForVisibility(
       // Interactive workers own their native TUI pane (D4) — send-text
       // mirroring is excluded for them.
       excluded: new Set(providers.filter(p => p instanceof HerdrAgentProvider).map(p => p.id)),
+      // Watch-to-steer: the worker pane hosts the steer relay for its lifetime.
+      relay: options.relayCommand,
     }));
   }
   if (sinks.length === 0) return providers;

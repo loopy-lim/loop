@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 
 import * as protocol from "@loop/protocol";
 import {
+  buildSteerRelayCommand,
   formatDoctorChecks,
   formatModelList,
   formatSnapshot,
@@ -408,4 +409,36 @@ test("runs, pause, guidance and attention resolution operate on durable state", 
   expect(await runCli(["resolve", "controls", "approval", "approved", ...flags], { io: output().io })).toBe(0);
   expect((await protocol.getSnapshot(input)).openAttentionIds).toEqual([]);
   expect((await protocol.getSnapshot(input)).state).toBe("paused");
+});
+
+test("steer relay process command mirrors the owner spawn layout", () => {
+  expect(buildSteerRelayCommand({
+    executablePath: "/usr/bin/bun",
+    sourceEntry: "/repo/packages/cli/src/main.ts",
+    databasePath: "/tmp/loop.sqlite",
+    runId: "run-9",
+    taskId: "t-1",
+  })).toEqual({
+    command: "/usr/bin/bun",
+    args: ["/repo/packages/cli/src/main.ts", "__steer-relay", "run-9", "t-1", "--database", "/tmp/loop.sqlite"],
+  });
+  expect(buildSteerRelayCommand({
+    executablePath: "/usr/local/bin/loop",
+    databasePath: "/tmp/loop.sqlite",
+    runId: "run-9",
+    taskId: "t-1",
+  })).toEqual({
+    command: "/usr/local/bin/loop",
+    args: ["__steer-relay", "run-9", "t-1", "--database", "/tmp/loop.sqlite"],
+  });
+});
+
+test("__steer-relay requires run, task and database arguments before touching state", async () => {
+  const missing = output();
+  expect(await runCli(["__steer-relay"], { io: missing.io })).toBe(2);
+  expect(missing.stderr()).toContain("__steer-relay requires <run-id> <task-id>");
+
+  const noDatabase = output();
+  expect(await runCli(["__steer-relay", "run-9", "t-1"], { io: noDatabase.io })).toBe(2);
+  expect(noDatabase.stderr()).toContain("__steer-relay requires --database <path>");
 });

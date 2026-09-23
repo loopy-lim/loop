@@ -1,10 +1,11 @@
 import { beforeAll, expect, test } from "bun:test";
 
+import { HerdrWorkerRuntime } from "@loop/herdr";
 import * as protocol from "@loop/protocol";
-import { MirroringProvider } from "@loop/providers";
+import { FakeProvider, MirroringProvider } from "@loop/providers";
 
 import type { LoopConfig } from "../src/config";
-import { buildProviderRegistry, StoreActivitySink, type ActivityRecorder } from "../src/composition";
+import { buildProviderRegistry, StoreActivitySink, wrapForVisibility, type ActivityRecorder } from "../src/composition";
 
 beforeAll(() => protocol.rustra.ready());
 
@@ -109,4 +110,87 @@ test("panes visibility without a recorder still wraps providers for panes", asyn
   });
   const provider = await registry.select("fast");
   expect(provider instanceof MirroringProvider).toBe(true);
+});
+
+test("panes visibility hosts the steer relay in each worker pane via the composition relayCommand", async () => {
+  const calls: string[][] = [];
+  const runner: import("@loop/herdr").HerdrRunner = {
+    async run(_command, args) {
+      calls.push(args);
+      if (args[0] === "workspace") {
+        return { exitCode: 0, stdout: JSON.stringify({ result: { workspace: { workspace_id: "ws-1" }, root_pane: { pane_id: "ws-1:p-root" } } }), stderr: "" };
+      }
+      if (args[0] === "tab" && args[1] === "create") {
+        return { exitCode: 0, stdout: JSON.stringify({ result: { tab: { tab_id: `ws-1:t-${calls.length}` }, root_pane: { pane_id: `ws-1:p-${calls.length}` } } }), stderr: "" };
+      }
+      return { exitCode: 0, stdout: "{}", stderr: "" };
+    },
+  };
+  const herdr = new HerdrWorkerRuntime({ runner });
+  const [provider] = wrapForVisibility(
+    [new FakeProvider("fake:offline", ["fast"], { delayMs: 5 })],
+    {
+      config: loopConfig("panes"),
+      projectRoot: "/project",
+      environment: { HERDR_WORKSPACE_ID: "ws-lead", HERDR_PANE_ID: "ws-lead:p-lead" },
+      herdr,
+      relayCommand: (worker) => ({ command: "loop", args: ["__steer-relay", worker.runId, worker.taskId, "--database", "/tmp/loop-visibility.sqlite"] }),
+    },
+    herdr,
+  );
+  expect(provider instanceof MirroringProvider).toBe(true);
+
+  const handle = await provider.start({
+    runId: "run-1",
+    taskId: "t-1",
+    title: "Task one",
+    kind: "implementation",
+    computeClass: "fast",
+    attempt: 0,
+    requirements: [],
+    workingDirectory: "/project/wt",
+  });
+  await provider.cancel(handle.id);
+
+  const relayRun = calls.find((args) => args[0] === "pane" && args[1] === "run");
+  expect(relayRun).toBeDefined();
+  expect(relayRun).toContain("__steer-relay");
+  expect(relayRun).toContain("run-1");
+  expect(relayRun).toContain("t-1");
+  expect(relayRun).toContain("/tmp/loop-visibility.sqlite");
+});
+
+test("panes visibility without herdr context never hosts a relay (headless no-op)", async () => {
+  const calls: string[][] = [];
+  const runner: import("@loop/herdr").HerdrRunner = {
+    async run(_command, args) {
+      calls.push(args);
+      return { exitCode: 0, stdout: "{}", stderr: "" };
+    },
+  };
+  const herdr = new HerdrWorkerRuntime({ runner });
+  const [provider] = wrapForVisibility(
+    [new FakeProvider("fake:offline", ["fast"], { delayMs: 5 })],
+    {
+      config: loopConfig("panes"),
+      projectRoot: "/project",
+      environment: {},
+      herdr,
+      relayCommand: () => ({ command: "loop", args: ["__steer-relay"] }),
+    },
+    herdr,
+  );
+  const handle = await provider.start({
+    runId: "run-1",
+    taskId: "t-1",
+    title: "Task one",
+    kind: "implementation",
+    computeClass: "fast",
+    attempt: 0,
+    requirements: [],
+    workingDirectory: "/project/wt",
+  });
+  await provider.cancel(handle.id);
+  expect(calls.some((args) => args[0] === "pane" && args[1] === "run")).toBe(false);
+  expect(calls.some((args) => args[0] === "tab" && args[1] === "create")).toBe(false);
 });
