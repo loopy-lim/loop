@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { ComputeClass } from "@loop/protocol";
 import { buildWorkerPrompt } from "../prompt";
 import { redactProviderText } from "../redact";
 
@@ -8,7 +9,7 @@ import type {
   StartWorkerInput,
   WorkerHandle,
   WorkerResult,
-  WorkerStatus,
+  WorkerState,
 } from "../types";
 
 interface ZaiApiProviderOptions {
@@ -20,7 +21,8 @@ interface ZaiApiProviderOptions {
   generalPath?: string;
   codingPlanPath?: string;
   fetch?: FetchLike;
-  computeClasses?: string[];
+  /** Compute-class stance comes from configuration at construction time. */
+  computeClasses: ComputeClass[];
 }
 
 type FetchLike = (
@@ -29,7 +31,7 @@ type FetchLike = (
 ) => Promise<Response>;
 
 interface Session {
-  status: WorkerStatus;
+  status: WorkerState;
   abort: AbortController;
   result: Promise<WorkerResult>;
 }
@@ -53,7 +55,7 @@ export class ZaiApiProvider implements AgentProvider {
     return {
       available: this.#options.apiKey.length > 0,
       models: [this.#options.model],
-      computeClasses: this.#options.computeClasses ?? ["tiny", "fast", "balanced", "strong"],
+      computeClasses: this.#options.computeClasses,
       tools: true,
       vision: false,
       structuredOutput: true,
@@ -75,11 +77,11 @@ export class ZaiApiProvider implements AgentProvider {
     };
     session.result = this.#request(input, abort.signal).then(
       (result) => {
-        session.status = result.success ? "completed" : "failed";
+        session.status = result.success ? "completed" : "lost";
         return result;
       },
       (error) => {
-        session.status = abort.signal.aborted ? "cancelled" : "failed";
+        session.status = abort.signal.aborted ? "cancelled" : "lost";
         return {
           success: false,
           summary: redact(error instanceof Error ? error.message : String(error)),
@@ -101,7 +103,7 @@ export class ZaiApiProvider implements AgentProvider {
     await session.result;
   }
 
-  async status(workerId: string): Promise<WorkerStatus> {
+  async status(workerId: string): Promise<WorkerState> {
     return this.require(workerId).status;
   }
 

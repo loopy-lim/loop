@@ -1,6 +1,12 @@
-import type { TaskContextOutput } from "@loop/protocol";
+import type { ComputeClass, TaskContextOutput } from "@loop/protocol";
 
-export type WorkerStatus = "starting" | "running" | "completed" | "failed" | "cancelled";
+/**
+ * Worker lifecycle vocabulary mirroring loop-core `WorkerState` (serde
+ * snake_case). `lost` is the only terminal-without-result state — adapters
+ * that end a session without a usable result report `lost` and carry the
+ * failure detail in `WorkerResult.failure` instead of a `failed` status.
+ */
+export type WorkerState = "starting" | "running" | "completed" | "lost" | "cancelled";
 
 export type ProviderFailureKind =
   | "unavailable"
@@ -14,7 +20,7 @@ export type ProviderFailureKind =
 export interface ProviderCapabilities {
   available: boolean;
   models?: string[];
-  computeClasses: string[];
+  computeClasses: ComputeClass[];
   tools: boolean;
   vision: boolean;
   structuredOutput: boolean;
@@ -27,10 +33,16 @@ export interface StartWorkerInput {
   taskId: string;
   title: string;
   kind: string;
-  computeClass: string;
+  computeClass: ComputeClass;
   attempt: number;
   requirements: string[];
   workingDirectory?: string;
+  /**
+   * Already-resolved persona prompt text (worker persona contract D4). The
+   * orchestrator resolves registry/config here; adapters render the opaque
+   * string only.
+   */
+  personaInstructions?: string;
 }
 
 export interface ResumeWorkerInput extends StartWorkerInput {
@@ -54,7 +66,7 @@ export interface WorkerResult {
 
 export type ProviderEvent =
   | { type: "output"; stream: "stdout" | "stderr"; text: string }
-  | { type: "lifecycle"; status: WorkerStatus }
+  | { type: "lifecycle"; status: WorkerState }
   | { type: "session"; sessionId: string }
   | { type: "final"; summary: string };
 
@@ -65,7 +77,7 @@ export interface AgentProvider {
   resume?(sessionId: string, input: ResumeWorkerInput): Promise<WorkerHandle>;
   cancel(workerId: string): Promise<void>;
   release?(workerId: string): Promise<void>;
-  status(workerId: string): Promise<WorkerStatus>;
+  status(workerId: string): Promise<WorkerState>;
   result(workerId: string): Promise<WorkerResult>;
   subscribe?(workerId: string, listener: (event: ProviderEvent) => void): () => void;
 }

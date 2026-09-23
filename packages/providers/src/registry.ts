@@ -25,14 +25,14 @@ export class ProviderRegistry {
       const capabilities = await this.#capabilitiesFor(provider);
       for (const candidateClass of capabilities.computeClasses) {
         // Candidate ids pair a provider with one advertised class so the Rust
-        // decision ranks (provider, class) pairs. The cast trusts the wire:
-        // loop-core owns the ComputeClass vocabulary and validates the value
-        // on deserialization, so no TypeScript copy of the enum exists here.
+        // decision ranks (provider, class) pairs. `computeClasses` is typed
+        // with the generated `ComputeClass` union, so no cast and no
+        // TypeScript copy of the enum exist here.
         const id = `${provider.id}::${candidateClass}`;
         providersByCandidate.set(id, provider);
         candidates.push({
           id,
-          computeClass: candidateClass as ComputeClass,
+          computeClass: candidateClass,
           capabilities: {
             coding: 0,
             reasoning: 0,

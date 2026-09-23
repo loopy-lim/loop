@@ -1,3 +1,5 @@
+import type { ComputeClass } from "@loop/protocol";
+
 import { NodeProcessRunner, type ProcessRunner } from "../process";
 import type {
   AgentProvider,
@@ -7,7 +9,7 @@ import type {
   StartWorkerInput,
   WorkerHandle,
   WorkerResult,
-  WorkerStatus,
+  WorkerState,
 } from "../types";
 import { buildWorkerPrompt } from "../prompt";
 import { AgyStreamDriver } from "./driver";
@@ -17,7 +19,8 @@ interface AgyPersistentProviderOptions {
   cwd: string;
   command?: string;
   model?: string;
-  computeClasses?: string[];
+  /** Compute-class stance comes from configuration at construction time. */
+  computeClasses: ComputeClass[];
   turnTimeoutMs?: number;
   driverFactory?: (options: { cwd: string; model?: string; conversationId?: string }) => AgyStreamDriver;
   available?: boolean;
@@ -26,7 +29,7 @@ interface AgyPersistentProviderOptions {
 interface Session {
   driver: AgyStreamDriver;
   workerId: string;
-  status: WorkerStatus;
+  status: WorkerState;
   result: Promise<WorkerResult>;
 }
 
@@ -42,7 +45,7 @@ export class AgyPersistentProvider implements AgentProvider {
   readonly #cwd: string;
   readonly #command: string;
   readonly #model?: string;
-  readonly #computeClasses: string[];
+  readonly #computeClasses: ComputeClass[];
   readonly #turnTimeoutMs: number;
   readonly #driverFactory: NonNullable<AgyPersistentProviderOptions["driverFactory"]>;
   readonly #available: boolean;
@@ -53,7 +56,7 @@ export class AgyPersistentProvider implements AgentProvider {
     this.#cwd = options.cwd;
     this.#command = options.command ?? "agy";
     this.#model = options.model;
-    this.#computeClasses = options.computeClasses ?? ["balanced", "strong", "frontier"];
+    this.#computeClasses = [...options.computeClasses];
     this.#turnTimeoutMs = options.turnTimeoutMs ?? 600_000;
     this.#available = options.available ?? true;
     this.#driverFactory =
@@ -150,7 +153,7 @@ export class AgyPersistentProvider implements AgentProvider {
     session.status = "cancelled";
   }
 
-  async status(workerId: string): Promise<WorkerStatus> {
+  async status(workerId: string): Promise<WorkerState> {
     const session = this.#session(workerId);
     if (!session) throw new Error(`unknown worker: ${workerId}`);
     return session.status;
@@ -167,7 +170,7 @@ export class AgyPersistentProvider implements AgentProvider {
     }
     const result = await session.result;
     if (session.status !== "cancelled") {
-      session.status = result.success ? "completed" : "failed";
+      session.status = result.success ? "completed" : "lost";
     }
     return result;
   }

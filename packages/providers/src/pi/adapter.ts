@@ -1,3 +1,5 @@
+import type { ComputeClass } from "@loop/protocol";
+
 import { NodeProcessRunner, type ProcessRunner } from "../process";
 import { ProcessProvider } from "../process-provider";
 import { buildWorkerPrompt } from "../prompt";
@@ -10,7 +12,8 @@ interface PiProviderOptions {
   command?: string;
   provider?: string;
   model?: string;
-  computeClasses?: string[];
+  /** Compute-class stance comes from configuration at construction time. */
+  computeClasses: ComputeClass[];
 }
 
 /**
@@ -26,7 +29,7 @@ export class PiProvider extends ProcessProvider {
   readonly #command: string;
   readonly #provider?: string;
   readonly #model?: string;
-  readonly #computeClasses: string[];
+  readonly #computeClasses: ComputeClass[];
 
   constructor(options: PiProviderOptions) {
     super();
@@ -36,7 +39,7 @@ export class PiProvider extends ProcessProvider {
     this.#command = options.command ?? "pi";
     this.#provider = options.provider;
     this.#model = options.model;
-    this.#computeClasses = options.computeClasses ?? ["tiny", "fast", "balanced", "strong", "frontier"];
+    this.#computeClasses = [...options.computeClasses];
   }
 
   async capabilities(): Promise<ProviderCapabilities> {

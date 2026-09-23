@@ -9,7 +9,7 @@ import type {
   StartWorkerInput,
   WorkerHandle,
   WorkerResult,
-  WorkerStatus,
+  WorkerState,
 } from "./types";
 
 export interface MirrorSinkWorkerStartInfo {
@@ -394,7 +394,7 @@ export class MirroringProvider implements AgentProvider {
     }
   }
 
-  async status(workerId: string): Promise<WorkerStatus> {
+  async status(workerId: string): Promise<WorkerState> {
     return this.#inner.status(workerId);
   }
 

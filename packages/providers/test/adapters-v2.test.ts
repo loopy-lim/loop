@@ -124,6 +124,7 @@ test("Codex adapter probes the official surface and normalizes a completed worke
     cwd: "/project",
     model: "configured-model",
     sandbox: "workspace-write",
+    computeClasses: ["balanced"],
   });
   expect((await provider.capabilities()).available).toBe(true);
   const handle = await provider.start(input);
@@ -168,7 +169,7 @@ test("pi provider launches headless pi with the configured model pattern", async
 
 test("Z.AI CLI provider uses the shared generated worker context", async () => {
   const runner = new FakeRunner();
-  const provider = new ZaiCliProvider({ runner, cwd: "/project" });
+  const provider = new ZaiCliProvider({ runner, cwd: "/project", computeClasses: ["fast"] });
 
   await provider.start(input);
 
@@ -184,6 +185,7 @@ test("Codex resume uses only arguments supported by the installed resume surface
     model: "configured-model",
     sandbox: "workspace-write",
     approveForMe: true,
+    computeClasses: ["balanced"],
   });
   await provider.resume("session-1", { ...input, previousWorkerId: "old" });
   const launch = runner.calls.at(-1)!;
@@ -194,7 +196,7 @@ test("Codex resume uses only arguments supported by the installed resume surface
 
 test("Antigravity adapter discovers models and uses stream-json execution", async () => {
   const runner = new FakeRunner();
-  const provider = new AntigravityProvider({ runner, cwd: "/project" });
+  const provider = new AntigravityProvider({ runner, cwd: "/project", computeClasses: ["fast"] });
   const capabilities = await provider.capabilities();
   expect(capabilities.available).toBe(true);
   expect(capabilities.models).toEqual(["gemini-3.1-pro"]);
@@ -220,7 +222,7 @@ test("Antigravity adapter discovers models and uses stream-json execution", asyn
 });
 
 test("process provider maps failures and redacts credentials", async () => {
-  const provider = new CodexProvider({ runner: new FailingRunner(), cwd: "/project" });
+  const provider = new CodexProvider({ runner: new FailingRunner(), cwd: "/project", computeClasses: ["balanced"] });
   const handle = await provider.start(input);
   const result = await provider.result(handle.id);
   expect(result.success).toBe(false);
@@ -277,6 +279,7 @@ test("Z.AI API adapter keeps the key in the header", async () => {
     apiKey: "secret-value",
     model: "configured-model",
     mode: "general",
+    computeClasses: ["fast"],
     fetch: async (_url, init) => {
       authorization = String((init?.headers as Record<string, string>).Authorization);
       const body = JSON.parse(String(init?.body)) as {
@@ -304,6 +307,7 @@ test("Z.AI API adapter redacts provider errors", async () => {
     apiKey: "secret-value",
     model: "configured-model",
     mode: "general",
+    computeClasses: ["fast"],
     fetch: async () => new Response(
       JSON.stringify({ error: { message: "Bearer secret-value rejected" } }),
       { status: 401, headers: { "content-type": "application/json" } },

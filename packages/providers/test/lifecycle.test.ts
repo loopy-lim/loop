@@ -96,7 +96,7 @@ test("process providers release only completed worker sessions", async () => {
       };
     },
   };
-  const provider = new CodexProvider({ cwd: "/project", runner });
+  const provider = new CodexProvider({ cwd: "/project", runner, computeClasses: ["balanced"] });
   const handle = await provider.start(input);
   await provider.result(handle.id);
 

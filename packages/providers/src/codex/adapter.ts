@@ -1,3 +1,5 @@
+import type { ComputeClass } from "@loop/protocol";
+
 import { NodeProcessRunner, type ProcessRunner } from "../process";
 import { ProcessProvider } from "../process-provider";
 import { buildWorkerPrompt } from "../prompt";
@@ -16,7 +18,8 @@ interface CodexProviderOptions {
   command?: string;
   sandbox?: "read-only" | "workspace-write" | "danger-full-access";
   approveForMe?: boolean;
-  computeClasses?: string[];
+  /** Compute-class stance comes from configuration at construction time. */
+  computeClasses: ComputeClass[];
 }
 
 export class CodexProvider extends ProcessProvider {
@@ -27,7 +30,7 @@ export class CodexProvider extends ProcessProvider {
   readonly #command: string;
   readonly #sandbox: "read-only" | "workspace-write" | "danger-full-access";
   readonly #approveForMe: boolean;
-  readonly #computeClasses: string[];
+  readonly #computeClasses: ComputeClass[];
 
   constructor(options: CodexProviderOptions) {
     super();
@@ -38,7 +41,7 @@ export class CodexProvider extends ProcessProvider {
     this.#command = options.command ?? "codex";
     this.#sandbox = options.sandbox ?? "workspace-write";
     this.#approveForMe = options.approveForMe ?? false;
-    this.#computeClasses = options.computeClasses ?? ["balanced", "strong", "frontier"];
+    this.#computeClasses = [...options.computeClasses];
   }
 
   async capabilities(): Promise<ProviderCapabilities> {

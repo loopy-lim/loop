@@ -1,3 +1,5 @@
+import type { ComputeClass } from "@loop/protocol";
+
 import { NodeProcessRunner, type ProcessRunner } from "../process";
 import { ProcessProvider } from "../process-provider";
 import { buildWorkerPrompt } from "../prompt";
@@ -11,7 +13,8 @@ interface AntigravityProviderOptions {
   command?: string;
   model?: string;
   sandbox?: boolean;
-  computeClasses?: string[];
+  /** Compute-class stance comes from configuration at construction time. */
+  computeClasses: ComputeClass[];
 }
 
 export class AntigravityProvider extends ProcessProvider {
@@ -21,7 +24,7 @@ export class AntigravityProvider extends ProcessProvider {
   readonly #command: string;
   readonly #model?: string;
   readonly #sandbox: boolean;
-  readonly #computeClasses: string[];
+  readonly #computeClasses: ComputeClass[];
 
   constructor(options: AntigravityProviderOptions) {
     super();
@@ -31,7 +34,7 @@ export class AntigravityProvider extends ProcessProvider {
     this.#command = options.command ?? "agy";
     this.#model = options.model;
     this.#sandbox = options.sandbox ?? true;
-    this.#computeClasses = options.computeClasses ?? ["fast", "balanced", "strong"];
+    this.#computeClasses = [...options.computeClasses];
   }
 
   async capabilities(): Promise<ProviderCapabilities> {

@@ -7,14 +7,14 @@ import type {
   ProviderEvent,
   ProviderFailureKind,
   WorkerResult,
-  WorkerStatus,
+  WorkerState,
 } from "./types";
 import type { ProcessResult, ProcessRunner, RunningProcess } from "./process";
 import { redactProviderText } from "./redact";
 
 interface Session {
   process: RunningProcess;
-  status: WorkerStatus;
+  status: WorkerState;
   result: Promise<WorkerResult>;
   sessionId?: string;
 }
@@ -46,7 +46,7 @@ export abstract class ProcessProvider implements AgentProvider {
     session.status = "cancelled";
   }
 
-  async status(workerId: string): Promise<WorkerStatus> {
+  async status(workerId: string): Promise<WorkerState> {
     return this.require(workerId).status;
   }
 
@@ -94,7 +94,7 @@ export abstract class ProcessProvider implements AgentProvider {
       }),
     };
     session.result = process.result.then((result) => {
-      session.status = result.exitCode === 0 ? "completed" : "failed";
+      session.status = result.exitCode === 0 ? "completed" : "lost";
       return normalizeProcessResult(result);
     });
     this.#sessions.set(process.id, session);

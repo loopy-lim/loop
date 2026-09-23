@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 
+import type { ComputeClass } from "@loop/protocol";
+
 import type {
   AgentProvider,
   ProviderCapabilities,
   StartWorkerInput,
   WorkerHandle,
   WorkerResult,
-  WorkerStatus,
+  WorkerState,
 } from "./types";
 
 interface FakeOptions {
@@ -16,7 +18,7 @@ interface FakeOptions {
 }
 
 interface Session {
-  status: WorkerStatus;
+  status: WorkerState;
   promise: Promise<WorkerResult>;
   resolve: (result: WorkerResult) => void;
   timer?: ReturnType<typeof setTimeout>;
@@ -33,7 +35,7 @@ export class FakeProvider implements AgentProvider {
 
   constructor(
     readonly id: string,
-    readonly computeClasses: string[],
+    readonly computeClasses: ComputeClass[],
     options: FakeOptions = {},
   ) {
     this.#delayMs = options.delayMs ?? 0;
@@ -66,7 +68,7 @@ export class FakeProvider implements AgentProvider {
       const remaining = this.#failures[input.taskId] ?? 0;
       if (remaining > 0) this.#failures[input.taskId] = remaining - 1;
       const failed = this.#alwaysFail || remaining > 0;
-      session.status = failed ? "failed" : "completed";
+      session.status = failed ? "lost" : "completed";
       this.active -= 1;
       resolve({
         success: !failed,
@@ -92,7 +94,7 @@ export class FakeProvider implements AgentProvider {
     });
   }
 
-  async status(workerId: string): Promise<WorkerStatus> {
+  async status(workerId: string): Promise<WorkerState> {
     return this.require(workerId).status;
   }
 
@@ -108,7 +110,7 @@ export class FakeProvider implements AgentProvider {
 }
 
 export class FailingProvider extends FakeProvider {
-  constructor(id = "failing", computeClasses = ["fast"]) {
+  constructor(id = "failing", computeClasses: ComputeClass[] = ["fast"]) {
     super(id, computeClasses, { alwaysFail: true });
   }
 }
@@ -119,7 +121,7 @@ export class SlowProvider implements AgentProvider {
   readonly #sessions = new Map<string, Session>();
   cancelled = 0;
 
-  constructor(readonly id: string, readonly computeClasses: string[]) {}
+  constructor(readonly id: string, readonly computeClasses: ComputeClass[]) {}
 
   async capabilities(): Promise<ProviderCapabilities> {
     return {
@@ -154,8 +156,8 @@ export class SlowProvider implements AgentProvider {
     });
   }
 
-  async status(workerId: string): Promise<WorkerStatus> {
-    return this.#sessions.get(workerId)?.status ?? "failed";
+  async status(workerId: string): Promise<WorkerState> {
+    return this.#sessions.get(workerId)?.status ?? "lost";
   }
 
   async result(workerId: string): Promise<WorkerResult> {

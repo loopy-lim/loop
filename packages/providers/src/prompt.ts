@@ -21,6 +21,7 @@ export function buildWorkerPrompt(input: StartWorkerInput): string {
     listSection("Read scope", context.task.readScope),
     listSection("Write scope", context.task.writeScope),
     listSection("Requirements", context.task.requirements),
+    input.personaInstructions ? section("Persona", [input.personaInstructions]) : "",
     listSection(
       "Completion checks",
       context.task.completionChecks.map(
@@ -65,6 +66,7 @@ function fallbackPrompt(input: StartWorkerInput): string {
       `attempt=${input.attempt}`,
     ].map(safe).join("\n"),
     listSection("Requirements", input.requirements),
+    input.personaInstructions ? section("Persona", [input.personaInstructions]) : "",
   ].filter(Boolean);
   return bound(sections.join("\n\n"), MAX_PROMPT_LENGTH);
 }

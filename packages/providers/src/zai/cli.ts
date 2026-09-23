@@ -1,3 +1,5 @@
+import type { ComputeClass } from "@loop/protocol";
+
 import { NodeProcessRunner, type ProcessRunner } from "../process";
 import { ProcessProvider } from "../process-provider";
 import { buildWorkerPrompt } from "../prompt";
@@ -9,7 +11,8 @@ interface ZaiCliProviderOptions {
   cwd: string;
   command?: string;
   model?: string;
-  computeClasses?: string[];
+  /** Compute-class stance comes from configuration at construction time. */
+  computeClasses: ComputeClass[];
 }
 
 export class ZaiCliProvider extends ProcessProvider {
@@ -18,7 +21,7 @@ export class ZaiCliProvider extends ProcessProvider {
   readonly #cwd: string;
   readonly #command: string;
   readonly #model?: string;
-  readonly #computeClasses: string[];
+  readonly #computeClasses: ComputeClass[];
 
   constructor(options: ZaiCliProviderOptions) {
     super();
@@ -27,7 +30,7 @@ export class ZaiCliProvider extends ProcessProvider {
     this.#cwd = options.cwd;
     this.#command = options.command ?? "zai";
     this.#model = options.model;
-    this.#computeClasses = options.computeClasses ?? ["tiny", "fast", "balanced", "strong"];
+    this.#computeClasses = [...options.computeClasses];
   }
 
   async capabilities(): Promise<ProviderCapabilities> {

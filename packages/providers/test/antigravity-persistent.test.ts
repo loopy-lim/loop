@@ -186,7 +186,7 @@ describe("AgyPersistentProvider", () => {
   test("streams redacted activity before the turn completes and unsubscribes", async () => {
     const { child } = fakeChild();
     const driver = AgyStreamDriver.start({ cwd: "/project", spawnProcess: spawnScript(child), turnTimeoutMs: 5000 });
-    const provider = new AgyPersistentProvider({ id: "agy-progress", cwd: "/project", driverFactory: () => driver });
+    const provider = new AgyPersistentProvider({ id: "agy-progress", cwd: "/project", computeClasses: ["balanced"], driverFactory: () => driver });
     const handle = await provider.start(input);
     const events: ProviderEvent[] = [];
     const unsubscribe = provider.subscribe(handle.id, event => events.push(event));
@@ -211,7 +211,7 @@ describe("AgyPersistentProvider", () => {
   test("a timed-out turn reports failure and releases its process before reuse", async () => {
     const { child } = fakeChild();
     const driver = AgyStreamDriver.start({ cwd: "/project", spawnProcess: spawnScript(child), turnTimeoutMs: 20 });
-    const provider = new AgyPersistentProvider({ id: "agy-timeout", cwd: "/project", driverFactory: () => driver });
+    const provider = new AgyPersistentProvider({ id: "agy-timeout", cwd: "/project", computeClasses: ["balanced"], driverFactory: () => driver });
     const handle = await provider.start(input);
     const result = await provider.result(handle.id);
     await provider.release(handle.id);
@@ -238,6 +238,7 @@ describe("AgyPersistentProvider", () => {
       id: "antigravity:test",
       cwd: "/project",
       model: "gemini-3.1-pro-high",
+      computeClasses: ["strong"],
       driverFactory: () => driver as never,
     });
     const handle = await provider.start(input);
@@ -263,6 +264,7 @@ describe("AgyPersistentProvider", () => {
     const provider = new AgyPersistentProvider({
       id: "antigravity:test",
       cwd: "/project",
+      computeClasses: ["strong"],
       driverFactory: (options) => {
         captured = options;
         return driver as never;
@@ -296,6 +298,7 @@ describe("AgyPersistentProvider", () => {
     const provider = new AgyPersistentProvider({
       id: "antigravity:test",
       cwd: "/project",
+      computeClasses: ["strong"],
       driverFactory: () => driver as never,
     });
     const handle = await provider.start(input);
@@ -328,6 +331,7 @@ describe("AgyPersistentProvider", () => {
     const provider = new AgyPersistentProvider({
       id: "antigravity:test",
       cwd: "/project",
+      computeClasses: ["strong"],
       driverFactory: () => driver as never,
     });
     const handle = await provider.start(input);

@@ -1,3 +1,5 @@
+import type { ComputeClass } from "@loop/protocol";
+
 import type {
   HerdrExecution,
   HerdrWorkerHandle,
@@ -11,7 +13,7 @@ import type {
   StartWorkerInput,
   WorkerHandle,
   WorkerResult,
-  WorkerStatus,
+  WorkerState,
 } from "./types";
 import { buildWorkerPrompt } from "./prompt";
 import { redactProviderText } from "./redact";
@@ -21,7 +23,7 @@ interface HerdrAgentProviderOptions {
   runtime: HerdrWorkerRuntime;
   kind: Extract<HerdrExecution, { type: "agent" }>["kind"];
   projectRoot: string;
-  computeClasses: string[];
+  computeClasses: ComputeClass[];
   args?: string[];
   available?: boolean;
   pollIntervalMs?: number;
@@ -30,7 +32,7 @@ interface HerdrAgentProviderOptions {
 
 interface Session {
   handle: HerdrWorkerHandle;
-  status: WorkerStatus;
+  status: WorkerState;
   result: Promise<WorkerResult>;
   listeners: Set<(event: ProviderEvent) => void>;
   cancelRequested: boolean;
@@ -42,7 +44,7 @@ export class HerdrAgentProvider implements AgentProvider {
   readonly #runtime: HerdrWorkerRuntime;
   readonly #kind: HerdrAgentProviderOptions["kind"];
   readonly #projectRoot: string;
-  readonly #computeClasses: string[];
+  readonly #computeClasses: ComputeClass[];
   readonly #args: string[];
   readonly #available: boolean;
   readonly #pollIntervalMs: number;
@@ -109,7 +111,7 @@ export class HerdrAgentProvider implements AgentProvider {
       resolveCancellation,
     };
     session.result = Promise.race([this.#wait(session), cancellation]).catch((error) => {
-      session.status = session.cancelRequested ? "cancelled" : "failed";
+      session.status = session.cancelRequested ? "cancelled" : "lost";
       this.#emit(session, { type: "lifecycle", status: session.status });
       return {
         success: false,
@@ -138,14 +140,14 @@ export class HerdrAgentProvider implements AgentProvider {
     await session.result;
   }
 
-  async status(workerId: string): Promise<WorkerStatus> {
+  async status(workerId: string): Promise<WorkerState> {
     const session = this.#require(workerId);
     if (session.status !== "running") return session.status;
     const observed = await this.#runtime.status(session.handle);
     if (session.cancelRequested && observed !== "running") session.status = "cancelled";
     else if (observed === "completed") session.status = "completed";
     else if (observed === "failed" || observed === "blocked" || observed === "unknown") {
-      session.status = "failed";
+      session.status = "lost";
     }
     return session.status;
   }
@@ -192,8 +194,8 @@ export class HerdrAgentProvider implements AgentProvider {
           await delay(this.#pollIntervalMs);
           continue;
         }
-        session.status = "failed";
-        this.#emit(session, { type: "lifecycle", status: "failed" });
+        session.status = "lost";
+        this.#emit(session, { type: "lifecycle", status: "lost" });
         return {
           success: false,
           summary: "Herdr acknowledged the prompt but never observed the worker start",
@@ -218,10 +220,10 @@ export class HerdrAgentProvider implements AgentProvider {
         this.#emit(session, { type: "final", summary });
         return { success: true, summary, sessionId: session.handle.agentName };
       }
-      session.status = observed === "blocked" ? "failed" : "failed";
+      session.status = "lost";
       const summary = redact((await this.#runtime.read(session.handle)).trim())
         || `Herdr worker became ${observed}`;
-      this.#emit(session, { type: "lifecycle", status: "failed" });
+      this.#emit(session, { type: "lifecycle", status: "lost" });
       return {
         success: false,
         summary,
