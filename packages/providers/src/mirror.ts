@@ -1,4 +1,10 @@
-import { BoundedPaneSender, encodeDisplayFrame, type PaneRelaySpec } from "@loop/herdr";
+import {
+  BoundedPaneSender,
+  encodeDisplayFrame,
+  herdrCallerFromEnvironment,
+  type HerdrCaller,
+  type PaneRelaySpec,
+} from "@loop/herdr";
 
 import { redactProviderText } from "./redact";
 import type {
@@ -219,6 +225,10 @@ export interface PaneMirrorHost {
     projectRoot: string,
     worktree: string,
     label: string,
+    /** Caller anchor (2026-09-24 caller-anchoring): when provided, the pane
+     * must be created as a sibling tab of the caller's workspace, never in a
+     * separate loop-<runId> workspace. Optional for older hosts. */
+    caller?: HerdrCaller,
   ): Promise<{ tabId: string; paneId: string }>;
   closePane(tabId: string): Promise<void>;
   sendText(paneId: string, text: string): Promise<void>;
@@ -311,6 +321,10 @@ export class PaneMirrorSink implements MirrorSink {
         this.#projectRoot,
         info.worktree ?? this.#projectRoot,
         info.taskId,
+        // Caller-anchored placement: mirror panes follow the same rule as
+        // worker tabs — sibling tab of the Lead's workspace when the process
+        // runs inside Herdr, loop-<runId> workspace fallback otherwise.
+        herdrCallerFromEnvironment(this.#environment),
       );
       // The worker may have finished while the pane was being created.
       if (this.#finished.has(info.workerId)) {

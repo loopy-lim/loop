@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
-import { HerdrWorkerRuntime, encodeDisplayFrame, parsePaneLine, type HerdrRunner, type HerdrResult } from "@loop/herdr";
+import {
+  HerdrWorkerRuntime,
+  encodeDisplayFrame,
+  parsePaneLine,
+  type HerdrCaller,
+  type HerdrRunner,
+  type HerdrResult,
+} from "@loop/herdr";
 
 import {
   FakeProvider,
@@ -207,6 +214,7 @@ describe("PaneMirrorSink", () => {
 
   function fakeHost() {
     const created: Array<{ tabId: string; paneId: string; label: string; worktree: string }> = [];
+    const callers: Array<HerdrCaller | undefined> = [];
     const closed: string[] = [];
     const sent: Array<{ paneId: string; text: string }> = [];
     const hosted: Array<{ paneId: string; command: string; args: string[] }> = [];
@@ -214,6 +222,7 @@ describe("PaneMirrorSink", () => {
     let failRunInPane = false;
     const host = {
       created,
+      callers,
       closed,
       sent,
       hosted,
@@ -221,7 +230,8 @@ describe("PaneMirrorSink", () => {
       setFailRunInPane(value: boolean) {
         failRunInPane = value;
       },
-      async createPane(runId: string, taskId: string, projectRoot: string, worktree: string, label: string) {
+      async createPane(runId: string, taskId: string, projectRoot: string, worktree: string, label: string, caller?: HerdrCaller) {
+        callers.push(caller);
         const pane = { tabId: `tab-${created.length + 1}`, paneId: `pane-${created.length + 1}`, label, worktree };
         void runId; void taskId; void projectRoot;
         created.push(pane);
@@ -248,6 +258,35 @@ describe("PaneMirrorSink", () => {
   }
 
   const herdrEnv = { HERDR_WORKSPACE_ID: "ws-1", HERDR_PANE_ID: "ws-1:p-main" };
+
+  test("mirror panes are anchored to the caller workspace derived from HERDR_PANE_ID", async () => {
+    const host = fakeHost();
+    const sink = new PaneMirrorSink({
+      host,
+      projectRoot: "/project",
+      environment: { HERDR_PANE_ID: "ws-lead:p-9" },
+      intervalMs: 5,
+    });
+    await sink.onWorkerStart({ providerId: "codex:x", workerId: "w1", runId: "run", taskId: "t-1" });
+
+    expect(host.callers).toEqual([{ workspaceId: "ws-lead", paneId: "ws-lead:p-9" }]);
+    expect(host.created).toHaveLength(1);
+  });
+
+  test("without HERDR_PANE_ID the sink propagates no caller (loop-<runId> fallback in the host)", async () => {
+    const host = fakeHost();
+    // HERDR_WORKSPACE_ID only gates sink activity; it is never a placement anchor.
+    const sink = new PaneMirrorSink({
+      host,
+      projectRoot: "/project",
+      environment: { HERDR_WORKSPACE_ID: "ws-1" },
+      intervalMs: 5,
+    });
+    await sink.onWorkerStart({ providerId: "codex:x", workerId: "w1", runId: "run", taskId: "t-1" });
+
+    expect(host.callers).toEqual([undefined]);
+    expect(host.created).toHaveLength(1);
+  });
 
   test("headless environments never create panes (fail-open)", async () => {
     const host = fakeHost();

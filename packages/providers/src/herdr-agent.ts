@@ -1,5 +1,6 @@
 import type { ComputeClass } from "@loop/protocol";
 
+import { herdrCallerFromEnvironment } from "@loop/herdr";
 import type {
   HerdrExecution,
   HerdrWorkerHandle,
@@ -75,12 +76,10 @@ export class HerdrAgentProvider implements AgentProvider {
   }
 
   async start(input: StartWorkerInput): Promise<WorkerHandle> {
-    const callerPaneId = process.env.HERDR_PANE_ID;
-    const callerWorkspaceId = callerPaneId ? callerPaneId.split(':')[0] : undefined;
-    const caller = callerWorkspaceId && callerPaneId ? {
-      workspaceId: callerWorkspaceId,
-      paneId: callerPaneId,
-    } : undefined;
+    // Single-source caller derivation (2026-09-24 caller-anchoring decision):
+    // worker tabs land in the Lead's workspace when HERDR_PANE_ID is set,
+    // with the loop-<runId> workspace as the documented fallback.
+    const caller = herdrCallerFromEnvironment(process.env);
 
     const handle = await this.#runtime.start({
       projectRoot: this.#projectRoot,

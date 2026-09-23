@@ -158,6 +158,61 @@ test("uses an explicit caller pane instead of creating a workspace", async () =>
   expect(runner.calls[2]).toEqual(["pane", "run", "w7:p2", "bun", "test"]);
 });
 
+test("anchors mirror panes to the caller workspace without creating a Loop workspace", async () => {
+  const runner = scriptedRunner();
+  const runtime = new HerdrWorkerRuntime({ runner });
+
+  const pane = await runtime.createPane(
+    "run-3",
+    "task-3",
+    "/project",
+    "/project",
+    "task-3",
+    { workspaceId: "w7", paneId: "w7:p4" },
+  );
+
+  expect(pane).toEqual({
+    workerId: "mirror·task-3",
+    workspaceId: "w7",
+    tabId: "w7:t2",
+    paneId: "w7:p2",
+    taskId: "task-3",
+  });
+  // Caller-anchored: the mirror pane is a sibling tab of the caller's
+  // workspace; no workspace is created (the caller owns that surface).
+  expect(runner.calls[0]).toEqual([
+    "tab",
+    "create",
+    "--workspace",
+    "w7",
+    "--cwd",
+    "/project",
+    "--label",
+    "mirror·task-3",
+    "--no-focus",
+  ]);
+  expect(runner.calls.flat()).not.toContain("workspace");
+});
+
+test("falls back to a dedicated loop-<runId> workspace when no caller is given", async () => {
+  const runner = scriptedRunner();
+  const runtime = new HerdrWorkerRuntime({ runner });
+
+  const pane = await runtime.createPane("run-fallback", "task-4", "/project", "/project", "task-4");
+
+  expect(pane.workspaceId).toBe("w1");
+  expect(runner.calls[0]).toEqual([
+    "workspace",
+    "create",
+    "--cwd",
+    "/project",
+    "--label",
+    "loop-run-fallback",
+    "--no-focus",
+  ]);
+  expect(runner.calls[1]?.slice(0, 4)).toEqual(["tab", "create", "--workspace", "w1"]);
+});
+
 test("long requested agent names stay unique within Herdr's 32-character limit", async () => {
   const runtime = new HerdrWorkerRuntime({ runner: scriptedRunner() });
   const common = "loop-12345678-1234-1234-1234-123456789012-lead";
@@ -596,6 +651,33 @@ test("purgeLeakedWorkspaces lists workspaces and closes ones prefixed with loop-
   expect(calls).toContainEqual(["workspace", "close", "w2"]);
   expect(calls).toContainEqual(["workspace", "close", "w3"]);
   expect(calls.some(c => c[0] === "workspace" && c[1] === "close" && (c[2] === "w1" || c[2] === "w4"))).toBe(false);
+});
+
+test("purgeLeakedWorkspaces scans workspace labels only and never inspects caller-anchored tabs", async () => {
+  const calls: string[][] = [];
+  const runner: HerdrRunner = {
+    async run(_cmd, args) {
+      calls.push(args);
+      if (args[0] === "workspace" && args[1] === "list") {
+        return result({
+          result: {
+            workspaces: [
+              // Caller-anchored mirror panes are tabs inside a user workspace:
+              // the label never matches, and no tab-level scan may discover them.
+              { label: "user-workspace", workspace_id: "u1" },
+            ],
+          },
+        });
+      }
+      return result({ result: {} });
+    },
+  };
+
+  const runtime = new HerdrWorkerRuntime({ runner });
+  const removed = await runtime.purgeLeakedWorkspaces(false);
+  expect(removed).toEqual([]);
+  expect(calls.some((args) => args[0] === "tab")).toBe(false);
+  expect(calls.some((args) => args[0] === "workspace" && args[1] === "close")).toBe(false);
 });
 
 test("purgeLeakedWorkspaces skips deletion on dry run", async () => {

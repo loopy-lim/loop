@@ -3,11 +3,30 @@ import { createHash } from "node:crypto";
 
 import { assertWorktreeInsideProject } from "./worktree";
 import type {
+  HerdrCaller,
   HerdrExecution,
   HerdrWorkerHandle,
   HerdrWorkerInput,
   HerdrWorkerState,
 } from "./worker";
+
+/**
+ * Single source of the caller-anchoring rule (docs/decisions/2026-09-24-herdr-caller-anchoring.md):
+ * a Herdr caller is derived from `HERDR_PANE_ID` in the `<workspaceId>:<paneId>` format.
+ * Unset/empty values and malformed ids (no `:` separator, or an empty workspace
+ * prefix) yield `undefined`, which selects the explicit per-run `loop-<runId>`
+ * workspace fallback. `HERDR_WORKSPACE_ID` is deliberately not a placement
+ * input; it only gates the mirror sink's activity.
+ */
+export function herdrCallerFromEnvironment(
+  environment: Record<string, string | undefined>,
+): HerdrCaller | undefined {
+  const paneId = environment.HERDR_PANE_ID;
+  if (!paneId) return undefined;
+  const separator = paneId.indexOf(":");
+  if (separator <= 0) return undefined;
+  return { workspaceId: paneId.slice(0, separator), paneId };
+}
 
 export interface HerdrResult {
   exitCode: number;
@@ -170,10 +189,13 @@ export class HerdrWorkerRuntime {
    * worker-tab vocabulary; the caller-provided label is accepted for
    * PaneMirrorHost compatibility only.
    */
-  async createPane(runId: string, taskId: string, projectRoot: string, worktree: string, _label?: string): Promise<HerdrWorkerHandle> {
+  async createPane(runId: string, taskId: string, projectRoot: string, worktree: string, _label?: string, caller?: HerdrCaller): Promise<HerdrWorkerHandle> {
     assertWorktreeInsideProject(projectRoot, worktree);
     const label = mirrorPaneLabel(taskId);
-    const parent = await this.#ensureWorkspace({
+    // Same placement rule as start(): with a caller the pane is a sibling tab
+    // of the caller's workspace and no Loop-owned workspace is created or
+    // tracked; without one, the per-run loop-<runId> workspace is the fallback.
+    const parent = caller ?? await this.#ensureWorkspace({
       runId,
       taskId,
       projectRoot,
