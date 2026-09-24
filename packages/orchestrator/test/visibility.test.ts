@@ -123,7 +123,7 @@ test("panes visibility hosts the steer relay in each worker pane via the composi
         return { exitCode: 0, stdout: JSON.stringify({ result: { workspace: { workspace_id: "ws-1" }, root_pane: { pane_id: "ws-1:p-root" } } }), stderr: "" };
       }
       if (args[0] === "tab" && args[1] === "create") {
-        return { exitCode: 0, stdout: JSON.stringify({ result: { tab: { tab_id: `ws-1:t-${calls.length}` }, root_pane: { pane_id: `ws-1:p-${calls.length}` } } }), stderr: "" };
+        return { exitCode: 0, stdout: JSON.stringify({ result: { tab: { tab_id: `ws-lead:t-${calls.length}` }, root_pane: { pane_id: `ws-lead:p-${calls.length}` } } }), stderr: "" };
       }
       return { exitCode: 0, stdout: "{}", stderr: "" };
     },

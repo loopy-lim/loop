@@ -487,10 +487,10 @@ describe("HerdrWorkerRuntime pane surface", () => {
     return { calls, runner };
   }
 
-  test("createPane, sendText, and closePane drive the passive pane lifecycle", async () => {
+  test("createPane, sendText, and closePane drive the passive mirror tab lifecycle", async () => {
     const responses = new Map<string, string>([
       ["workspace create --cwd /project --label loop-run-9 --no-focus", JSON.stringify({ result: { workspace: { workspace_id: "ws-9" }, root_pane: { pane_id: "ws-9:p-root" } } })],
-      ["tab create --workspace ws-9 --cwd /project/wt --label mirror·t-1 --no-focus", JSON.stringify({ result: { root_pane: { pane_id: "ws-9:p-1" }, tab: { tab_id: "ws-9:t-1" } } })],
+      ["tab create --workspace ws-9 --cwd /project/wt --label mirror·t-1 --no-focus", JSON.stringify({ result: { tab: { tab_id: "ws-9:t-1" }, root_pane: { pane_id: "ws-9:p-1" } } })],
       ["pane rename ws-9:p-1 mirror·t-1", "{}"],
       ["pane send-text ws-9:p-1 hello\n", "{}"],
       ["tab close ws-9:t-1", "{}"],
@@ -510,5 +510,6 @@ describe("HerdrWorkerRuntime pane surface", () => {
     expect(verbs).toContain("pane rename");
     expect(verbs).toContain("pane send-text");
     expect(verbs).toContain("tab close");
+    expect(verbs).not.toContain("pane close");
   });
 });

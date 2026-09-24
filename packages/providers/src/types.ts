@@ -86,4 +86,13 @@ export interface AgentProvider {
   status(workerId: string): Promise<WorkerState>;
   result(workerId: string): Promise<WorkerResult>;
   subscribe?(workerId: string, listener: (event: ProviderEvent) => void): () => void;
+  /**
+   * Optional live-conversation steering channel (live-tabs ADR §4,
+   * 2026-09-24): delivers a message into a running worker's interactive
+   * conversation (`agent prompt` surface — typed into the TUI editor, never
+   * raw key injection). Providers without a live conversation surface omit
+   * it; rejections (e.g. `agent_blocked`) propagate to the caller, where the
+   * recorded-steer contract keeps the message in the run history.
+   */
+  steer?(workerId: string, message: string): Promise<void>;
 }

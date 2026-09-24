@@ -523,6 +523,7 @@ test("Herdr cancellation waits for the active turn and release closes only the w
 
   await provider.release!(handle.id);
   expect(calls).toContainEqual(["tab", "close", "worker-tab"]);
+  expect(calls.some((args) => args[0] === "pane" && args[1] === "close")).toBe(false);
   expect(calls.some((args) => args[0] === "workspace" && args[1] === "close")).toBe(false);
   expect(provider.status(handle.id)).rejects.toThrow("unknown worker");
 });

@@ -11,12 +11,7 @@ function scriptedRunner(): HerdrRunner & { calls: string[][] } {
       if (args[0] === "tab" && args[1] === "create") {
         return {
           exitCode: 0,
-          stdout: JSON.stringify({
-            result: {
-              root_pane: { pane_id: "caller-ws:p-new" },
-              tab: { tab_id: "caller-ws:t-new" },
-            }
-          }),
+          stdout: JSON.stringify({ result: { tab: { tab_id: "caller-ws:t-new" }, root_pane: { pane_id: "caller-ws:p-new" } } }),
           stderr: "",
         };
       }

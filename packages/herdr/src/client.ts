@@ -51,10 +51,17 @@ export interface CloseWorkspaceResult {
   reason?: string;
 }
 
+/**
+ * Per-run placement record. `owned` distinguishes the loop-<runId> workspace
+ * Loop may tear down from a caller-anchored run, whose workspace, tabs, and
+ * anchor pane always belong to the user: for those only the run's own
+ * worker tabs are ever closed.
+ */
 interface WorkspaceRef {
   workspaceId: string;
   rootPaneId: string;
   tabIds: Set<string>;
+  owned: boolean;
 }
 
 export class NodeHerdrRunner implements HerdrRunner {
@@ -126,6 +133,8 @@ export class HerdrWorkerRuntime {
 
     process.on("exit", () => {
       for (const ws of this.#workspaces.values()) {
+        // Caller-anchored records point at the user's workspace: never close.
+        if (!ws.owned) continue;
         try {
           spawnSync(this.#command, ["workspace", "close", ws.workspaceId], { stdio: "ignore" });
         } catch {
@@ -144,8 +153,10 @@ export class HerdrWorkerRuntime {
     const label = input.label
       ? workerLabel({ taskId: input.taskId, kind: input.label.kind, attempt: input.label.attempt })
       : workerId;
-    // Workers live in their own tab of the same workspace: same space,
-    // one tab per worker, no split-screen clutter, no focus stealing.
+    // One tab per worker (live-tabs ADR placement rule, reinstated
+    // 2026-09-25): the worker's interactive conversation TUI runs inside its
+    // own no-focus tab of the anchor workspace via `agent start --pane` +
+    // `agent prompt`. No split-screen placement, no focus stealing.
     const tab = await this.#run([
       "tab",
       "create",
@@ -160,9 +171,7 @@ export class HerdrWorkerRuntime {
     const paneId = requiredString(tab, ["result", "root_pane", "pane_id"]);
     const tabId = requiredString(tab, ["result", "tab", "tab_id"]);
     await this.#run(["pane", "rename", paneId, label]);
-    if (this.#workspaces.has(input.runId)) {
-      this.#workspaces.get(input.runId)!.tabIds.add(tabId);
-    }
+    this.#ensureRunRef(input.runId, parent).tabIds.add(tabId);
     const handle: HerdrWorkerHandle = {
       workerId,
       workspaceId: parent.workspaceId,
@@ -176,24 +185,26 @@ export class HerdrWorkerRuntime {
       await this.#launch(handle, input.execution, input.prompt, input.waitForPrompt === true);
       return handle;
     } catch (error) {
+      this.#forgetTab(tabId);
       await this.#run(["tab", "close", tabId]).catch(() => undefined);
       throw error;
     }
   }
 
   /**
-   * Creates a passive pane inside the run's workspace for mirroring worker
-   * output. The pane hosts no process — it is a pure viewer surface whose
-   * lifetime is owned by the caller (closePane on worker finish). The label
-   * is derived from taskId (`mirror·<taskId>`) so mirror panels share the
-   * worker-tab vocabulary; the caller-provided label is accepted for
-   * PaneMirrorHost compatibility only.
+   * Creates a passive pane for mirroring worker output, placed as its own
+   * no-focus tab of the anchor workspace by the same rule as start(). The
+   * pane hosts no process — it is a pure viewer surface whose lifetime is
+   * owned by the caller (closePane on worker finish). The label is derived
+   * from taskId (`mirror·<taskId>`) so mirror panes share the worker-tab
+   * vocabulary; the caller-provided label is accepted for PaneMirrorHost
+   * compatibility only.
    */
   async createPane(runId: string, taskId: string, projectRoot: string, worktree: string, _label?: string, caller?: HerdrCaller): Promise<HerdrWorkerHandle> {
     assertWorktreeInsideProject(projectRoot, worktree);
     const label = mirrorPaneLabel(taskId);
-    // Same placement rule as start(): with a caller the pane is a sibling tab
-    // of the caller's workspace and no Loop-owned workspace is created or
+    // Same placement rule as start(): with a caller the mirror is a sibling
+    // tab of the caller's workspace and no Loop-owned workspace is created or
     // tracked; without one, the per-run loop-<runId> workspace is the fallback.
     const parent = caller ?? await this.#ensureWorkspace({
       runId,
@@ -213,14 +224,18 @@ export class HerdrWorkerRuntime {
     const paneId = requiredString(tab, ["result", "root_pane", "pane_id"]);
     const tabId = requiredString(tab, ["result", "tab", "tab_id"]);
     await this.#run(["pane", "rename", paneId, label]);
-    if (this.#workspaces.has(runId)) {
-      this.#workspaces.get(runId)!.tabIds.add(tabId);
-    }
+    this.#ensureRunRef(runId, parent).tabIds.add(tabId);
     return { workerId: label, workspaceId: parent.workspaceId, tabId, paneId, taskId };
   }
 
+  /**
+   * Closes a mirror surface (its lifetime is the worker's): the mirror tab
+   * this runtime created. Best-effort like the previous contract: failures
+   * are swallowed.
+   */
   async closePane(tabId: string): Promise<void> {
     await this.#run(["tab", "close", tabId]).catch(() => undefined);
+    this.#forgetTab(tabId);
   }
 
   async sendText(paneId: string, text: string): Promise<void> {
@@ -248,18 +263,50 @@ export class HerdrWorkerRuntime {
 
   async status(handle: HerdrWorkerHandle): Promise<HerdrWorkerState> {
     validateHandle(handle);
-    const payload = handle.agentName
-      ? await this.#run(["agent", "get", handle.agentName])
-      : await this.#run(["pane", "get", handle.paneId]);
-    const state = optionalString(
-      payload,
-      handle.agentName ? ["result", "agent", "agent_status"] : ["result", "pane", "agent_status"],
-    )
-      ?? optionalString(
-        payload,
-        handle.agentName ? ["result", "agent", "state"] : ["result", "pane", "state"],
-      );
-    return mapState(state);
+    if (!handle.agentName) return await this.#paneStatus(handle.paneId);
+    let payload: unknown;
+    try {
+      payload = await this.#run(["agent", "get", handle.agentName]);
+    } catch (error) {
+      if (!isAlreadyGone(error)) throw error;
+      // Agent record already gone (herdr restart/prune): observe the pane
+      // itself — live-tabs ADR §5 fallback surface.
+      return await this.#paneStatus(handle.paneId);
+    }
+    const state = mapState(
+      optionalString(payload, ["result", "agent", "agent_status"])
+        ?? optionalString(payload, ["result", "agent", "state"]),
+    );
+    // Live-tab health signal (ADR §6): a live agent herdr does not consider
+    // input-ready is the only observable form of the silent non-interactive
+    // fallback (pi falls back to print mode with exit 0). Never judge by exit
+    // codes or stdout — surface it as a failure instead.
+    if (
+      (state === "running" || state === "blocked" || state === "idle")
+      && optionalBoolean(payload, ["result", "agent", "interactive_ready"]) === false
+    ) {
+      return "failed";
+    }
+    return state;
+  }
+
+  /**
+   * Pane-level lifecycle observation. A gone pane/tab is termination
+   * confirmed (ADR §5): report `completed` instead of throwing, so the
+   * already-gone contract keeps holding for both agent and command workers.
+   */
+  async #paneStatus(paneId: string): Promise<HerdrWorkerState> {
+    let payload: unknown;
+    try {
+      payload = await this.#run(["pane", "get", paneId]);
+    } catch (error) {
+      if (isAlreadyGone(error)) return "completed";
+      throw error;
+    }
+    return mapState(
+      optionalString(payload, ["result", "pane", "agent_status"])
+        ?? optionalString(payload, ["result", "pane", "state"]),
+    );
   }
 
   async read(handle: HerdrWorkerHandle, lines = 80): Promise<string> {
@@ -267,19 +314,56 @@ export class HerdrWorkerRuntime {
     if (!Number.isInteger(lines) || lines < 1 || lines > 10_000) {
       throw new Error("lines must be an integer between 1 and 10000");
     }
-    const args = handle.agentName
-      ? [
-          "agent",
-          "read",
-          handle.agentName,
-          "--source",
-          "recent-unwrapped",
-          "--lines",
-          String(lines),
-        ]
-      : ["pane", "read", handle.paneId, "--lines", String(lines)];
-    // Unlike the other herdr verbs, `read` prints the raw pane text instead
-    // of the JSON envelope, so parse it as plain output.
+    if (!handle.agentName) {
+      return await this.#readSurface(["pane", "read", handle.paneId, "--lines", String(lines)]);
+    }
+    try {
+      return await this.#readSurface([
+        "agent",
+        "read",
+        handle.agentName,
+        "--source",
+        "recent-unwrapped",
+        "--lines",
+        String(lines),
+      ]);
+    } catch (error) {
+      if (!isAlreadyGone(error)) throw error;
+      // Agent record gone: the pane is the remaining snapshot surface. When
+      // the pane is gone too, termination is confirmed and no transcript
+      // exists (ADR §5) — an empty snapshot, not an error.
+      try {
+        return await this.#readSurface(["pane", "read", handle.paneId, "--lines", String(lines)]);
+      } catch (paneError) {
+        if (isAlreadyGone(paneError)) return "";
+        throw paneError;
+      }
+    }
+  }
+
+  /**
+   * Delivers a steer message into a live agent conversation (live-tabs ADR
+   * §4): `agent prompt` is the only text surface — it types the message into
+   * the TUI editor with bracketed-paste semantics, and herdr pre-rejects it
+   * with `agent_blocked` while a blocking UI holds the agent. Raw key
+   * injection (`send-keys`) stays cancel-only; command workers have no
+   * conversation to steer. Empty messages carry no turn and are skipped,
+   * mirroring the initial-prompt guard in `#launch`.
+   */
+  async steer(handle: HerdrWorkerHandle, message: string): Promise<void> {
+    validateHandle(handle);
+    if (!handle.agentName) {
+      throw new Error(`Herdr worker ${handle.workerId} has no interactive agent conversation to steer`);
+    }
+    if (message.length === 0) return;
+    await this.#run(["agent", "prompt", handle.agentName, message]);
+  }
+
+  /**
+   * Runs a `read` verb. Unlike the other herdr verbs, `read` prints the raw
+   * pane text instead of the JSON envelope, so it is parsed as plain output.
+   */
+  async #readSurface(args: string[]): Promise<string> {
     const result = await this.#runner.run(this.#command, args);
     if (result.exitCode !== 0) {
       throw new Error(formatHerdrError(result));
@@ -316,6 +400,8 @@ export class HerdrWorkerRuntime {
   async cleanup(handle: HerdrWorkerHandle): Promise<void> {
     validateHandle(handle);
     try {
+      // The worker's own tab is the close surface. The Lead/caller pane and
+      // its hosting tab are never close targets.
       await this.#run(["tab", "close", handle.tabId]);
     } catch (error) {
       if (!isAlreadyGone(error)) {
@@ -323,6 +409,7 @@ export class HerdrWorkerRuntime {
       }
       // Already-gone surfaces count as cleaned.
     }
+    this.#forgetTab(handle.tabId);
     this.#turns.delete(handle.workerId);
   }
 
@@ -369,7 +456,28 @@ export class HerdrWorkerRuntime {
       }
       return { closed: true, reason: "already_gone" };
     }
+    if (!workspace.owned) {
+      return await this.#sweepRunSurfaces(runId, workspace);
+    }
     return await this.#teardownWorkspace(runId, workspace.workspaceId, workspace.rootPaneId, workspace.tabIds);
+  }
+
+  /**
+   * End-of-run sweep for caller-anchored runs: the workspace, its tabs, and
+   * the anchor pane belong to the user and are never touched — only this
+   * run's leftover worker tabs close. Already-gone tabs count as swept; a
+   * hard failure keeps the record so a retry can finish the sweep.
+   */
+  async #sweepRunSurfaces(runId: string, workspace: WorkspaceRef): Promise<CloseWorkspaceResult> {
+    const tabIds = [...workspace.tabIds];
+    for (const tabId of tabIds) {
+      await this.#run(["tab", "close", tabId]).catch((error) => {
+        if (!isAlreadyGone(error)) throw error;
+      });
+    }
+    this.#workspaces.delete(runId);
+    for (const tabId of tabIds) this.#forgetTab(tabId);
+    return { closed: true, reason: "surfaces_closed" };
   }
 
   async #teardownWorkspace(
@@ -467,7 +575,17 @@ export class HerdrWorkerRuntime {
         handle.paneId,
       ];
       if (execution.args.length > 0) args.push("--", ...execution.args);
-      await this.#startAgentWithRetry(args);
+      const started = await this.#startAgentWithRetry(args);
+      // Launch-time live-tab contract (ADR §6): herdr blocks `agent start`
+      // until the agent is interactive-ready, so an explicit `interactive_ready:
+      // false` acknowledgement means the conversation TUI never came up (pi
+      // silently falls back to print mode with exit 0). Fail the launch
+      // instead of letting a headless worker pass as a live tab.
+      if (optionalBoolean(started, ["result", "agent", "interactive_ready"]) === false) {
+        throw new Error(
+          `agent_not_interactive: herdr started ${handle.workerId} without a ready conversation TUI`,
+        );
+      }
       if (prompt.length > 0) {
         // Submission acknowledgement and lifecycle observation are separate:
         // a non-wait prompt proves delivery, then the provider polls status.
@@ -502,6 +620,7 @@ export class HerdrWorkerRuntime {
           workspaceId: requiredString(payload, ["result", "workspace", "workspace_id"]),
           rootPaneId: requiredString(payload, ["result", "root_pane", "pane_id"]),
           tabIds: new Set<string>(rootTabId ? [rootTabId] : []),
+          owned: true,
         };
         this.#workspaces.set(input.runId, workspace);
         return { workspaceId: workspace.workspaceId, paneId: workspace.rootPaneId };
@@ -511,6 +630,29 @@ export class HerdrWorkerRuntime {
     })();
     this.#pendingWorkspaces.set(input.runId, promise);
     return promise;
+  }
+
+  /**
+   * Registers the run's placement record. Caller-anchored runs anchor to the
+   * caller's workspace without owning it, so their worker tabs join a
+   * sweep-only record; the loop-<runId> fallback records itself in
+   * #ensureWorkspace instead.
+   */
+  #ensureRunRef(runId: string, parent: { workspaceId: string; paneId: string }): WorkspaceRef {
+    const existing = this.#workspaces.get(runId);
+    if (existing) return existing;
+    const ref: WorkspaceRef = {
+      workspaceId: parent.workspaceId,
+      rootPaneId: parent.paneId,
+      tabIds: new Set<string>(),
+      owned: false,
+    };
+    this.#workspaces.set(runId, ref);
+    return ref;
+  }
+
+  #forgetTab(tabId: string): void {
+    for (const ref of this.#workspaces.values()) ref.tabIds.delete(tabId);
   }
 
   async #run(args: string[]): Promise<unknown> {
@@ -619,6 +761,16 @@ function optionalString(payload: unknown, path: string[]): string | undefined {
     value = (value as Record<string, unknown>)[key];
   }
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/** Boolean payload lens; absent fields stay `undefined` (tolerated, never false). */
+function optionalBoolean(payload: unknown, path: string[]): boolean | undefined {
+  let value = payload;
+  for (const key of path) {
+    if (typeof value !== "object" || value === null || !(key in value)) return undefined;
+    value = (value as Record<string, unknown>)[key];
+  }
+  return typeof value === "boolean" ? value : undefined;
 }
 
 function mapState(state: string | undefined): HerdrWorkerState {

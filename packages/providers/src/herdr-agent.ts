@@ -156,6 +156,22 @@ export class HerdrAgentProvider implements AgentProvider {
     return this.#require(workerId).result;
   }
 
+  /**
+   * Live-conversation steering (live-tabs ADR §4): the message goes through
+   * the same `agent prompt` surface as the initial prompt, so the user sees
+   * it typed into the conversation TUI exactly like direct input. Rejections
+   * (e.g. `agent_blocked` while a blocking UI holds the agent) propagate —
+   * the steer record stays in the run history per the recorded-steer
+   * contract.
+   */
+  async steer(workerId: string, message: string): Promise<void> {
+    const session = this.#require(workerId);
+    if (session.status !== "running") {
+      throw new Error(`worker ${workerId} is no longer running (${session.status})`);
+    }
+    await this.#runtime.steer(session.handle, message);
+  }
+
   async release(workerId: string): Promise<void> {
     const session = this.#require(workerId);
     await session.result;

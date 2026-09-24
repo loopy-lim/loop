@@ -33,6 +33,7 @@ export interface HerdrWorkerInput {
 export interface HerdrWorkerHandle {
   workerId: string;
   workspaceId: string;
+  /** Close-surface id: the worker's own tab — never the caller's hosting tab. */
   tabId: string;
   paneId: string;
   taskId: string;

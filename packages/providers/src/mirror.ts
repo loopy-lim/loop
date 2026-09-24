@@ -465,6 +465,13 @@ export class MirroringProvider implements AgentProvider {
     return this.#inner.status(workerId);
   }
 
+  async steer(workerId: string, message: string): Promise<void> {
+    if (!this.#inner.steer) {
+      throw new Error(`Provider ${this.id} does not support steer`);
+    }
+    await this.#inner.steer(workerId, message);
+  }
+
   async result(workerId: string): Promise<WorkerResult> {
     try {
       const res = await this.#inner.result(workerId);
