@@ -520,7 +520,8 @@ fn apply_indexes(transaction: &Transaction<'_>, event: &Event) -> Result<(), Sto
             update_task_state(transaction, &event.run_id, task_id.as_str(), "done")?;
             update_latest_attempt_state(transaction, &event.run_id, task_id.as_str(), "done")?;
         }
-        EventKind::VerificationFailed { task_id, .. } => {
+        EventKind::VerificationFailed { task_id, .. }
+        | EventKind::VerificationClassifiedFailure { task_id, .. } => {
             update_task_state(transaction, &event.run_id, task_id.as_str(), "ready")?;
             update_latest_attempt_state(transaction, &event.run_id, task_id.as_str(), "failed")?;
         }

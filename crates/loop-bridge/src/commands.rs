@@ -2,12 +2,17 @@ use loop_core::attention::{Attention, AttentionKind, AttentionResolution};
 use loop_core::benchmark::{TraceComparison, TraceScore, TraceSummary};
 use loop_core::event::{Event, EventKind};
 use loop_core::graph::TaskGraph;
-use loop_core::policy::{ComputeClass, RetentionPolicy};
+use loop_core::policy::{
+    CleanupDisposition, ComputeClass, DependencyTerminalization, FailureClass, FailurePolicy,
+    IndependentBranchAction, OnExhaustion, RefusalCode, RetentionPolicy, RetryOutcome, RetryScope,
+    RunFailureAction, TerminalizationPolicy,
+};
 use loop_core::run::RunState;
 use loop_core::scheduler::{Capacity, Scheduler};
 use loop_core::task::{
-    CompletionCheck, CompletionContract, Task, TaskId, TaskKind, TaskState, VerificationEvidence,
-    WorkOwnership,
+    Assumption, CompletionCheck, CompletionContract, CompletionCoverage, DecompositionContract,
+    DependencyConsumption, EvidenceLevel, SemanticAccess, SemanticConflictResolution,
+    SemanticTouchpoint, Task, TaskId, TaskKind, TaskState, VerificationEvidence, WorkOwnership,
 };
 use loop_store::SqliteStore;
 use rustra::prelude::*;
@@ -51,6 +56,60 @@ pub struct TaskSpecInput {
     pub minimum_compute: ComputeClass,
     pub maximum_compute: ComputeClass,
     pub max_attempts: u16,
+}
+
+#[bridge_type]
+pub struct AssumptionInput {
+    pub assumption: String,
+    pub evidence: String,
+    pub if_false: String,
+    pub revisit: String,
+}
+
+#[bridge_type]
+pub struct SemanticTouchpointInput {
+    pub id: String,
+    pub access: SemanticAccess,
+    pub conflict_resolution: SemanticConflictResolution,
+}
+
+#[bridge_type]
+pub struct DependencyConsumptionInput {
+    pub dependency: String,
+    pub decisions: Vec<String>,
+    pub artifacts: Vec<String>,
+    pub checks: Vec<String>,
+    pub risks: Vec<String>,
+}
+
+#[bridge_type]
+pub struct CompletionCoverageInput {
+    pub check_id: String,
+    pub requirements: Vec<String>,
+    pub artifacts: Vec<String>,
+    pub semantics: Vec<String>,
+    pub evidence_level: EvidenceLevel,
+}
+
+#[bridge_type]
+pub struct PreflightTaskSpecInput {
+    pub task: TaskSpecInput,
+    pub defaults: Vec<String>,
+    pub assumptions: Vec<AssumptionInput>,
+    pub semantic_touchpoints: Vec<SemanticTouchpointInput>,
+    pub consumes: Vec<DependencyConsumptionInput>,
+    pub completion_coverage: Vec<CompletionCoverageInput>,
+    pub failure_policy: FailurePolicy,
+}
+
+#[bridge_type]
+pub struct DecompositionContractOutput {
+    pub defaults: Vec<String>,
+    pub assumptions: Vec<AssumptionInput>,
+    pub semantic_touchpoints: Vec<SemanticTouchpointInput>,
+    pub consumes: Vec<DependencyConsumptionInput>,
+    pub completion_coverage: Vec<CompletionCoverageInput>,
+    pub failure_policy: FailurePolicy,
 }
 
 #[bridge_type]
@@ -256,6 +315,42 @@ pub struct PolicyEvaluationOutput {
 }
 
 #[bridge_type]
+pub struct EvaluateCleanupDispositionInput {
+    pub refusal_code: RefusalCode,
+}
+
+#[bridge_type]
+pub struct CleanupDispositionOutput {
+    pub disposition: CleanupDisposition,
+}
+
+#[bridge_type]
+pub struct EvaluateFailurePolicyInput {
+    pub failure_class: FailureClass,
+    pub retries_used: u16,
+    pub task_kind: TaskKind,
+    pub failure_policy: FailurePolicy,
+    pub terminalization_policy: TerminalizationPolicy,
+}
+
+#[bridge_type]
+pub enum FailurePolicyAction {
+    Retry,
+    FailTask,
+    RequireAttention,
+}
+
+#[bridge_type]
+pub struct FailurePolicyOutput {
+    pub action: FailurePolicyAction,
+    pub retry_scope: Option<RetryScope>,
+    pub delay_ms: Option<u64>,
+    pub dependents: Option<DependencyTerminalization>,
+    pub independent_branches: Option<IndependentBranchAction>,
+    pub run: Option<RunFailureAction>,
+}
+
+#[bridge_type]
 pub struct EvaluateSurfaceRemovalInput {
     pub surface_id: String,
     pub is_owned_by_loop: bool,
@@ -377,11 +472,15 @@ pub fn update_task(input: UpdateTaskInput) -> Result<OperationOutput> {
     }
     if matches!(
         current,
-        TaskState::Running | TaskState::Verifying | TaskState::Cancelled | TaskState::Done
+        TaskState::Running
+            | TaskState::Verifying
+            | TaskState::Blocked
+            | TaskState::Cancelled
+            | TaskState::Done
     ) {
         return Err(bridge_error(
             "reconciliation_required",
-            "running, verifying, cancelled, or completed work cannot be reset with updateTask",
+            "running, verifying, terminally blocked, cancelled, or completed work cannot be reset with updateTask",
         ));
     }
     let event = Event::new(&input.run_id, EventKind::TaskReady(task_id));
@@ -483,11 +582,22 @@ pub fn record_worker_result(input: WorkerResultInput) -> Result<OperationOutput>
             "worker_result_failed",
         )?;
     } else {
+        let task_id = finished_task_id(&finished)?;
         let failure = Event::new(
             &input.run_id,
-            EventKind::VerificationFailed {
-                task_id: finished_task_id(&finished)?,
-                reason: input.summary,
+            if input.execution_owner.is_some() {
+                EventKind::VerificationClassifiedFailure {
+                    task_id,
+                    failure_class: FailureClass::Environment,
+                    reason: input.summary,
+                }
+            } else {
+                // Without a lease owner, external process liveness is not
+                // proven; retain the legacy attention/reconciliation path.
+                EventKind::VerificationFailed {
+                    task_id,
+                    reason: input.summary,
+                }
             },
         );
         append_batch_and_notify_owned(
@@ -514,6 +624,21 @@ pub fn record_verification(input: VerificationInput) -> Result<OperationOutput> 
     let failed_task_id = task_id.clone();
     let failure_reason = input.reason.clone();
     let passed = input.passed;
+    let mut store = store(&input.database_path)?;
+    let failure_class = if passed {
+        FailureClass::Assertion
+    } else {
+        let projection = store
+            .projection(&input.run_id)
+            .map_err(|error| bridge_error("snapshot_failed", error))?;
+        match projection.checks.get(&task_id) {
+            Some(receipts) if receipts.iter().any(|receipt| receipt.timed_out) => {
+                FailureClass::Timeout
+            }
+            Some(_) if !input.checks.is_empty() => FailureClass::Assertion,
+            _ => FailureClass::Environment,
+        }
+    };
     let kind = if input.passed {
         EventKind::VerificationPassed {
             task_id,
@@ -524,13 +649,18 @@ pub fn record_verification(input: VerificationInput) -> Result<OperationOutput> 
                     .map(|check| (check.id, check.passed)),
             ),
         }
+    } else if execution_owner.is_some() {
+        EventKind::VerificationClassifiedFailure {
+            task_id,
+            failure_class,
+            reason: input.reason,
+        }
     } else {
         EventKind::VerificationFailed {
             task_id,
             reason: input.reason,
         }
     };
-    let mut store = store(&input.database_path)?;
     let event = Event::new(&input.run_id, kind);
     append_and_notify_owned(
         &mut store,
@@ -622,8 +752,14 @@ pub fn resolve_attention(input: ResolveAttentionInput) -> Result<OperationOutput
             .state;
         match state {
             TaskState::Pending | TaskState::Ready => {}
-            TaskState::Attention | TaskState::Blocked | TaskState::Failed => {
+            TaskState::Attention | TaskState::Failed => {
                 events.push(Event::new(&input.run_id, EventKind::TaskReady(task_id)));
+            }
+            TaskState::Blocked => {
+                return Err(bridge_error(
+                    "invalid_retry",
+                    "terminally blocked dependent work cannot be retried",
+                ));
             }
             TaskState::Running | TaskState::Verifying | TaskState::Cancelled => {
                 return Err(bridge_error(
@@ -1044,6 +1180,53 @@ pub fn select_candidate(input: SelectCandidateInput) -> Result<SelectCandidateOu
 }
 
 #[command]
+pub fn evaluate_cleanup_disposition(
+    input: EvaluateCleanupDispositionInput,
+) -> Result<CleanupDispositionOutput> {
+    Ok(CleanupDispositionOutput {
+        disposition: input.refusal_code.disposition(),
+    })
+}
+
+#[command]
+pub fn evaluate_failure_policy(input: EvaluateFailurePolicyInput) -> Result<FailurePolicyOutput> {
+    Ok(
+        match input
+            .failure_policy
+            .evaluate(input.failure_class, input.retries_used)
+        {
+            RetryOutcome::Retry { scope, delay_ms } => FailurePolicyOutput {
+                action: FailurePolicyAction::Retry,
+                retry_scope: Some(scope),
+                delay_ms: Some(delay_ms),
+                dependents: None,
+                independent_branches: None,
+                run: None,
+            },
+            RetryOutcome::Exhausted(OnExhaustion::RequireAttention) => FailurePolicyOutput {
+                action: FailurePolicyAction::RequireAttention,
+                retry_scope: None,
+                delay_ms: None,
+                dependents: None,
+                independent_branches: None,
+                run: None,
+            },
+            RetryOutcome::Exhausted(OnExhaustion::FailTask) => {
+                let terminalization = input.terminalization_policy.outcome(input.task_kind);
+                FailurePolicyOutput {
+                    action: FailurePolicyAction::FailTask,
+                    retry_scope: None,
+                    delay_ms: None,
+                    dependents: Some(terminalization.dependents),
+                    independent_branches: Some(terminalization.independent_branches),
+                    run: Some(terminalization.run),
+                }
+            }
+        },
+    )
+}
+
+#[command]
 pub fn get_trace(input: GetTraceInput) -> Result<GetTraceOutput> {
     let run_id = input.run_id.clone();
     let summary = run_trace_summary(&input.database_path, &run_id)?;
@@ -1284,6 +1467,66 @@ fn snapshot(store: &SqliteStore, run_id: &str) -> Result<SnapshotOutput> {
     })
 }
 
+pub(crate) fn task_from_preflight_input(input: PreflightTaskSpecInput) -> Result<Task> {
+    let mut task = task_from_input(input.task)?;
+    let mut coverage_by_check = std::collections::BTreeMap::new();
+    for coverage in input.completion_coverage {
+        let coverage = (
+            coverage.check_id,
+            CompletionCoverage::new(
+                coverage.requirements,
+                coverage.artifacts,
+                coverage.semantics,
+                coverage.evidence_level,
+            ),
+        );
+        if coverage_by_check.insert(coverage.0, coverage.1).is_some() {
+            return Err(bridge_error(
+                "invalid_task",
+                "completion coverage contains a duplicate check id",
+            ));
+        }
+    }
+    for check in &mut task.completion_contract.checks {
+        check.coverage = coverage_by_check.remove(&check.id);
+    }
+    if !coverage_by_check.is_empty() {
+        return Err(bridge_error(
+            "invalid_task",
+            "completion coverage references an unknown check",
+        ));
+    }
+    task.decomposition_contract = Some(DecompositionContract::new(
+        input.defaults,
+        input.assumptions.into_iter().map(|assumption| {
+            Assumption::new(
+                assumption.assumption,
+                assumption.evidence,
+                assumption.if_false,
+                assumption.revisit,
+            )
+        }),
+        input.semantic_touchpoints.into_iter().map(|touchpoint| {
+            SemanticTouchpoint::new(
+                touchpoint.id,
+                touchpoint.access,
+                touchpoint.conflict_resolution,
+            )
+        }),
+        input.consumes.into_iter().map(|consumption| {
+            DependencyConsumption::new(
+                TaskId::from(consumption.dependency),
+                consumption.decisions,
+                consumption.artifacts,
+                consumption.checks,
+                consumption.risks,
+            )
+        }),
+        input.failure_policy,
+    ));
+    Ok(task)
+}
+
 pub(crate) fn task_from_input(input: TaskSpecInput) -> Result<Task> {
     Task::builder(TaskId::from(input.id), input.title, input.kind)
         .dependencies(input.dependencies.into_iter().map(TaskId::from))
@@ -1313,7 +1556,7 @@ pub(crate) fn task_from_input(input: TaskSpecInput) -> Result<Task> {
 pub fn loop_package() -> &'static Package {
     static PACKAGE: OnceLock<Package> = OnceLock::new();
     PACKAGE.get_or_init(|| {
-        let package = register!(
+        let package = crate::execution::register_preflight(register!(
             crate::execution::register_execution(register!(
                 Package::builder("loop.orchestration"),
                 create_run,
@@ -1343,8 +1586,10 @@ pub fn loop_package() -> &'static Package {
             )),
             // Registered after the execution module so existing command ids
             // stay stable (additive exposure of the routing decision).
-            select_candidate
-        )
+            select_candidate,
+            evaluate_failure_policy,
+            evaluate_cleanup_disposition
+        ))
         .event::<RunChangedEvent>("loop.run_changed")
         .build();
         package.register_ffi_with_default(FfiFormat::Json);
@@ -1468,6 +1713,36 @@ mod routing_tests {
         })
         .unwrap();
         assert_eq!(output.candidate_id, "sighted");
+    }
+
+    #[test]
+    fn cleanup_disposition_is_exposed_without_creating_attention() {
+        let output = evaluate_cleanup_disposition(EvaluateCleanupDispositionInput {
+            refusal_code: RefusalCode::RunNotTerminal,
+        })
+        .unwrap();
+
+        assert!(matches!(output.disposition, CleanupDisposition::Defer));
+    }
+
+    #[test]
+    fn failure_policy_returns_a_core_terminalization_outcome() {
+        let output = evaluate_failure_policy(EvaluateFailurePolicyInput {
+            failure_class: FailureClass::Assertion,
+            retries_used: 0,
+            task_kind: TaskKind::Integration,
+            failure_policy: FailurePolicy::default(),
+            terminalization_policy: TerminalizationPolicy::default(),
+        })
+        .unwrap();
+
+        assert!(matches!(output.action, FailurePolicyAction::FailTask));
+        assert_eq!(
+            output.dependents,
+            Some(DependencyTerminalization::BlockTerminal)
+        );
+        assert_eq!(output.run, Some(RunFailureAction::Fail));
+        assert_eq!(output.retry_scope, None);
     }
 
     #[test]

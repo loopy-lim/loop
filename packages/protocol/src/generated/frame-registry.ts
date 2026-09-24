@@ -6,7 +6,7 @@
 // DO NOT EDIT — changes will be overwritten and fail codegen --check.
 // ────────────────────────────────────────────────────────────
 
-import { addTaskCodec, cancelRunCodec, claimExecutionCodec, claimRunnableTasksCodec, cleanupRunCodec, compareTracesCodec, configureRunCodec, confirmPausedCodec, createRunCodec, evaluateSurfaceRemovalCodec, evaluateWorktreeRemovalCodec, getRunCodec, getRunPlanCodec, getSnapshotCodec, getTaskContextCodec, getTraceCodec, listRunsCodec, pauseRunCodec, prepareRunCodec, reconcileTaskCodec, recordActivityCodec, recordCheckReceiptsCodec, recordDecisionCodec, recordVerificationCodec, recordWorkerResultCodec, recordWorkerStartedCodec, recordWorkerStoppedCodec, releaseExecutionCodec, renewExecutionCodec, requestAttentionCodec, resolveAttentionCodec, resumeRunCodec, selectCandidateCodec, steerRunCodec, stopVerificationCodec, submitPlanCodec, subscribeEventsCodec, updateTaskCodec } from './frame-codecs.js';
+import { addTaskCodec, cancelRunCodec, claimExecutionCodec, claimRunnableTasksCodec, cleanupRunCodec, compareTracesCodec, configureRunCodec, confirmPausedCodec, createRunCodec, evaluateCleanupDispositionComplexCodec, evaluateFailurePolicyComplexCodec, evaluateSurfaceRemovalCodec, evaluateWorktreeRemovalCodec, getRunCodec, getRunPlanCodec, getSnapshotCodec, getTaskContextCodec, getTraceCodec, listRunsCodec, pauseRunCodec, prepareRunCodec, prepareRunPreflightCodec, reconcileTaskCodec, recordActivityCodec, recordCheckReceiptsCodec, recordDecisionCodec, recordVerificationCodec, recordWorkerResultCodec, recordWorkerStartedCodec, recordWorkerStoppedCodec, releaseExecutionCodec, renewExecutionCodec, requestAttentionCodec, resolveAttentionCodec, resumeRunCodec, selectCandidateCodec, steerRunCodec, stopVerificationCodec, submitPlanCodec, subscribeEventsCodec, updateTaskCodec } from './frame-codecs.js';
 
 export const frameRegistry = new Map<string, import('@rustra/types').FrameCodec<any, any>>([
   // route: postcard
@@ -27,6 +27,10 @@ export const frameRegistry = new Map<string, import('@rustra/types').FrameCodec<
   ['confirmPaused', confirmPausedCodec],
   // route: postcard
   ['createRun', createRunCodec],
+  // route: complex
+  ['evaluateCleanupDisposition', evaluateCleanupDispositionComplexCodec],
+  // route: complex
+  ['evaluateFailurePolicy', evaluateFailurePolicyComplexCodec],
   // route: postcard
   ['evaluateSurfaceRemoval', evaluateSurfaceRemovalCodec],
   // route: postcard
@@ -47,6 +51,8 @@ export const frameRegistry = new Map<string, import('@rustra/types').FrameCodec<
   ['pauseRun', pauseRunCodec],
   // route: postcard
   ['prepareRun', prepareRunCodec],
+  // route: postcard
+  ['prepareRunPreflight', prepareRunPreflightCodec],
   // route: postcard
   ['reconcileTask', reconcileTaskCodec],
   // route: postcard

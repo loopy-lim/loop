@@ -963,6 +963,344 @@
       }
     },
     {
+      "name": "evaluateCleanupDisposition",
+      "commandId": 40,
+      "inputType": "EvaluateCleanupDispositionInput",
+      "outputType": "CleanupDispositionOutput",
+      "inputSchema": {
+        "title": "EvaluateCleanupDispositionInput",
+        "type": "object",
+        "required": [
+          "refusalCode"
+        ],
+        "properties": {
+          "refusalCode": {
+            "$ref": "#/definitions/RefusalCode"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "CleanupDispositionOutput",
+        "type": "object",
+        "required": [
+          "disposition"
+        ],
+        "properties": {
+          "disposition": {
+            "$ref": "#/definitions/CleanupDisposition"
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "RefusalCode": {
+          "type": "string",
+          "enum": [
+            "run_not_terminal",
+            "worktree_unmerged",
+            "worktree_dirty",
+            "path_is_project_root",
+            "path_outside_project",
+            "surface_not_owned",
+            "external_session"
+          ]
+        },
+        "CleanupDisposition": {
+          "oneOf": [
+            {
+              "description": "Retry cleanup only after the run reaches a terminal state.",
+              "type": "string",
+              "enum": [
+                "defer"
+              ]
+            },
+            {
+              "description": "Preserve the artifact and record why Loop did not remove it.",
+              "type": "string",
+              "enum": [
+                "skip"
+              ]
+            },
+            {
+              "description": "A lossy cleanup choice requires an explicit human decision.",
+              "type": "string",
+              "enum": [
+                "require_decision"
+              ]
+            }
+          ],
+          "x-rustra-variant-order": [
+            "defer",
+            "skip",
+            "require_decision"
+          ]
+        }
+      }
+    },
+    {
+      "name": "evaluateFailurePolicy",
+      "commandId": 39,
+      "inputType": "EvaluateFailurePolicyInput",
+      "outputType": "FailurePolicyOutput",
+      "inputSchema": {
+        "title": "EvaluateFailurePolicyInput",
+        "type": "object",
+        "required": [
+          "failureClass",
+          "failurePolicy",
+          "retriesUsed",
+          "taskKind",
+          "terminalizationPolicy"
+        ],
+        "properties": {
+          "failureClass": {
+            "$ref": "#/definitions/FailureClass"
+          },
+          "retriesUsed": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0.0
+          },
+          "taskKind": {
+            "$ref": "#/definitions/TaskKind"
+          },
+          "failurePolicy": {
+            "$ref": "#/definitions/FailurePolicy"
+          },
+          "terminalizationPolicy": {
+            "$ref": "#/definitions/TerminalizationPolicy"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "FailurePolicyOutput",
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/definitions/FailurePolicyAction"
+          },
+          "retryScope": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/RetryScope"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delayMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "dependents": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/DependencyTerminalization"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "independentBranches": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/IndependentBranchAction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/RunFailureAction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "FailureClass": {
+          "description": "Infrastructure-neutral classification of an execution or verification failure.",
+          "type": "string",
+          "enum": [
+            "assertion",
+            "timeout",
+            "process_start",
+            "invalid_contract",
+            "interrupted",
+            "environment"
+          ]
+        },
+        "TaskKind": {
+          "type": "string",
+          "enum": [
+            "research",
+            "decision",
+            "implementation",
+            "verification",
+            "integration"
+          ]
+        },
+        "FailurePolicy": {
+          "description": "Deterministic retry decision table. Missing classes fail closed.",
+          "type": "object",
+          "required": [
+            "onUnbudgetedFailure",
+            "retryBudgets"
+          ],
+          "properties": {
+            "retryBudgets": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/RetryBudget"
+              }
+            },
+            "onUnbudgetedFailure": {
+              "$ref": "#/definitions/OnExhaustion"
+            }
+          }
+        },
+        "RetryBudget": {
+          "description": "Retry budget for one failure class. `max_retries` excludes the initial try.",
+          "type": "object",
+          "required": [
+            "backoff",
+            "failureClass",
+            "maxRetries",
+            "onExhaustion",
+            "scope"
+          ],
+          "properties": {
+            "failureClass": {
+              "$ref": "#/definitions/FailureClass"
+            },
+            "scope": {
+              "$ref": "#/definitions/RetryScope"
+            },
+            "maxRetries": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "backoff": {
+              "$ref": "#/definitions/BackoffPolicy"
+            },
+            "onExhaustion": {
+              "$ref": "#/definitions/OnExhaustion"
+            }
+          }
+        },
+        "RetryScope": {
+          "description": "The smallest operation a retry budget permits the executor to repeat.",
+          "type": "string",
+          "enum": [
+            "check",
+            "candidate",
+            "worker",
+            "compute"
+          ]
+        },
+        "BackoffPolicy": {
+          "description": "Bounded exponential backoff. A multiplier of one represents fixed backoff.",
+          "type": "object",
+          "required": [
+            "initialDelayMs",
+            "maxDelayMs",
+            "multiplier"
+          ],
+          "properties": {
+            "initialDelayMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "multiplier": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "maxDelayMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        },
+        "OnExhaustion": {
+          "description": "What the executor must do when no retry remains.",
+          "type": "string",
+          "enum": [
+            "fail_task",
+            "require_attention"
+          ]
+        },
+        "TerminalizationPolicy": {
+          "description": "Failure propagation rules owned by core rather than an executor adapter.",
+          "type": "object",
+          "required": [
+            "dependents",
+            "failRunForSerialTask",
+            "independentBranches"
+          ],
+          "properties": {
+            "dependents": {
+              "$ref": "#/definitions/DependencyTerminalization"
+            },
+            "independentBranches": {
+              "$ref": "#/definitions/IndependentBranchAction"
+            },
+            "failRunForSerialTask": {
+              "type": "boolean"
+            }
+          }
+        },
+        "DependencyTerminalization": {
+          "description": "Terminal state assigned to descendants that require a failed task.",
+          "type": "string",
+          "enum": [
+            "block_terminal",
+            "cancel"
+          ]
+        },
+        "IndependentBranchAction": {
+          "type": "string",
+          "enum": [
+            "continue"
+          ]
+        },
+        "FailurePolicyAction": {
+          "type": "string",
+          "enum": [
+            "retry",
+            "failTask",
+            "requireAttention"
+          ]
+        },
+        "RunFailureAction": {
+          "type": "string",
+          "enum": [
+            "continue",
+            "fail"
+          ]
+        }
+      }
+    },
+    {
       "name": "evaluateSurfaceRemoval",
       "commandId": 22,
       "inputType": "EvaluateSurfaceRemovalInput",
@@ -1855,6 +2193,16 @@
           "task": {
             "$ref": "#/definitions/TaskSpecInput"
           },
+          "decompositionContract": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/DecompositionContractOutput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "attempt": {
             "type": "integer",
             "format": "uint16",
@@ -2026,6 +2374,299 @@
             "balanced",
             "strong",
             "frontier"
+          ]
+        },
+        "DecompositionContractOutput": {
+          "type": "object",
+          "required": [
+            "assumptions",
+            "completionCoverage",
+            "consumes",
+            "defaults",
+            "failurePolicy",
+            "semanticTouchpoints"
+          ],
+          "properties": {
+            "defaults": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assumptions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/AssumptionInput"
+              }
+            },
+            "semanticTouchpoints": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/SemanticTouchpointInput"
+              }
+            },
+            "consumes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/DependencyConsumptionInput"
+              }
+            },
+            "completionCoverage": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/CompletionCoverageInput"
+              }
+            },
+            "failurePolicy": {
+              "$ref": "#/definitions/FailurePolicy"
+            }
+          }
+        },
+        "AssumptionInput": {
+          "type": "object",
+          "required": [
+            "assumption",
+            "evidence",
+            "ifFalse",
+            "revisit"
+          ],
+          "properties": {
+            "assumption": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            },
+            "ifFalse": {
+              "type": "string"
+            },
+            "revisit": {
+              "type": "string"
+            }
+          }
+        },
+        "SemanticTouchpointInput": {
+          "type": "object",
+          "required": [
+            "access",
+            "conflictResolution",
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "access": {
+              "$ref": "#/definitions/SemanticAccess"
+            },
+            "conflictResolution": {
+              "$ref": "#/definitions/SemanticConflictResolution"
+            }
+          }
+        },
+        "SemanticAccess": {
+          "type": "string",
+          "enum": [
+            "consume",
+            "modify"
+          ]
+        },
+        "SemanticConflictResolution": {
+          "type": "string",
+          "enum": [
+            "unresolved",
+            "serialize",
+            "dependency_order"
+          ]
+        },
+        "DependencyConsumptionInput": {
+          "type": "object",
+          "required": [
+            "artifacts",
+            "checks",
+            "decisions",
+            "dependency",
+            "risks"
+          ],
+          "properties": {
+            "dependency": {
+              "type": "string"
+            },
+            "decisions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "checks": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "risks": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "CompletionCoverageInput": {
+          "type": "object",
+          "required": [
+            "artifacts",
+            "checkId",
+            "evidenceLevel",
+            "requirements",
+            "semantics"
+          ],
+          "properties": {
+            "checkId": {
+              "type": "string"
+            },
+            "requirements": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "semantics": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "evidenceLevel": {
+              "$ref": "#/definitions/EvidenceLevel"
+            }
+          }
+        },
+        "EvidenceLevel": {
+          "type": "string",
+          "enum": [
+            "static",
+            "unit",
+            "fake",
+            "integration",
+            "live"
+          ]
+        },
+        "FailurePolicy": {
+          "description": "Deterministic retry decision table. Missing classes fail closed.",
+          "type": "object",
+          "required": [
+            "onUnbudgetedFailure",
+            "retryBudgets"
+          ],
+          "properties": {
+            "retryBudgets": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/RetryBudget"
+              }
+            },
+            "onUnbudgetedFailure": {
+              "$ref": "#/definitions/OnExhaustion"
+            }
+          }
+        },
+        "RetryBudget": {
+          "description": "Retry budget for one failure class. `max_retries` excludes the initial try.",
+          "type": "object",
+          "required": [
+            "backoff",
+            "failureClass",
+            "maxRetries",
+            "onExhaustion",
+            "scope"
+          ],
+          "properties": {
+            "failureClass": {
+              "$ref": "#/definitions/FailureClass"
+            },
+            "scope": {
+              "$ref": "#/definitions/RetryScope"
+            },
+            "maxRetries": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "backoff": {
+              "$ref": "#/definitions/BackoffPolicy"
+            },
+            "onExhaustion": {
+              "$ref": "#/definitions/OnExhaustion"
+            }
+          }
+        },
+        "FailureClass": {
+          "description": "Infrastructure-neutral classification of an execution or verification failure.",
+          "type": "string",
+          "enum": [
+            "assertion",
+            "timeout",
+            "process_start",
+            "invalid_contract",
+            "interrupted",
+            "environment"
+          ]
+        },
+        "RetryScope": {
+          "description": "The smallest operation a retry budget permits the executor to repeat.",
+          "type": "string",
+          "enum": [
+            "check",
+            "candidate",
+            "worker",
+            "compute"
+          ]
+        },
+        "BackoffPolicy": {
+          "description": "Bounded exponential backoff. A multiplier of one represents fixed backoff.",
+          "type": "object",
+          "required": [
+            "initialDelayMs",
+            "maxDelayMs",
+            "multiplier"
+          ],
+          "properties": {
+            "initialDelayMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "multiplier": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "maxDelayMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        },
+        "OnExhaustion": {
+          "description": "What the executor must do when no retry remains.",
+          "type": "string",
+          "enum": [
+            "fail_task",
+            "require_attention"
           ]
         },
         "DependencyResultOutput": {
@@ -2520,6 +3161,489 @@
             "balanced",
             "strong",
             "frontier"
+          ]
+        }
+      }
+    },
+    {
+      "name": "prepareRunPreflight",
+      "commandId": 41,
+      "inputType": "PrepareRunPreflightInput",
+      "outputType": "OperationOutput",
+      "inputSchema": {
+        "title": "PrepareRunPreflightInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "intent",
+          "runId",
+          "tasks",
+          "workingDirectory"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "intent": {
+            "type": "string"
+          },
+          "workingDirectory": {
+            "type": "string"
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/PreflightTaskSpecInput"
+            }
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "OperationOutput",
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "PreflightTaskSpecInput": {
+          "type": "object",
+          "required": [
+            "assumptions",
+            "completionCoverage",
+            "consumes",
+            "defaults",
+            "failurePolicy",
+            "semanticTouchpoints",
+            "task"
+          ],
+          "properties": {
+            "task": {
+              "$ref": "#/definitions/TaskSpecInput"
+            },
+            "defaults": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assumptions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/AssumptionInput"
+              }
+            },
+            "semanticTouchpoints": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/SemanticTouchpointInput"
+              }
+            },
+            "consumes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/DependencyConsumptionInput"
+              }
+            },
+            "completionCoverage": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/CompletionCoverageInput"
+              }
+            },
+            "failurePolicy": {
+              "$ref": "#/definitions/FailurePolicy"
+            }
+          }
+        },
+        "TaskSpecInput": {
+          "type": "object",
+          "required": [
+            "completionChecks",
+            "dependencies",
+            "id",
+            "kind",
+            "maxAttempts",
+            "maximumCompute",
+            "minimumCompute",
+            "preferredCompute",
+            "readScope",
+            "requirements",
+            "title",
+            "writeScope"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/definitions/TaskKind"
+            },
+            "dependencies": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "readScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "writeScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "requirements": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "persona": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "completionChecks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/CompletionCheckInput"
+              }
+            },
+            "preferredCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "minimumCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "maximumCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "maxAttempts": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            }
+          }
+        },
+        "TaskKind": {
+          "type": "string",
+          "enum": [
+            "research",
+            "decision",
+            "implementation",
+            "verification",
+            "integration"
+          ]
+        },
+        "CompletionCheckInput": {
+          "type": "object",
+          "required": [
+            "args",
+            "command",
+            "id",
+            "timeoutMs"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "workingDirectory": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        },
+        "ComputeClass": {
+          "type": "string",
+          "enum": [
+            "deterministic",
+            "typed_decision",
+            "tiny",
+            "fast",
+            "balanced",
+            "strong",
+            "frontier"
+          ]
+        },
+        "AssumptionInput": {
+          "type": "object",
+          "required": [
+            "assumption",
+            "evidence",
+            "ifFalse",
+            "revisit"
+          ],
+          "properties": {
+            "assumption": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            },
+            "ifFalse": {
+              "type": "string"
+            },
+            "revisit": {
+              "type": "string"
+            }
+          }
+        },
+        "SemanticTouchpointInput": {
+          "type": "object",
+          "required": [
+            "access",
+            "conflictResolution",
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "access": {
+              "$ref": "#/definitions/SemanticAccess"
+            },
+            "conflictResolution": {
+              "$ref": "#/definitions/SemanticConflictResolution"
+            }
+          }
+        },
+        "SemanticAccess": {
+          "type": "string",
+          "enum": [
+            "consume",
+            "modify"
+          ]
+        },
+        "SemanticConflictResolution": {
+          "type": "string",
+          "enum": [
+            "unresolved",
+            "serialize",
+            "dependency_order"
+          ]
+        },
+        "DependencyConsumptionInput": {
+          "type": "object",
+          "required": [
+            "artifacts",
+            "checks",
+            "decisions",
+            "dependency",
+            "risks"
+          ],
+          "properties": {
+            "dependency": {
+              "type": "string"
+            },
+            "decisions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "checks": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "risks": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "CompletionCoverageInput": {
+          "type": "object",
+          "required": [
+            "artifacts",
+            "checkId",
+            "evidenceLevel",
+            "requirements",
+            "semantics"
+          ],
+          "properties": {
+            "checkId": {
+              "type": "string"
+            },
+            "requirements": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "semantics": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "evidenceLevel": {
+              "$ref": "#/definitions/EvidenceLevel"
+            }
+          }
+        },
+        "EvidenceLevel": {
+          "type": "string",
+          "enum": [
+            "static",
+            "unit",
+            "fake",
+            "integration",
+            "live"
+          ]
+        },
+        "FailurePolicy": {
+          "description": "Deterministic retry decision table. Missing classes fail closed.",
+          "type": "object",
+          "required": [
+            "onUnbudgetedFailure",
+            "retryBudgets"
+          ],
+          "properties": {
+            "retryBudgets": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/RetryBudget"
+              }
+            },
+            "onUnbudgetedFailure": {
+              "$ref": "#/definitions/OnExhaustion"
+            }
+          }
+        },
+        "RetryBudget": {
+          "description": "Retry budget for one failure class. `max_retries` excludes the initial try.",
+          "type": "object",
+          "required": [
+            "backoff",
+            "failureClass",
+            "maxRetries",
+            "onExhaustion",
+            "scope"
+          ],
+          "properties": {
+            "failureClass": {
+              "$ref": "#/definitions/FailureClass"
+            },
+            "scope": {
+              "$ref": "#/definitions/RetryScope"
+            },
+            "maxRetries": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "backoff": {
+              "$ref": "#/definitions/BackoffPolicy"
+            },
+            "onExhaustion": {
+              "$ref": "#/definitions/OnExhaustion"
+            }
+          }
+        },
+        "FailureClass": {
+          "description": "Infrastructure-neutral classification of an execution or verification failure.",
+          "type": "string",
+          "enum": [
+            "assertion",
+            "timeout",
+            "process_start",
+            "invalid_contract",
+            "interrupted",
+            "environment"
+          ]
+        },
+        "RetryScope": {
+          "description": "The smallest operation a retry budget permits the executor to repeat.",
+          "type": "string",
+          "enum": [
+            "check",
+            "candidate",
+            "worker",
+            "compute"
+          ]
+        },
+        "BackoffPolicy": {
+          "description": "Bounded exponential backoff. A multiplier of one represents fixed backoff.",
+          "type": "object",
+          "required": [
+            "initialDelayMs",
+            "maxDelayMs",
+            "multiplier"
+          ],
+          "properties": {
+            "initialDelayMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "multiplier": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "maxDelayMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        },
+        "OnExhaustion": {
+          "description": "What the executor must do when no retry remains.",
+          "type": "string",
+          "enum": [
+            "fail_task",
+            "require_attention"
           ]
         }
       }

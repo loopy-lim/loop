@@ -127,6 +127,117 @@ export type AttentionSnapshotOutput = {
 
 export type AttentionKind = 'question' | 'decision' | 'approval' | 'conflict' | 'failure';
 
+export type RefusalCode = 'run_not_terminal' | 'worktree_unmerged' | 'worktree_dirty' | 'path_is_project_root' | 'path_outside_project' | 'surface_not_owned' | 'external_session';
+
+export type CleanupDisposition = 'defer' | 'skip' | 'require_decision';
+
+/**
+ * Infrastructure-neutral classification of an execution or verification failure.
+ */
+export type FailureClass = 'assertion' | 'timeout' | 'process_start' | 'invalid_contract' | 'interrupted' | 'environment';
+
+/**
+ * Deterministic retry decision table. Missing classes fail closed.
+ */
+export type FailurePolicy = {
+  retryBudgets: RetryBudget[];
+  onUnbudgetedFailure: OnExhaustion;
+};
+
+/**
+ * Retry budget for one failure class. `max_retries` excludes the initial try.
+ */
+export type RetryBudget = {
+  failureClass: FailureClass;
+  scope: RetryScope;
+  maxRetries: number;
+  backoff: BackoffPolicy;
+  onExhaustion: OnExhaustion;
+};
+
+/**
+ * The smallest operation a retry budget permits the executor to repeat.
+ */
+export type RetryScope = 'check' | 'candidate' | 'worker' | 'compute';
+
+/**
+ * Bounded exponential backoff. A multiplier of one represents fixed backoff.
+ */
+export type BackoffPolicy = {
+  initialDelayMs: number | bigint;
+  multiplier: number;
+  maxDelayMs: number | bigint;
+};
+
+/**
+ * What the executor must do when no retry remains.
+ */
+export type OnExhaustion = 'fail_task' | 'require_attention';
+
+/**
+ * Failure propagation rules owned by core rather than an executor adapter.
+ */
+export type TerminalizationPolicy = {
+  dependents: DependencyTerminalization;
+  independentBranches: IndependentBranchAction;
+  failRunForSerialTask: boolean;
+};
+
+/**
+ * Terminal state assigned to descendants that require a failed task.
+ */
+export type DependencyTerminalization = 'block_terminal' | 'cancel';
+
+export type IndependentBranchAction = 'continue';
+
+export type FailurePolicyAction = 'retry' | 'failTask' | 'requireAttention';
+
+export type RunFailureAction = 'continue' | 'fail';
+
+export type DecompositionContractOutput = {
+  defaults: string[];
+  assumptions: AssumptionInput[];
+  semanticTouchpoints: SemanticTouchpointInput[];
+  consumes: DependencyConsumptionInput[];
+  completionCoverage: CompletionCoverageInput[];
+  failurePolicy: FailurePolicy;
+};
+
+export type AssumptionInput = {
+  assumption: string;
+  evidence: string;
+  ifFalse: string;
+  revisit: string;
+};
+
+export type SemanticTouchpointInput = {
+  id: string;
+  access: SemanticAccess;
+  conflictResolution: SemanticConflictResolution;
+};
+
+export type SemanticAccess = 'consume' | 'modify';
+
+export type SemanticConflictResolution = 'unresolved' | 'serialize' | 'dependency_order';
+
+export type DependencyConsumptionInput = {
+  dependency: string;
+  decisions: string[];
+  artifacts: string[];
+  checks: string[];
+  risks: string[];
+};
+
+export type CompletionCoverageInput = {
+  checkId: string;
+  requirements: string[];
+  artifacts: string[];
+  semantics: string[];
+  evidenceLevel: EvidenceLevel;
+};
+
+export type EvidenceLevel = 'static' | 'unit' | 'fake' | 'integration' | 'live';
+
 export type DependencyResultOutput = {
   taskId: string;
   title: string;
@@ -148,6 +259,16 @@ export type CheckReceipt = {
 export type RunListOutput = {
   runId: string;
   state: RunState;
+};
+
+export type PreflightTaskSpecInput = {
+  task: TaskSpecInput;
+  defaults: string[];
+  assumptions: AssumptionInput[];
+  semanticTouchpoints: SemanticTouchpointInput[];
+  consumes: DependencyConsumptionInput[];
+  completionCoverage: CompletionCoverageInput[];
+  failurePolicy: FailurePolicy;
 };
 
 export type CheckResultInput = {
@@ -279,6 +400,31 @@ export type SnapshotOutput = {
   executionExpiresAt?: number | bigint | null;
 };
 
+export type EvaluateCleanupDispositionInput = {
+  refusalCode: RefusalCode;
+};
+
+export type CleanupDispositionOutput = {
+  disposition: CleanupDisposition;
+};
+
+export type EvaluateFailurePolicyInput = {
+  failureClass: FailureClass;
+  retriesUsed: number;
+  taskKind: TaskKind;
+  failurePolicy: FailurePolicy;
+  terminalizationPolicy: TerminalizationPolicy;
+};
+
+export type FailurePolicyOutput = {
+  action: FailurePolicyAction;
+  retryScope?: RetryScope | null;
+  delayMs?: number | bigint | null;
+  dependents?: DependencyTerminalization | null;
+  independentBranches?: IndependentBranchAction | null;
+  run?: RunFailureAction | null;
+};
+
 export type EvaluateSurfaceRemovalInput = {
   surfaceId: string;
   isOwnedByLoop: boolean;
@@ -313,6 +459,7 @@ export type TaskContextOutput = {
   intent: string;
   workingDirectory: string;
   task: TaskSpecInput;
+  decompositionContract?: DecompositionContractOutput | null;
   attempt: number;
   dependencyResults: DependencyResultOutput[];
   resultSummary?: string | null;
@@ -344,6 +491,14 @@ export type PrepareRunInput = {
   intent: string;
   workingDirectory: string;
   tasks: TaskSpecInput[];
+};
+
+export type PrepareRunPreflightInput = {
+  databasePath: string;
+  runId: string;
+  intent: string;
+  workingDirectory: string;
+  tasks: PreflightTaskSpecInput[];
 };
 
 export type ReconcileTaskInput = {

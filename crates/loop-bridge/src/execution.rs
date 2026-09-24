@@ -1,7 +1,12 @@
 use crate::commands::{
     append, append_batch_and_notify, append_owned, bridge_error, store, task_from_input,
+    task_from_preflight_input,
 };
-use crate::{CompletionCheckInput, OperationOutput, RunInput, TaskSpecInput};
+use crate::{
+    AssumptionInput, CompletionCheckInput, CompletionCoverageInput, DecompositionContractOutput,
+    DependencyConsumptionInput, OperationOutput, PreflightTaskSpecInput, RunInput,
+    SemanticTouchpointInput, TaskSpecInput,
+};
 use loop_core::attention::{AttentionKind, AttentionResolution, AttentionState};
 use loop_core::event::{CheckReceipt, Event, EventKind};
 use loop_core::task::{Task, TaskId, TaskState};
@@ -14,6 +19,15 @@ pub struct PrepareRunInput {
     pub intent: String,
     pub working_directory: String,
     pub tasks: Vec<TaskSpecInput>,
+}
+
+#[bridge_type]
+pub struct PrepareRunPreflightInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub intent: String,
+    pub working_directory: String,
+    pub tasks: Vec<PreflightTaskSpecInput>,
 }
 
 #[bridge_type]
@@ -59,6 +73,7 @@ pub struct TaskContextOutput {
     pub intent: String,
     pub working_directory: String,
     pub task: TaskSpecInput,
+    pub decomposition_contract: Option<DecompositionContractOutput>,
     pub attempt: u16,
     pub dependency_results: Vec<DependencyResultOutput>,
     pub result_summary: Option<String>,
@@ -169,6 +184,47 @@ pub fn prepare_run(input: PrepareRunInput) -> Result<OperationOutput> {
 }
 
 #[command]
+pub fn prepare_run_preflight(input: PrepareRunPreflightInput) -> Result<OperationOutput> {
+    if !std::path::Path::new(&input.working_directory).is_absolute() {
+        return Err(bridge_error(
+            "invalid_context",
+            "working directory must be absolute",
+        ));
+    }
+    let tasks = input
+        .tasks
+        .into_iter()
+        .map(task_from_preflight_input)
+        .collect::<Result<Vec<_>>>()?;
+    if tasks.is_empty() {
+        return Err(bridge_error("preflight_failed", "plan must contain tasks"));
+    }
+    loop_core::graph::TaskGraph::preflight(tasks.clone())
+        .map_err(|error| bridge_error("preflight_failed", error))?;
+    let mut events = vec![
+        Event::new(&input.run_id, EventKind::RunCreated),
+        Event::new(
+            &input.run_id,
+            EventKind::RunConfigured {
+                intent: input.intent,
+                working_directory: input.working_directory,
+            },
+        ),
+    ];
+    events.extend(
+        tasks
+            .into_iter()
+            .map(|task| Event::new(&input.run_id, EventKind::TaskCreated(task))),
+    );
+    append_batch_and_notify(
+        &mut store(&input.database_path)?,
+        &events,
+        "prepare_run_failed",
+    )?;
+    Ok(OperationOutput { accepted: true })
+}
+
+#[command]
 pub fn configure_run(input: ConfigureRunInput) -> Result<OperationOutput> {
     if input.working_directory.trim().is_empty() {
         return Err(bridge_error(
@@ -255,6 +311,7 @@ pub fn get_task_context(input: TaskContextInput) -> Result<TaskContextOutput> {
         intent: projection.intent.clone(),
         working_directory: projection.working_directory.clone(),
         task: task_spec(task),
+        decomposition_contract: decomposition_contract(task),
         attempt: task.attempt,
         dependency_results,
         result_summary: projection.outputs.get(&id).cloned(),
@@ -402,6 +459,59 @@ pub fn list_runs(input: ListRunsInput) -> Result<Vec<RunListOutput>> {
         .collect())
 }
 
+fn decomposition_contract(task: &Task) -> Option<DecompositionContractOutput> {
+    let contract = task.decomposition_contract.as_ref()?;
+    Some(DecompositionContractOutput {
+        defaults: contract.defaults.clone(),
+        assumptions: contract
+            .assumptions
+            .iter()
+            .map(|assumption| AssumptionInput {
+                assumption: assumption.assumption.clone(),
+                evidence: assumption.evidence.clone(),
+                if_false: assumption.if_false.clone(),
+                revisit: assumption.revisit.clone(),
+            })
+            .collect(),
+        semantic_touchpoints: contract
+            .semantic_touchpoints
+            .iter()
+            .map(|touchpoint| SemanticTouchpointInput {
+                id: touchpoint.id.clone(),
+                access: touchpoint.access,
+                conflict_resolution: touchpoint.conflict_resolution,
+            })
+            .collect(),
+        consumes: contract
+            .consumes
+            .iter()
+            .map(|consumption| DependencyConsumptionInput {
+                dependency: consumption.dependency.to_string(),
+                decisions: consumption.decisions.clone(),
+                artifacts: consumption.artifacts.clone(),
+                checks: consumption.checks.clone(),
+                risks: consumption.risks.clone(),
+            })
+            .collect(),
+        completion_coverage: task
+            .completion_contract
+            .checks
+            .iter()
+            .filter_map(|check| {
+                let coverage = check.coverage.as_ref()?;
+                Some(CompletionCoverageInput {
+                    check_id: check.id.clone(),
+                    requirements: coverage.requirements.clone(),
+                    artifacts: coverage.artifacts.clone(),
+                    semantics: coverage.semantics.clone(),
+                    evidence_level: coverage.evidence_level,
+                })
+            })
+            .collect(),
+        failure_policy: contract.failure_policy.clone(),
+    })
+}
+
 pub(crate) fn task_spec(task: &Task) -> TaskSpecInput {
     TaskSpecInput {
         id: task.id.to_string(),
@@ -433,6 +543,10 @@ pub(crate) fn task_spec(task: &Task) -> TaskSpecInput {
     }
 }
 
+pub(crate) fn register_preflight(builder: rustra::PackageBuilder) -> rustra::PackageBuilder {
+    register!(builder, prepare_run_preflight)
+}
+
 pub(crate) fn register_execution(builder: rustra::PackageBuilder) -> rustra::PackageBuilder {
     register!(
         builder,
@@ -450,4 +564,118 @@ pub(crate) fn register_execution(builder: rustra::PackageBuilder) -> rustra::Pac
         reconcile_task,
         list_runs
     )
+}
+
+#[cfg(test)]
+mod preflight_bridge_tests {
+    use super::*;
+    use crate::{
+        AssumptionInput, CompletionCoverageInput, DependencyConsumptionInput,
+        PreflightTaskSpecInput, SemanticTouchpointInput,
+    };
+    use loop_core::policy::{ComputeClass, FailurePolicy, OnExhaustion};
+    use loop_core::task::{EvidenceLevel, SemanticAccess, SemanticConflictResolution, TaskKind};
+
+    fn task(id: &str) -> TaskSpecInput {
+        TaskSpecInput {
+            id: id.into(),
+            title: id.into(),
+            kind: TaskKind::Implementation,
+            dependencies: vec![],
+            read_scope: vec![],
+            write_scope: vec![format!("src/{id}.rs")],
+            requirements: vec!["behavior".into()],
+            persona: None,
+            completion_checks: vec![CompletionCheckInput {
+                id: "unit".into(),
+                command: "cargo".into(),
+                args: vec!["test".into()],
+                working_directory: None,
+                timeout_ms: 1_000,
+            }],
+            preferred_compute: ComputeClass::Fast,
+            minimum_compute: ComputeClass::Tiny,
+            maximum_compute: ComputeClass::Strong,
+            max_attempts: 2,
+        }
+    }
+
+    fn preflight_task(id: &str) -> PreflightTaskSpecInput {
+        PreflightTaskSpecInput {
+            task: task(id),
+            defaults: vec!["preserve compatibility".into()],
+            assumptions: vec![AssumptionInput {
+                assumption: "tests are offline".into(),
+                evidence: "repository suite".into(),
+                if_false: "record missing live evidence".into(),
+                revisit: "before release".into(),
+            }],
+            semantic_touchpoints: vec![SemanticTouchpointInput {
+                id: "policy".into(),
+                access: SemanticAccess::Modify,
+                conflict_resolution: SemanticConflictResolution::Serialize,
+            }],
+            consumes: Vec::<DependencyConsumptionInput>::new(),
+            completion_coverage: vec![CompletionCoverageInput {
+                check_id: "unit".into(),
+                requirements: vec!["behavior".into()],
+                artifacts: vec![format!("src/{id}.rs")],
+                semantics: vec!["behavior is preserved".into()],
+                evidence_level: EvidenceLevel::Unit,
+            }],
+            failure_policy: FailurePolicy::new([], OnExhaustion::FailTask),
+        }
+    }
+
+    #[test]
+    fn prepare_run_preflight_rejects_weak_contract_before_persisting() {
+        let dir = tempfile::tempdir().unwrap();
+        let database_path = dir.path().join("preflight.db").display().to_string();
+        let mut weak = preflight_task("weak");
+        weak.defaults.clear();
+
+        let error = prepare_run_preflight(PrepareRunPreflightInput {
+            database_path,
+            run_id: "run".into(),
+            intent: "intent".into(),
+            working_directory: "/project".into(),
+            tasks: vec![weak],
+        })
+        .unwrap_err();
+
+        assert_eq!(error.code(), "preflight_failed");
+    }
+
+    #[test]
+    fn prepare_run_preflight_persists_contract_for_worker_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let database_path = dir
+            .path()
+            .join("preflight-context.db")
+            .display()
+            .to_string();
+        prepare_run_preflight(PrepareRunPreflightInput {
+            database_path: database_path.clone(),
+            run_id: "run".into(),
+            intent: "intent".into(),
+            working_directory: "/project".into(),
+            tasks: vec![preflight_task("implementation")],
+        })
+        .unwrap();
+
+        let context = get_task_context(TaskContextInput {
+            database_path,
+            run_id: "run".into(),
+            task_id: "implementation".into(),
+        })
+        .unwrap();
+        let contract = context.decomposition_contract.unwrap();
+
+        assert_eq!(contract.defaults, vec!["preserve compatibility"]);
+        assert_eq!(contract.completion_coverage[0].check_id, "unit");
+        assert_eq!(
+            contract.failure_policy.on_unbudgeted_failure,
+            OnExhaustion::FailTask
+        );
+    }
 }

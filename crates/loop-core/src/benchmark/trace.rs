@@ -38,7 +38,10 @@ impl TraceSummary {
                 EventKind::WorkerFinished { .. } => summary.worker_finishes += 1,
                 EventKind::WorkerFailed { .. } => summary.worker_failures += 1,
                 EventKind::VerificationPassed { .. } => summary.verification_passes += 1,
-                EventKind::VerificationFailed { .. } => summary.verification_failures += 1,
+                EventKind::VerificationFailed { .. }
+                | EventKind::VerificationClassifiedFailure { .. } => {
+                    summary.verification_failures += 1;
+                }
                 EventKind::AttentionCreated(_) => summary.attention_created += 1,
                 EventKind::AttentionResolved { .. } => summary.attention_resolved += 1,
                 EventKind::RunCreated

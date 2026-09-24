@@ -77,27 +77,18 @@ fn retention_evaluation_generates_purge_plan_and_refuses_non_terminal_runs() {
     assert_eq!(plan.refusals[0].artifact_kind, ArtifactKind::RunRecord);
     assert_eq!(plan.refusals[0].target, "run-active");
     assert_eq!(plan.refusals[0].code, RefusalCode::RunNotTerminal);
-    assert_eq!(
-        plan.refusals[0].attention_kind(),
-        AttentionKind::Failure
-    );
+    assert_eq!(plan.refusals[0].attention_kind(), AttentionKind::Failure);
 
     assert_eq!(plan.refusals[1].artifact_kind, ArtifactKind::RunRecord);
     assert_eq!(plan.refusals[1].target, "run-attention");
     assert_eq!(plan.refusals[1].code, RefusalCode::RunNotTerminal);
-    assert_eq!(
-        plan.refusals[1].attention_kind(),
-        AttentionKind::Failure
-    );
+    assert_eq!(plan.refusals[1].attention_kind(), AttentionKind::Failure);
 }
 
 #[test]
 fn retention_selection_when_terminal_runs_fewer_than_keep_count() {
     let policy = RetentionPolicy::new(5);
-    let runs = [
-        ("run-2", RunState::Completed),
-        ("run-1", RunState::Failed),
-    ];
+    let runs = [("run-2", RunState::Completed), ("run-1", RunState::Failed)];
 
     let removable = policy.select_removable_runs(runs);
     assert!(removable.is_empty());
@@ -246,11 +237,7 @@ fn event_reducer_rejects_artifact_events_before_run_creation() {
     let err = projection
         .apply(&Event::new(
             "run-1",
-            EventKind::ArtifactCreated(Artifact::new(
-                "p-1",
-                ArtifactKind::Process,
-                "proc-10",
-            )),
+            EventKind::ArtifactCreated(Artifact::new("p-1", ArtifactKind::Process, "proc-10")),
         ))
         .unwrap_err();
 
@@ -309,14 +296,10 @@ fn unsafe_removal_refuses_unmerged_or_dirty_worktrees() {
     let unmerged_refusal =
         evaluate_worktree_removal(project_root, worktree, false, true).unwrap_err();
     assert_eq!(unmerged_refusal.code, RefusalCode::WorktreeUnmerged);
-    assert_eq!(
-        unmerged_refusal.attention_kind(),
-        AttentionKind::Decision
-    );
+    assert_eq!(unmerged_refusal.attention_kind(), AttentionKind::Decision);
 
     // Dirty working directory -> Decision attention
-    let dirty_refusal =
-        evaluate_worktree_removal(project_root, worktree, true, false).unwrap_err();
+    let dirty_refusal = evaluate_worktree_removal(project_root, worktree, true, false).unwrap_err();
     assert_eq!(dirty_refusal.code, RefusalCode::WorktreeDirty);
     assert_eq!(dirty_refusal.attention_kind(), AttentionKind::Decision);
 
@@ -348,8 +331,7 @@ fn unsafe_removal_refuses_non_terminal_run_records() {
     assert_eq!(active_refusal.code, RefusalCode::RunNotTerminal);
     assert_eq!(active_refusal.attention_kind(), AttentionKind::Failure);
 
-    let attention_refusal =
-        evaluate_run_record_removal("run-2", RunState::Attention).unwrap_err();
+    let attention_refusal = evaluate_run_record_removal("run-2", RunState::Attention).unwrap_err();
     assert_eq!(attention_refusal.code, RefusalCode::RunNotTerminal);
     assert_eq!(attention_refusal.attention_kind(), AttentionKind::Failure);
 

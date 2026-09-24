@@ -6,7 +6,7 @@
 // DO NOT EDIT — changes will be overwritten and fail codegen --check.
 // ────────────────────────────────────────────────────────────
 
-import type { AddTaskInput, Array_of_EventOutput, Array_of_RunListOutput, ClaimRunnableTasksInput, CleanupRunInput, CleanupRunOutput, CompareTracesInput, CompareTracesOutput, ConfigureRunInput, CreateRunInput, DecisionInput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, ExecutionLeaseInput, GetTraceInput, GetTraceOutput, ListRunsInput, OperationOutput, PolicyEvaluationOutput, PrepareRunInput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RunInput, RunPlanOutput, SelectCandidateInput, SelectCandidateOutput, SnapshotOutput, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
+import type { AddTaskInput, Array_of_EventOutput, Array_of_RunListOutput, ClaimRunnableTasksInput, CleanupDispositionOutput, CleanupRunInput, CleanupRunOutput, CompareTracesInput, CompareTracesOutput, ConfigureRunInput, CreateRunInput, DecisionInput, EvaluateCleanupDispositionInput, EvaluateFailurePolicyInput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, ExecutionLeaseInput, FailurePolicyOutput, GetTraceInput, GetTraceOutput, ListRunsInput, OperationOutput, PolicyEvaluationOutput, PrepareRunInput, PrepareRunPreflightInput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RunInput, RunPlanOutput, SelectCandidateInput, SelectCandidateOutput, SnapshotOutput, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
 import { createGeneratedFields2, invokeGenerated, invokeGeneratedFields1, invokeGeneratedFields3 } from '@rustra/types';
 import type { InvokeOptions } from '@rustra/types';
 
@@ -46,6 +46,16 @@ export const confirmPaused = createGeneratedFields2<RunInput, OperationOutput>(1
 
 export const createRun = createGeneratedFields2<CreateRunInput, SnapshotOutput>(1, 'createRun', "databasePath", "runId", 'createRun');
 
+export function evaluateCleanupDisposition(input: EvaluateCleanupDispositionInput, options?: InvokeOptions): Promise<CleanupDispositionOutput> {
+  return invokeGeneratedFields1<CleanupDispositionOutput>(40, 'evaluateCleanupDisposition', input, input["refusalCode"], options);
+}
+evaluateCleanupDisposition.commandId = 'evaluateCleanupDisposition';
+
+export function evaluateFailurePolicy(input: EvaluateFailurePolicyInput, options?: InvokeOptions): Promise<FailurePolicyOutput> {
+  return invokeGenerated<FailurePolicyOutput>(39, 'evaluateFailurePolicy', input, options);
+}
+evaluateFailurePolicy.commandId = 'evaluateFailurePolicy';
+
 export const evaluateSurfaceRemoval = createGeneratedFields2<EvaluateSurfaceRemovalInput, PolicyEvaluationOutput>(22, 'evaluateSurfaceRemoval', "surfaceId", "isOwnedByLoop", 'evaluateSurfaceRemoval');
 
 export function evaluateWorktreeRemoval(input: EvaluateWorktreeRemovalInput, options?: InvokeOptions): Promise<PolicyEvaluationOutput> {
@@ -77,6 +87,11 @@ export function prepareRun(input: PrepareRunInput, options?: InvokeOptions): Pro
   return invokeGenerated<OperationOutput>(25, 'prepareRun', input, options);
 }
 prepareRun.commandId = 'prepareRun';
+
+export function prepareRunPreflight(input: PrepareRunPreflightInput, options?: InvokeOptions): Promise<OperationOutput> {
+  return invokeGenerated<OperationOutput>(41, 'prepareRunPreflight', input, options);
+}
+prepareRunPreflight.commandId = 'prepareRunPreflight';
 
 export function reconcileTask(input: ReconcileTaskInput, options?: InvokeOptions): Promise<OperationOutput> {
   return invokeGenerated<OperationOutput>(36, 'reconcileTask', input, options);

@@ -4,7 +4,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::attention::AttentionKind;
 use crate::run::RunState;
 
 #[derive(
@@ -74,15 +73,26 @@ pub enum RefusalCode {
     ExternalSession,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CleanupDisposition {
+    /// Retry cleanup only after the run reaches a terminal state.
+    Defer,
+    /// Preserve the artifact and record why Loop did not remove it.
+    Skip,
+    /// A lossy cleanup choice requires an explicit human decision.
+    RequireDecision,
+}
+
 impl RefusalCode {
-    pub const fn attention_kind(self) -> AttentionKind {
+    pub const fn disposition(self) -> CleanupDisposition {
         match self {
-            Self::WorktreeUnmerged | Self::WorktreeDirty => AttentionKind::Decision,
+            Self::RunNotTerminal => CleanupDisposition::Defer,
             Self::PathOutsideProject
             | Self::PathIsProjectRoot
             | Self::SurfaceNotOwned
-            | Self::RunNotTerminal
-            | Self::ExternalSession => AttentionKind::Failure,
+            | Self::ExternalSession => CleanupDisposition::Skip,
+            Self::WorktreeUnmerged | Self::WorktreeDirty => CleanupDisposition::RequireDecision,
         }
     }
 }
@@ -111,8 +121,20 @@ impl CleanupRefusal {
         }
     }
 
-    pub fn attention_kind(&self) -> AttentionKind {
-        self.code.attention_kind()
+    pub const fn disposition(&self) -> CleanupDisposition {
+        self.code.disposition()
+    }
+
+    /// Compatibility shim for callers that have not migrated to
+    /// [`CleanupDisposition`]. New cleanup flows must branch on `disposition`
+    /// before deciding whether human attention is appropriate.
+    pub const fn attention_kind(&self) -> crate::attention::AttentionKind {
+        match self.disposition() {
+            CleanupDisposition::RequireDecision => crate::attention::AttentionKind::Decision,
+            CleanupDisposition::Defer | CleanupDisposition::Skip => {
+                crate::attention::AttentionKind::Failure
+            }
+        }
     }
 }
 

@@ -194,7 +194,10 @@ fn scan_tasks(connection: &Connection, run_id: &str) -> Result<Vec<TaskTrace>, S
                 task.first_started_seq.get_or_insert(seq);
             }
             EventKind::WorkerFailed { .. } => task.worker_failures += 1,
-            EventKind::VerificationFailed { .. } => task.verification_failures += 1,
+            EventKind::VerificationFailed { .. }
+            | EventKind::VerificationClassifiedFailure { .. } => {
+                task.verification_failures += 1;
+            }
             EventKind::VerificationPassed { .. } => {
                 task.verification_passes += 1;
                 mark_completed(task, seq, created_at);
@@ -223,6 +226,7 @@ fn task_key(event: &Event) -> Option<String> {
         | EventKind::WorkerFailed { task_id, .. }
         | EventKind::VerificationPassed { task_id, .. }
         | EventKind::VerificationFailed { task_id, .. }
+        | EventKind::VerificationClassifiedFailure { task_id, .. }
         | EventKind::TaskCompleted(task_id) => Some(task_id.as_str().to_owned()),
         EventKind::AttentionCreated(attention) => attention
             .task_id

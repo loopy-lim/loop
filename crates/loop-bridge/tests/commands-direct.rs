@@ -151,7 +151,11 @@ fn add_task_appends_a_task_to_an_existing_plan() {
         run_id: "add-run".into(),
     })
     .unwrap();
-    assert_eq!(unchanged.tasks.len(), 2, "rejected adds leave the plan intact");
+    assert_eq!(
+        unchanged.tasks.len(),
+        2,
+        "rejected adds leave the plan intact"
+    );
 }
 
 #[test]

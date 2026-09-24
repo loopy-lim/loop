@@ -1,13 +1,19 @@
 use std::fmt;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::policy::ComputeClass;
 
-use super::{CompletionContract, TaskKind, TaskState, VerificationEvidence, WorkOwnership};
+use super::{
+    CompletionContract, DecompositionContract, TaskKind, TaskState, VerificationEvidence,
+    WorkOwnership,
+};
 
-#[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(
+    Clone, Debug, Deserialize, Eq, Hash, JsonSchema, Ord, PartialEq, PartialOrd, Serialize,
+)]
 #[serde(transparent)]
 pub struct TaskId(String);
 
@@ -48,6 +54,8 @@ pub struct Task {
     pub ownership: WorkOwnership,
     pub requirements: Vec<String>,
     pub completion_contract: CompletionContract,
+    #[serde(default)]
+    pub decomposition_contract: Option<DecompositionContract>,
     pub preferred_compute: ComputeClass,
     pub minimum_compute: ComputeClass,
     pub maximum_compute: ComputeClass,
@@ -90,8 +98,6 @@ impl Task {
                 | (TaskState::Attention, TaskState::Ready)
                 | (TaskState::Attention, TaskState::Failed)
                 | (TaskState::Attention, TaskState::Cancelled)
-                | (TaskState::Blocked, TaskState::Ready)
-                | (TaskState::Blocked, TaskState::Cancelled)
                 | (TaskState::Failed, TaskState::Ready)
         );
         if !allowed {
@@ -121,6 +127,7 @@ impl TaskBuilder {
                 ownership: WorkOwnership::default(),
                 requirements: Vec::new(),
                 completion_contract: CompletionContract::default(),
+                decomposition_contract: None,
                 preferred_compute: ComputeClass::Balanced,
                 minimum_compute: ComputeClass::Tiny,
                 maximum_compute: ComputeClass::Frontier,
@@ -148,6 +155,11 @@ impl TaskBuilder {
 
     pub fn completion_contract(mut self, contract: CompletionContract) -> Self {
         self.task.completion_contract = contract;
+        self
+    }
+
+    pub fn decomposition_contract(mut self, contract: DecompositionContract) -> Self {
+        self.task.decomposition_contract = Some(contract);
         self
     }
 

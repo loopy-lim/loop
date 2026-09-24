@@ -99,7 +99,10 @@ fn assert_foreign_keys_clean(connection: &Connection) {
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    assert!(offenders.is_empty(), "foreign key violations: {offenders:?}");
+    assert!(
+        offenders.is_empty(),
+        "foreign key violations: {offenders:?}"
+    );
 }
 
 fn seed_run_and_tasks(connection: &Connection) {
@@ -210,7 +213,13 @@ fn legacy_global_keys_are_rewritten_without_losing_rows() {
             "{table}_legacy should be dropped"
         );
     }
-    for missing in ["edges", "attempts", "events", "projection_cache", "execution_leases"] {
+    for missing in [
+        "edges",
+        "attempts",
+        "events",
+        "projection_cache",
+        "execution_leases",
+    ] {
         assert!(
             object_exists(&connection, "table", missing),
             "missing table {missing}"
@@ -269,11 +278,17 @@ fn migrate_is_idempotent_on_an_already_migrated_database() {
 
     for table in ["workers", "attention", "decisions", "artifacts"] {
         assert_eq!(pk_count(&connection, table), 2, "{table}");
-        assert!(!object_exists(&connection, "table", &format!("{table}_legacy")));
+        assert!(!object_exists(
+            &connection,
+            "table",
+            &format!("{table}_legacy")
+        ));
     }
     for table in ["workers", "decisions", "attention", "artifacts"] {
         let count: i64 = connection
-            .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| row.get(0))
+            .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(count, 1, "{table} rows must not duplicate");
     }
@@ -316,7 +331,11 @@ fn an_already_migrated_table_does_not_block_remaining_legacy_tables() {
 
     for table in ["workers", "attention", "decisions", "artifacts"] {
         assert_eq!(pk_count(&connection, table), 2, "{table}");
-        assert!(!object_exists(&connection, "table", &format!("{table}_legacy")));
+        assert!(!object_exists(
+            &connection,
+            "table",
+            &format!("{table}_legacy")
+        ));
     }
     let worker_count: i64 = connection
         .query_row("SELECT count(*) FROM workers", [], |row| row.get(0))
@@ -357,7 +376,10 @@ fn composite_keys_scope_identifiers_per_run() {
             VALUES ('approval', 'new', 'approval', 'open', '{}')",
         [],
     );
-    assert!(duplicate.is_err(), "duplicate (run_id, id) must be rejected");
+    assert!(
+        duplicate.is_err(),
+        "duplicate (run_id, id) must be rejected"
+    );
 
     let per_run: Vec<(String, String)> = connection
         .prepare("SELECT run_id, id FROM attention ORDER BY run_id")
@@ -366,6 +388,12 @@ fn composite_keys_scope_identifiers_per_run() {
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    assert_eq!(per_run, vec![("new".into(), "approval".into()), ("old".into(), "approval".into())]);
+    assert_eq!(
+        per_run,
+        vec![
+            ("new".into(), "approval".into()),
+            ("old".into(), "approval".into())
+        ]
+    );
     assert_foreign_keys_clean(&connection);
 }

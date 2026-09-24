@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::task::{Task, TaskId, TaskState};
 
-use super::validation::{validate, GraphError};
+use super::validation::{validate, validate_preflight, GraphError};
 
 #[derive(Clone, Debug)]
 pub struct TaskGraph {
@@ -11,6 +11,17 @@ pub struct TaskGraph {
 
 impl TaskGraph {
     pub fn new(tasks: impl IntoIterator<Item = Task>) -> Result<Self, GraphError> {
+        Self::build(tasks, false)
+    }
+
+    pub fn preflight(tasks: impl IntoIterator<Item = Task>) -> Result<Self, GraphError> {
+        Self::build(tasks, true)
+    }
+
+    fn build(
+        tasks: impl IntoIterator<Item = Task>,
+        require_decomposition_contract: bool,
+    ) -> Result<Self, GraphError> {
         let mut values = BTreeMap::new();
         for task in tasks {
             if values.insert(task.id.clone(), task).is_some() {
@@ -18,6 +29,9 @@ impl TaskGraph {
             }
         }
         validate(&values)?;
+        if require_decomposition_contract {
+            validate_preflight(&values)?;
+        }
         Ok(Self { tasks: values })
     }
 

@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::attention::{Attention, AttentionResolution};
-use crate::policy::ArtifactKind;
+use crate::policy::{ArtifactKind, FailureClass};
 use crate::task::{Task, TaskId, VerificationEvidence};
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -100,6 +100,11 @@ pub enum EventKind {
     },
     VerificationFailed {
         task_id: TaskId,
+        reason: String,
+    },
+    VerificationClassifiedFailure {
+        task_id: TaskId,
+        failure_class: FailureClass,
         reason: String,
     },
     AttentionCreated(Attention),

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::attention::{Attention, AttentionState};
-use crate::policy::{next_compute_class, ArtifactKind};
+use crate::policy::{next_compute_class, ArtifactKind, FailureClass};
 use crate::run::RunState;
 use crate::task::{Task, TaskId, TaskState, TaskTransitionError};
 
@@ -134,10 +134,12 @@ impl RunProjection {
                 let task = self.task_mut(task_id)?;
                 match task.state {
                     TaskState::Ready => {}
-                    TaskState::Pending
-                    | TaskState::Blocked
-                    | TaskState::Attention
-                    | TaskState::Failed => task.transition(TaskState::Ready, None)?,
+                    TaskState::Pending | TaskState::Attention | TaskState::Failed => {
+                        task.transition(TaskState::Ready, None)?
+                    }
+                    TaskState::Blocked => {
+                        return Err(ProjectionError::UnsafeReadyTransition(task_id.clone()));
+                    }
                     TaskState::Running
                     | TaskState::Verifying
                     | TaskState::Cancelled
@@ -177,6 +179,7 @@ impl RunProjection {
             EventKind::VerificationPassed { task_id, evidence } => {
                 self.task_mut(task_id)?
                     .transition(TaskState::Done, Some(evidence))?;
+                self.fail_run_when_all_tasks_are_terminal();
             }
             EventKind::VerificationFailed { task_id, reason } => {
                 let task = self.task_mut(task_id)?;
@@ -193,6 +196,45 @@ impl RunProjection {
                     task.transition(TaskState::Ready, None)?;
                 }
                 self.failures.insert(task_id.clone(), reason.clone());
+            }
+            EventKind::VerificationClassifiedFailure {
+                task_id,
+                failure_class,
+                reason,
+            } => {
+                let terminalized = {
+                    let task = self.task_mut(task_id)?;
+                    if task.state != TaskState::Verifying {
+                        return Err(ProjectionError::InvalidVerificationState(task_id.clone()));
+                    }
+                    task.attempt = task.attempt.saturating_add(1);
+                    let deterministic = matches!(
+                        failure_class,
+                        FailureClass::Assertion | FailureClass::InvalidContract
+                    );
+                    if *failure_class == FailureClass::Interrupted {
+                        task.transition(TaskState::Attention, None)?;
+                        false
+                    } else if deterministic || task.attempt >= task.max_attempts {
+                        task.transition(TaskState::Failed, None)?;
+                        true
+                    } else {
+                        if let Some(next) = next_compute_class(task.preferred_compute) {
+                            task.preferred_compute = next.min(task.maximum_compute);
+                        }
+                        task.transition(TaskState::Ready, None)?;
+                        false
+                    }
+                };
+                self.failures.insert(task_id.clone(), reason.clone());
+                if terminalized {
+                    self.terminalize_dependents(task_id);
+                    if self.tasks[task_id].kind.is_serial() {
+                        self.run_state = Some(RunState::Failed);
+                    } else {
+                        self.fail_run_when_all_tasks_are_terminal();
+                    }
+                }
             }
             EventKind::AttentionCreated(attention) => {
                 self.require_controllable()?;
@@ -378,6 +420,47 @@ impl RunProjection {
             }
         }
         Ok(())
+    }
+
+    fn terminalize_dependents(&mut self, failed_task_id: &TaskId) {
+        let mut terminalized = std::collections::BTreeSet::from([failed_task_id.clone()]);
+        loop {
+            let descendants: Vec<_> = self
+                .tasks
+                .values()
+                .filter(|task| {
+                    matches!(task.state, TaskState::Pending | TaskState::Ready)
+                        && task
+                            .dependencies
+                            .iter()
+                            .any(|dependency| terminalized.contains(dependency))
+                })
+                .map(|task| task.id.clone())
+                .collect();
+            if descendants.is_empty() {
+                break;
+            }
+            for task_id in descendants {
+                if let Some(task) = self.tasks.get_mut(&task_id) {
+                    task.state = TaskState::Blocked;
+                }
+                terminalized.insert(task_id);
+            }
+        }
+    }
+
+    fn fail_run_when_all_tasks_are_terminal(&mut self) {
+        if self.run_state != Some(RunState::Active) || self.tasks.is_empty() {
+            return;
+        }
+        if self.tasks.values().all(|task| task.state.is_terminal())
+            && self
+                .tasks
+                .values()
+                .any(|task| matches!(task.state, TaskState::Failed | TaskState::Blocked))
+        {
+            self.run_state = Some(RunState::Failed);
+        }
     }
 
     pub fn active_artifacts(&self) -> impl Iterator<Item = &ArtifactRecord> {

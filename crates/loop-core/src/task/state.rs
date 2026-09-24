@@ -18,6 +18,9 @@ pub enum TaskState {
 
 impl TaskState {
     pub const fn is_terminal(self) -> bool {
-        matches!(self, Self::Done | Self::Failed | Self::Cancelled)
+        matches!(
+            self,
+            Self::Blocked | Self::Done | Self::Failed | Self::Cancelled
+        )
     }
 }

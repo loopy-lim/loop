@@ -1,6 +1,6 @@
 use crate::graph::TaskGraph;
 use crate::policy::ComputeClass;
-use crate::task::{Task, TaskId, TaskState};
+use crate::task::{SemanticAccess, Task, TaskId, TaskState};
 
 use super::{write_scopes_overlap, Capacity};
 
@@ -73,4 +73,91 @@ fn tasks_conflict(left: &Task, right: &Task) -> bool {
     write_scopes_overlap(&left.ownership.write_scope, &right.ownership.write_scope)
         || write_scopes_overlap(&left.ownership.read_scope, &right.ownership.write_scope)
         || write_scopes_overlap(&left.ownership.write_scope, &right.ownership.read_scope)
+        || semantic_touchpoints_overlap(left, right)
+}
+
+fn semantic_touchpoints_overlap(left: &Task, right: &Task) -> bool {
+    let Some(left_contract) = &left.decomposition_contract else {
+        return false;
+    };
+    let Some(right_contract) = &right.decomposition_contract else {
+        return false;
+    };
+    left_contract.semantic_touchpoints.iter().any(|left| {
+        right_contract.semantic_touchpoints.iter().any(|right| {
+            left.id == right.id
+                && (left.access == SemanticAccess::Modify || right.access == SemanticAccess::Modify)
+        })
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::policy::{FailurePolicy, OnExhaustion};
+    use crate::task::{
+        Assumption, CompletionCheck, CompletionContract, CompletionCoverage, DecompositionContract,
+        EvidenceLevel, SemanticAccess, SemanticConflictResolution, SemanticTouchpoint, TaskKind,
+        WorkOwnership,
+    };
+
+    fn task(id: &str, write_scope: &str, touchpoint: &str) -> Task {
+        let requirement = format!("requirement-{id}");
+        Task::builder(TaskId::from(id), id, TaskKind::Implementation)
+            .ownership(WorkOwnership::new(
+                std::iter::empty::<&str>(),
+                [write_scope],
+            ))
+            .requirements([requirement.clone()])
+            .completion_contract(CompletionContract::new([CompletionCheck::new(format!(
+                "check-{id}"
+            ))
+            .coverage(CompletionCoverage::new(
+                [requirement],
+                [write_scope],
+                ["behavior"],
+                EvidenceLevel::Unit,
+            ))]))
+            .decomposition_contract(DecompositionContract::new(
+                ["preserve compatibility"],
+                [Assumption::new("offline", "tests", "report", "release")],
+                [SemanticTouchpoint::new(
+                    touchpoint,
+                    SemanticAccess::Modify,
+                    SemanticConflictResolution::Serialize,
+                )],
+                [],
+                FailurePolicy::new([], OnExhaustion::FailTask),
+            ))
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn serializes_known_physical_scope_overlap_without_attention() {
+        let graph = TaskGraph::preflight([
+            task("a", "src/**", "policy-a"),
+            task("b", "src/a.rs", "policy-b"),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            Scheduler::new(Capacity::new(2, 2)).claim_runnable(&graph, &[]),
+            vec![TaskId::from("a")]
+        );
+    }
+
+    #[test]
+    fn serializes_declared_semantic_touchpoint_overlap() {
+        let graph = TaskGraph::preflight([
+            task("a", "src/a.rs", "shared-policy"),
+            task("b", "src/b.rs", "shared-policy"),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            Scheduler::new(Capacity::new(2, 2)).claim_runnable(&graph, &[]),
+            vec![TaskId::from("a")]
+        );
+    }
 }
