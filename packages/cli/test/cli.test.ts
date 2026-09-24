@@ -100,9 +100,9 @@ test("loop run starts the interactive Loop agent in the current terminal", async
       "--extension",
       "/opt/loop/loop-pi-extension.js",
       "--provider",
-      "zai",
+      "openai-codex",
       "--model",
-      "glm-5.3-flashx",
+      "gpt-6-sol",
       "--",
       "Implement feature X",
     ],
@@ -172,9 +172,9 @@ test("bare loop starts the interactive Loop agent without launching or attaching
       "--extension",
       "/opt/loop/loop-pi-extension.js",
       "--provider",
-      "zai",
+      "openai-codex",
       "--model",
-      "glm-5.3-flashx",
+      "gpt-6-sol",
     ],
     cwd: process.cwd(),
     configDirectory: join(root, "config"),
@@ -204,9 +204,9 @@ test("doctor auth checks native stores without requesting or printing credential
       "auth",
       "check",
       "--provider",
-      "zai",
+      "openai-codex",
       "--model",
-      "glm-5.3-flashx",
+      "gpt-6-sol",
       "--json",
       "--no-refresh",
     ],
@@ -372,7 +372,7 @@ test("human models output is a bounded list while JSON remains complete", async 
   expect(human.stdout()).not.toContain("[{");
   expect(human.stdout()).not.toContain("}]");
   expect(human.stdout()).toContain("fast · zai/glm-5.3-flashx");
-  expect(JSON.parse(json.stdout())).toHaveLength(16);
+  expect(JSON.parse(json.stdout())).toHaveLength(19);
 });
 
 function output(): {

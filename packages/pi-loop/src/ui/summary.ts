@@ -36,15 +36,35 @@ export function renderLoopRunSummary(
   summary: RunSummary,
   limits: OutputLimits,
 ): string {
-  return compactLines([
-    `Run ${runId}`,
-    `State: ${summary.status}`,
-    `Tasks: ${summary.tasks}`,
-    `Escalations: ${summary.escalations.length}`,
-    summary.status === "completed" ? "Verification: passed" : "Verification: attention required",
-  ], {
-    lineLimit: limits.statusLineLimit,
+  const completed = summary.status === "completed";
+  const lines = completed
+    ? [
+      `Run ${runId}`,
+      `State: ${summary.status}`,
+      "Goal: complete",
+      `Tasks: ${summary.tasks}`,
+      `Escalations: ${summary.escalations.length}`,
+      "Verification: passed",
+    ]
+    : [
+      `Run ${runId}`,
+      `State: ${summary.status}`,
+      "Goal: incomplete",
+      `Tasks: ${summary.tasks}`,
+      "Remaining: original acceptance criteria are not fully verified.",
+      continuationLine(runId, summary.status),
+    ];
+  return compactLines(lines, {
+    lineLimit: completed ? limits.statusLineLimit : limits.attentionLineLimit,
     lineTextLimit: limits.lineTextLimit,
     overflow: (omitted) => `… ${omitted} more status lines`,
   }).join("\n");
+}
+
+function continuationLine(runId: string, status: RunSummary["status"]): string {
+  if (status === "attention") {
+    return `Next: /loop attention ${runId}; resolve reported items; /loop resume ${runId}`;
+  }
+  if (status === "paused") return `Next: /loop resume ${runId}`;
+  return "Next: submit a follow-up request carrying the unresolved acceptance criteria.";
 }

@@ -27,6 +27,92 @@ async function until(predicate: () => Promise<boolean>) {
   }
 }
 
+test("quota failure releases the first worker and retries on another provider", async () => {
+  const lifecycle: string[] = [];
+  const owners: string[] = [];
+  class QuotaProvider extends FakeProvider {
+    override async result(workerId: string) {
+      await super.result(workerId);
+      return { success: false, summary: "quota exhausted", failure: { kind: "quota" as const, retryable: true } };
+    }
+    async release() {
+      const snapshot = await protocol.getSnapshot(input);
+      expect(snapshot.activeWorkers).toHaveLength(1);
+      owners.push(snapshot.activeWorkers[0]!.id);
+      lifecycle.push("released");
+    }
+  }
+  class Fallback extends FakeProvider {
+    override async start(startInput: StartWorkerInput) {
+      lifecycle.push("fallback");
+      const snapshot = await protocol.getSnapshot(input);
+      expect(snapshot.activeWorkers).toHaveLength(1);
+      owners.push(snapshot.activeWorkers[0]!.id);
+      expect(startInput.attempt).toBe(0);
+      return super.start(startInput);
+    }
+  }
+  const quota = new QuotaProvider("zai", ["fast"]);
+  const fallback = new Fallback("fallback", ["fast"]);
+  const directory = mkdtempSync(join(tmpdir(), "loop-quota-fallback-"));
+  const input = { databasePath: join(directory, "run.db"), runId: "quota-fallback" };
+  const orchestrator = new Orchestrator({ control: protocol, providers: new ProviderRegistry([quota, fallback], { zai: { costWeight: 1, latency: 1 }, fallback: { costWeight: 3, latency: 2 } }), maxWorkers: 1, completionVerifier: verifier });
+  const result = await orchestrator.run({ ...input, tasks: [fixture("a")], workingDirectory: directory });
+  expect(result.status).toBe("completed");
+  expect(result.providersByTask.a).toEqual(["zai", "fallback"]);
+  expect(quota.active).toBe(0);
+  expect(lifecycle).toEqual(["released", "fallback"]);
+  expect(new Set(owners).size).toBe(1);
+  expect((await protocol.getSnapshot(input)).activeWorkers).toEqual([]);
+});
+
+for (const mode of ["exhausted", "recovered", "cleanup", "authentication", "cancel", "pause"] as const) {
+  test(`quota fallback lifecycle: ${mode}`, async () => {
+    const directory = mkdtempSync(join(tmpdir(), "loop-quota-lifecycle-"));
+    const input = { databasePath: join(directory, "run.db"), runId: mode };
+    let calls = 0;
+    class Primary extends FakeProvider {
+      override async result(id: string) {
+        const result = await super.result(id);
+        if (mode === "recovered" && ++calls > 1) return result;
+        return { success: false, summary: "classified failure", failure: { kind: mode === "authentication" ? "authentication" as const : "quota" as const, retryable: false } };
+      }
+      async release() {
+        if (mode === "cleanup") throw new Error("cannot close quota worker");
+        if (mode === "cancel") await protocol.cancelRun(input);
+        if (mode === "pause") await protocol.pauseRun(input);
+      }
+    }
+    class Secondary extends FakeProvider {
+      override async result(id: string) {
+        const result = await super.result(id);
+        return mode === "exhausted" ? { success: false, summary: "second pool exhausted", failure: { kind: "quota" as const, retryable: true } } : result;
+      }
+    }
+    const primary = new Primary("zai", ["fast"]);
+    const sibling = new FakeProvider("zai-other-model", ["fast"]);
+    const fallback = new Secondary("fallback", ["fast"]);
+    const providers = new ProviderRegistry([primary, sibling, fallback], {
+      zai: { costWeight: 1, latency: 0, quotaGroup: "zai-account" },
+      "zai-other-model": { costWeight: 2, latency: 0, quotaGroup: "zai-account" },
+      fallback: { costWeight: 3, latency: 0 },
+    });
+    const runtime = new Orchestrator({ control: protocol, providers, maxWorkers: 1, completionVerifier: verifier });
+    const result = await runtime.run({ ...input, workingDirectory: directory, tasks: ["recovered", "pause"].includes(mode) ? [fixture("a"), fixture("b", ["a"])] : [fixture("a")] });
+    expect(result.status).toBe(mode === "recovered" ? "completed" : mode === "cancel" ? "cancelled" : mode === "pause" ? "paused" : "attention");
+    expect(result.providersByTask.a).toEqual(["zai", ...(["exhausted", "recovered", "pause"].includes(mode) ? ["fallback"] : [])]);
+    expect(sibling.maxConcurrent).toBe(0);
+    const snapshot = await protocol.getSnapshot(input);
+    expect(snapshot.activeWorkers).toHaveLength(mode === "cleanup" ? 1 : 0);
+    if (mode === "recovered") {
+      expect(result.providersByTask.b).toEqual(["zai"]);
+      expect(snapshot.openAttentionIds).toEqual([]);
+      expect((await protocol.getTaskContext({ ...input, taskId: "a" })).attempt).toBe(0);
+    }
+    if (mode === "exhausted") expect(snapshot.attention.some(item => item.summary.includes("fallback exhausted"))).toBe(true);
+  });
+}
+
 test("external cancellation stops workers before reporting cancelled", async () => {
   const provider = new FakeProvider("fake", ["fast"], { delayMs: 500 });
   const { input, directory, orchestrator } = setup(provider);

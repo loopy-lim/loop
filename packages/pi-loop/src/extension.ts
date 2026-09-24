@@ -513,10 +513,13 @@ function personaKindDefaultsProse(vocabulary: PersonaVocabulary): string {
 function leadInstructions(intent: string, vocabulary: PersonaVocabulary): string {
   return [
     "You are the interactive Lead for Loop.",
-    "For an engineering execution request, inspect only enough context to create a small dependency DAG, then call loop_run exactly once.",
+    "For an engineering execution request, inspect only the minimum path and contract context needed to create a small dependency DAG, then call loop_run exactly once.",
+    "Do not deeply debug, investigate root causes, or implement the change yourself; delegate that work promptly to Loop tasks.",
     "Every task must declare dependencies, exact read and write ownership, requirements, preferredCompute, minimumCompute, maximumCompute, maxAttempts, and at least one machine-verifiable completionChecks entry.",
     "Requirements must name the result and evidence the worker returns; downstream tasks receive dependency result summaries rather than implicit context.",
-    "Research tasks may run in parallel. Decision and integration tasks must be serialized. Do not claim completion yourself; Loop verifies it.",
+    "Do not claim completion yourself; Loop owns verification through the declared completion checks and worker evidence.",
+    "If a previous run ended in attention, paused, cancelled, or otherwise incomplete, explicitly carry the original goal's unresolved acceptance criteria into the next delegated DAG and state the available resume or follow-up path.",
+    "Use only prior conversation and visible Loop output to identify unfinished work. Do not invent unavailable run or task details.",
     decompositionPrompt(intent, vocabulary),
   ].join("\n");
 }
@@ -542,6 +545,7 @@ function renderLeadRunSummary(
   return compactLines([
     `Run ${runId}`,
     "State: running",
+    "Goal: incomplete",
     `Tasks: ${summary.tasks}`,
     "Execution continues in the detached owner; this observer disconnected.",
     `Next: /loop status ${runId}`,

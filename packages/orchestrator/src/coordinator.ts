@@ -34,7 +34,7 @@ export interface RunRequest {
 }
 export interface ExistingRunRequest { databasePath: string; runId: string; signal?: AbortSignal }
 export interface RunSummary {
-  status: "completed" | "cancelled" | "attention" | "paused" | "running";
+  status: "completed" | "failed" | "cancelled" | "attention" | "paused" | "running";
   tasks: number;
   escalations: Array<{ taskId: string; from: string; to: string }>;
   providersByTask: Record<string, string[]>;
@@ -92,7 +92,7 @@ export class Orchestrator {
       while (Date.now() <= expires + 250) {
         await delay(100);
         const current = await this.#control.getSnapshot(input);
-        if (["completed", "cancelled", "paused", "attention"].includes(current.state)) {
+        if (["completed", "failed", "cancelled", "paused", "attention"].includes(current.state)) {
           summary.status = current.state as RunSummary["status"];
           return summary;
         }
@@ -159,7 +159,10 @@ export class Orchestrator {
           if (task.error) throw task.error;
           summary.finishedAt[id] = Date.now();
         }
-        if (snapshot.state === "completed") { summary.status = "completed"; return summary; }
+        if (snapshot.state === "completed" || snapshot.state === "failed") {
+          summary.status = snapshot.state;
+          return summary;
+        }
         if (active.size === 0 && ["attention", "pausing", "paused"].includes(snapshot.state)) {
           if (snapshot.state === "pausing") await this.#control.confirmPaused(input);
           summary.status = snapshot.state === "attention" ? "attention" : "paused";
@@ -196,7 +199,22 @@ export class Orchestrator {
             throw error;
           }
           summary.startedAt[taskId] = Date.now();
-          active.set(taskId, executeTask({ ...taskExecutionOptions, context, workerId, provider }));
+          active.set(taskId, executeTask({
+            ...taskExecutionOptions, context, workerId, provider,
+            selectFallback: async excluded => {
+              const next = await selectWhileActive(this.#providers.select(context.task.preferredCompute, excluded), async () => {
+                if (request.signal?.aborted) await this.#control.cancelRun(input);
+                // Pause drains this already-reserved task; cancellation does not.
+                return !leaseLost && ["active", "pausing"].includes((await this.#control.getSnapshot(input)).state);
+              });
+              if (next) {
+                const previous = history.at(-1)!;
+                summary.escalations.push({ taskId, from: previous, to: next.id });
+                history.push(next.id);
+              }
+              return next;
+            },
+          }));
         }
         if (leaseLost) throw new Error("execution ownership was lost");
         if (active.size === 0) {
@@ -212,10 +230,10 @@ export class Orchestrator {
       for (const task of active.values()) task.abort();
       await Promise.allSettled([...active.values()].map(task => task.done));
       const snapshot = await this.#control.getSnapshot(input);
-      if (!leaseLost && snapshot.executionOwner === owner && Number(snapshot.executionExpiresAt ?? 0) > Date.now() && !["completed", "cancelled"].includes(snapshot.state)) {
+      if (!leaseLost && snapshot.executionOwner === owner && Number(snapshot.executionExpiresAt ?? 0) > Date.now() && !["completed", "failed", "cancelled"].includes(snapshot.state)) {
         await this.#control.requestAttention({ ...executionInput, attentionId: `dispatcher-${owner}`, kind: "failure", taskId: null, summary: redact(error) });
       }
-      summary.status = "attention";
+      summary.status = snapshot.state === "failed" ? "failed" : "attention";
       return summary;
     } finally {
       clearInterval(heartbeat);

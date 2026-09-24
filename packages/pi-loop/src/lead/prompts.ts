@@ -47,7 +47,10 @@ export function taskSpecInputDescription(vocabulary: PersonaVocabulary): string 
 export function decompositionPrompt(intent: string, vocabulary: PersonaVocabulary): string {
   return [
     "Decompose this engineering intent into a small dependency DAG.",
-    "Return typed tasks only. Facts may run in parallel; decisions and integration are serialized.",
+    "Put independent fact-finding and non-overlapping implementation tasks in the same parallel frontier.",
+    "Keep dependency-ordered work sequential, and serialize decision and integration tasks.",
+    "For a small bounded change, delegate directly to an execution task. Do not add ceremonial research or decision tasks.",
+    "Map every acceptance criterion in the original intent to implementation and verification tasks; do not treat worker success alone as goal completion.",
     "Every task needs dependencies, exact read and write ownership, compute bounds, and machine-verifiable completion checks.",
     "Describe expected outputs in requirements so each worker returns a concise result summary with evidence; dependent tasks receive dependency result summaries.",
     taskSpecInputDescription(vocabulary),

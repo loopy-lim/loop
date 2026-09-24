@@ -37,8 +37,20 @@ test("natural-language Pi turns receive the Loop Lead contract", async () => {
 
   expect(result.systemPrompt).toContain("interactive Lead for Loop");
   expect(result.systemPrompt).toContain("call loop_run exactly once");
+  expect(result.systemPrompt).toContain("Do not deeply debug, investigate root causes, or implement the change yourself");
+  expect(result.systemPrompt).toContain("minimum path and contract context");
+  expect(result.systemPrompt).toContain("same parallel frontier");
+  expect(result.systemPrompt).toContain("non-overlapping implementation tasks");
+  expect(result.systemPrompt).toContain("Keep dependency-ordered work sequential");
+  expect(result.systemPrompt).toContain("serialize decision and integration tasks");
+  expect(result.systemPrompt).toContain("Do not add ceremonial research or decision tasks");
   expect(result.systemPrompt).toContain("dependency result summaries");
   expect(result.systemPrompt).toContain("exact read and write ownership");
+  expect(result.systemPrompt).toContain("Loop owns verification");
+  expect(result.systemPrompt).toContain("acceptance criteria");
+  expect(result.systemPrompt).toContain("implementation and verification tasks");
+  expect(result.systemPrompt).toContain("previous run ended in attention, paused, cancelled, or otherwise incomplete");
+  expect(result.systemPrompt).toContain("Do not invent unavailable run or task details");
   expect(result.systemPrompt).toContain("Implement feature X");
 
   const tool = host.tools.get("loop_run")!;
@@ -92,6 +104,57 @@ test("loop_run validates the DAG and delegates execution to Loop", async () => {
   expect(calls).toHaveLength(1);
   expect(updates.some((update) => update.includes("State: active"))).toBe(true);
   expect(result.content[0]?.text).toContain("State: completed");
+});
+
+test("loop_run distinguishes completed goals from attention and gives a continuation path", async () => {
+  const completedHost = fakePi();
+  registerLoopExtension(completedHost.api, fakeBackend(), undefined, settings);
+  const completed = await completedHost.tools.get("loop_run")!.execute(
+    "tool-completed",
+    {
+      intent: "Finish every acceptance criterion",
+      runId: "run-completed",
+      tasksJson: JSON.stringify([task("implementation", "implementation", [], ["src/**"])]),
+    },
+    new AbortController().signal,
+    undefined,
+    context(),
+  );
+
+  const attentionHost = fakePi();
+  registerLoopExtension(attentionHost.api, fakeBackend({
+    async run(input) {
+      return {
+        status: "attention",
+        tasks: input.tasks.length,
+        escalations: [],
+        providersByTask: {},
+        startedAt: {},
+        finishedAt: {},
+      };
+    },
+  }), undefined, settings);
+  const attention = await attentionHost.tools.get("loop_run")!.execute(
+    "tool-attention",
+    {
+      intent: "Finish every acceptance criterion",
+      runId: "run-attention",
+      tasksJson: JSON.stringify([task("implementation", "implementation", [], ["src/**"])]),
+    },
+    new AbortController().signal,
+    undefined,
+    context(),
+  );
+
+  expect(completed.content[0]?.text).toContain("Goal: complete");
+  expect(completed.content[0]?.text).toContain("Verification: passed");
+  expect(completed.content[0]?.text).not.toContain("Goal: incomplete");
+  expect(attention.content[0]?.text).toContain("Goal: incomplete");
+  expect(attention.content[0]?.text).toContain("Remaining: original acceptance criteria are not fully verified");
+  expect(attention.content[0]?.text).toContain("Next: /loop attention run-attention");
+  expect(attention.content[0]?.text).toContain("/loop resume run-attention");
+  expect(attention.content[0]?.text).not.toContain("Goal: complete");
+  expect(attention.content[0]?.text).not.toContain("Verification: passed");
 });
 
 test("Pi updates, notify, tool result, and commands share injected output limits", async () => {

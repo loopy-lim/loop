@@ -319,6 +319,22 @@ test("Z.AI API adapter redacts provider errors", async () => {
   expect(result.summary).not.toContain("secret-value");
 });
 
+test("routing passes configured cost and latency to Rust and excludes the entire failed quota pool", async () => {
+  const first = new FakeProvider("z-primary", ["fast"]);
+  const sibling = new FakeProvider("z-sibling", ["fast"]);
+  const fallback = new FakeProvider("a-fallback", ["fast"]);
+  const registry = new ProviderRegistry([fallback, sibling, first], {
+    "z-primary": { costWeight: 1, latency: 0, quotaGroup: "account" },
+    "z-sibling": { costWeight: 1, latency: 1, quotaGroup: "account" },
+    "a-fallback": { costWeight: 1, latency: 5 },
+  });
+  expect((await registry.select("fast")).id).toBe(first.id);
+  expect((await registry.select("fast", new Set([first.id]))).id).toBe(fallback.id);
+  await expect(registry.select("fast", new Set([first.id, fallback.id]))).rejects.toThrow();
+  expect((await registry.select("fast")).id).toBe(first.id);
+  await expect(registry.select("frontier")).rejects.toThrow();
+});
+
 test("provider selection skips an unavailable adapter", async () => {
   const unavailable = new UnavailableProvider("missing-cli", ["fast"]);
   const available = new FakeProvider("available", ["fast"]);

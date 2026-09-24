@@ -157,7 +157,19 @@ export function buildProviderRegistry(options: ProviderCompositionOptions): Prov
   if (providers.length === 0) {
     throw new Error("no enabled provider has a configured model");
   }
-  return new ProviderRegistry(wrapForVisibility(providers, options, herdr));
+  // Pi model patterns identify the upstream quota pool, not the launcher.
+  // Keep this adapter knowledge out of the deterministic Rust policy.
+  const routing = Object.fromEntries(options.config.models.map(model => [
+    `${model.provider}:${model.id}`,
+    {
+      costWeight: model.costWeight,
+      latency: model.latency,
+      quotaGroup: model.provider === "pi" && model.id.includes("/")
+        ? model.id.split("/")[0]
+        : model.provider === "zai_cli" ? "zai" : model.provider,
+    },
+  ]));
+  return new ProviderRegistry(wrapForVisibility(providers, options, herdr), routing);
 }
 
 /**

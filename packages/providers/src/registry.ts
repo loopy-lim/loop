@@ -2,11 +2,13 @@ import { selectCandidate, type ComputeClass, type SelectCandidateInput } from "@
 
 import type { AgentProvider, ProviderCapabilities } from "./types";
 
+type RoutingMetadata = Pick<SelectCandidateInput["candidates"][number], "costWeight" | "latency"> & { quotaGroup?: string };
+
 export class ProviderRegistry {
   readonly #providers: AgentProvider[];
   readonly #capabilities = new Map<string, ProviderCapabilities>();
 
-  constructor(providers: AgentProvider[]) {
+  constructor(providers: AgentProvider[], private readonly routing: Readonly<Record<string, RoutingMetadata>> = {}) {
     if (providers.length === 0) throw new Error("at least one provider is required");
     this.#providers = [...providers];
   }
@@ -18,10 +20,12 @@ export class ProviderRegistry {
    * cost/latency ordering live in Rust — this method only maps provider
    * capabilities into candidates and executes the decision.
    */
-  async select(computeClass: ComputeClass): Promise<AgentProvider> {
+  async select(computeClass: ComputeClass, excludedProviderIds: ReadonlySet<string> = new Set()): Promise<AgentProvider> {
     const providersByCandidate = new Map<string, AgentProvider>();
     const candidates: SelectCandidateInput["candidates"] = [];
+    const excludedGroups = new Set([...excludedProviderIds].map(id => this.routing[id]?.quotaGroup ?? id));
     for (const provider of this.#providers) {
+      if (excludedGroups.has(this.routing[provider.id]?.quotaGroup ?? provider.id)) continue;
       const capabilities = await this.#capabilitiesFor(provider);
       for (const candidateClass of capabilities.computeClasses) {
         // Candidate ids pair a provider with one advertised class so the Rust
@@ -40,8 +44,8 @@ export class ProviderRegistry {
             vision: capabilities.vision ? 1 : 0,
             longContext: 0,
           },
-          latency: 0,
-          costWeight: 0,
+          latency: this.routing[provider.id]?.latency ?? 0,
+          costWeight: this.routing[provider.id]?.costWeight ?? 0,
           available: capabilities.available,
         });
       }

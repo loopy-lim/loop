@@ -34,7 +34,11 @@ test("loads the repository configuration into typed runtime data", () => {
     workerActivityLines: 5,
     workerPaneLimit: 4,
   });
-  expect(config.lead).toEqual({ command: "pi", provider: "zai", model: "glm-5.3-flashx" });
+  expect(config.lead).toEqual({
+    command: "pi",
+    provider: "openai-codex",
+    model: "gpt-6-sol",
+  });
   expect(config.providers.codex?.command).toBe("codex");
 
   const registry = new ModelRegistry(config.models);
@@ -47,6 +51,14 @@ test("loads the repository configuration into typed runtime data", () => {
   expect(registry.get("gpt-5.6-luna").computeClass).toBe("balanced");
   expect(registry.get("gpt-5.6-terra").computeClass).toBe("strong");
   expect(registry.get("gpt-5.6-sol").computeClass).toBe("frontier");
+  expect(registry.forComputeClass("balanced").map((model) => model.id)).toEqual([
+    "zai/glm-5.3-flashx:high",
+    "zai/glm-5.3-flash",
+    "gemini-3.8-flash-high",
+    "gpt-5.6-luna",
+    "gpt-6-luna",
+    "openai-codex/gpt-6-luna",
+  ]);
   // Registry orders by cost_weight + latency, ties broken by id: all four
   // frontier models tie at 4+3 and sort lexicographically (the restored
   // gpt-6-luna/sol lanes mirror the codex fallback figures).

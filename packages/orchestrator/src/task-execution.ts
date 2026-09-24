@@ -12,6 +12,8 @@ interface Options {
   context: TaskContextOutput;
   workerId: string;
   provider: AgentProvider;
+  /** Runs only after the failed handle is released; reservation stays owned. */
+  selectFallback?: (excludedProviderIds: ReadonlySet<string>) => Promise<AgentProvider | undefined>;
   control: OrchestrationControl;
   verifier: CompletionVerifier;
   personas?: PersonaRegistry;
@@ -30,7 +32,7 @@ export function executeTask(options: Options): TaskExecution {
   execution.done = run(options, controller.signal).catch(error => { execution.error = error; }).finally(() => { execution.settled = true; });
   return execution;
 }
-async function run({ input, context, workerId, provider, control, verifier, personas, personaKindDefaults, recordRawActivity = true }: Options, signal: AbortSignal): Promise<void> {
+async function run({ input, context, workerId, provider, selectFallback, control, verifier, personas, personaKindDefaults, recordRawActivity = true }: Options, signal: AbortSignal): Promise<void> {
   const taskId = context.task.id;
   const workerInput = { ...input, taskId, workerId };
   const persona = resolvePersona({ requested: context.task.persona, kind: context.task.kind, registry: personas ?? {}, defaults: personaKindDefaults });
@@ -56,33 +58,60 @@ async function run({ input, context, workerId, provider, control, verifier, pers
   try {
     if (signal.aborted) { await control.recordWorkerStopped(workerInput); return; }
     const startInput: StartWorkerInput = { runId: input.runId, taskId, title: context.task.title, kind: context.task.kind, computeClass: context.task.preferredCompute, attempt: context.attempt, requirements: context.task.requirements, workingDirectory: context.workingDirectory, context, ...(persona.instructions ? { personaInstructions: persona.instructions } : {}) };
-    const starting = provider.start(startInput);
-    let handle: WorkerHandle;
-    try { handle = await startup(starting, signal); }
-    catch (error) {
-      if (error instanceof StartupUncertain) {
-        // If startup eventually yields a handle while this owner remains alive,
-        // stop it. The durable reservation remains until explicit reconciliation.
-        void starting.then(async late => { await provider.cancel(late.id); await provider.release?.(late.id); }).catch(() => {});
+    const excludedProviderIds = new Set<string>();
+    let result: WorkerResult;
+    // One durable reservation spans these sequential handles. Never release
+    // ownership or consume a scheduler attempt merely because quota ran out.
+    while (true) {
+      const starting = provider.start(startInput);
+      let handle: WorkerHandle;
+      try { handle = await startup(starting, signal); }
+      catch (error) {
+        if (error instanceof StartupUncertain) {
+          // If startup eventually yields a handle while this owner remains alive,
+          // stop it. The durable reservation remains until explicit reconciliation.
+          void starting.then(async late => { await provider.cancel(late.id); await provider.release?.(late.id); }).catch(() => {});
+        }
+        throw error;
       }
-      throw error;
-    }
-    handleId = handle.id;
-    // The subscription must stay attached even when raw recording is
-    // suppressed: the mirroring layer renders sink lines from these events.
-    unsubscribe = provider.subscribe?.(handle.id, event => {
-      if (event.type !== "output" || !recordRawActivity || Date.now() - lastActivity < 1000) return;
-      const activity = redact(event.text.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "").trim().split(/\r?\n/).at(-1) ?? "", 300);
-      if (!activity) return;
-      lastActivity = Date.now();
-      void control.recordActivity({ ...input, taskId, activity }).catch(() => {});
-    });
-    const result = await untilAborted(provider.result(handle.id), signal);
-    if (!result || signal.aborted) {
-      await provider.cancel(handle.id);
+      handleId = handle.id;
+      // The subscription must stay attached even when raw recording is
+      // suppressed: the mirroring layer renders sink lines from these events.
+      unsubscribe = provider.subscribe?.(handle.id, event => {
+        if (event.type !== "output" || !recordRawActivity || Date.now() - lastActivity < 1000) return;
+        const activity = redact(event.text.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "").trim().split(/\r?\n/).at(-1) ?? "", 300);
+        if (!activity) return;
+        lastActivity = Date.now();
+        void control.recordActivity({ ...input, taskId, activity }).catch(() => {});
+      });
+      const received = await untilAborted(provider.result(handle.id), signal);
+      if (!received || signal.aborted) {
+        await provider.cancel(handle.id);
+        await release();
+        await control.recordWorkerStopped(workerInput);
+        return;
+      }
+      result = received;
+      if (result.success || result.failure?.kind !== "quota" || !selectFallback) break;
       await release();
-      await control.recordWorkerStopped(workerInput);
-      return;
+      unsubscribe?.();
+      unsubscribe = undefined;
+      excludedProviderIds.add(provider.id);
+      await control.recordActivity({ ...input, taskId, activity: redact(`Quota exhausted (${provider.id}); released worker and selecting an untried quota pool. ${result.summary}`, 500) });
+      let next: AgentProvider | undefined;
+      try { next = await selectFallback(excludedProviderIds); }
+      catch (error) {
+        result = { ...result, summary: `${result.summary}\nQuota fallback exhausted or unavailable: ${redact(error)}` };
+        break;
+      }
+      if (!next || signal.aborted) {
+        await control.recordWorkerStopped(workerInput);
+        return;
+      }
+      provider = next;
+      handleId = undefined;
+      releaseAttempted = false;
+      lastActivity = 0;
     }
     await control.recordWorkerResult({ ...workerInput, success: result.success, summary: withPersonaWarning(redact(result.summary)) });
     workerFinished = true;
