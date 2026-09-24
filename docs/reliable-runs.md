@@ -31,6 +31,16 @@ Pi에서는 `/loop status`, `graph`, `workers`, `attention`, `runs`, `task`, `pa
 
 각 작업에는 원래 요청, 현재 지침, 직접 의존하는 완료 작업의 결과, 선언한 범위, 완료 조건, 이전 실패와 검증 기록을 전달한다. 작업자의 성공 보고 이후에도 완료 조건의 명령이 통과해야 작업이 완료된다. 상태·요약·기록에 포함되는 일반적인 인증 토큰 패턴은 저장 전에 가린다.
 
+## 실패 재시도와 terminal 종결
+
+재시도 가능한 timeout·일시적 process/environment 실패만 task의 `maxAttempts` 예산 안에서 재시도한다. 예산이 소진되면 질문을 만들지 않고 task와 run을 terminal `Failed`로 종결하며, 실패 task의 후손은 `Blocked`로 전파한다. 의존하지 않는 branch는 계속 실행한다. decision·integration 작업이 실패하면 부분 결과를 채택하지 않고 run을 실패로 닫는다. 다만 프로세스 생존 여부가 불명확해 재시도가 중복 부작용을 만들 수 있는 경우처럼 terminal 상태를 안전하게 확정할 수 없을 때는 attention과 수동 reconcile을 유지한다.
+
+deterministic assertion 같은 completion-check 실패는 같은 명령을 재시도하거나 compute class를 승격하지 않으며 첫 실패를 terminal `Failed`로 기록한다. 실패한 check를 worker 성공 보고로 대체하거나 `Done`으로 승격하지 않는다.
+
+모델 라우팅에서는 `config/models.toml`의 strong 후보 `zai/glm-5.3-flash:high`를 우선해, 검증 실패로 compute가 승격될 때 openai-codex quota가 소모되지 않도록 한다.
+
+이 동작은 fake/offline 시나리오와 자동 회귀 검사로 검증한다. 실제 인증 provider·유료 모델 호출·장시간 운영 환경의 live evidence는 별도이며, 확보되지 않은 경우 공급자별 오류 매핑과 실제 quota fallback까지 검증된 것으로 해석하지 않는다.
+
 ## 저장 형식과 빌드
 
 이벤트 기록을 보존하며 현재 상태 캐시를 같은 저장 트랜잭션에서 갱신한다. 캐시가 없거나 읽을 수 없으면 이벤트를 재생한다. 기존 전역 식별자 테이블은 실행별 복합 식별자로 자동 이전한다. 실행별 소유권 임대가 중복 배정을 막고, 작업 상태를 기록하는 트랜잭션에서도 소유권을 확인하여 이전 실행 프로세스의 늦은 결과를 거절한다.
