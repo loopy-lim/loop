@@ -38,15 +38,16 @@ enabled = true
 auth = "native"
 mode = "interactive"
 
-# Mixed routing (2026-09-23): pi runs the zai volume classes plus the gpt-6
-# luna/sol primary lane (openai-codex, ChatGPT native login; smoke evidence
-# OK-LUNA-PI / OK-SOL-PI on pi 0.87.1); codex exec mode retains the gpt-5.6
-# luna/terra/sol line plus gpt-6 luna/sol fallback. Codex native ChatGPT login
-# is used; credentials stay in codex's own auth store and are never logged or
-# persisted by Loop.
+# Mixed routing (2026-09, updated after codex lane drop): pi runs the zai
+# volume classes plus the gpt-6 luna/sol lane (openai-codex, ChatGPT native
+# login; smoke evidence OK-LUNA-PI / OK-SOL-PI on pi 0.87.1). The codex-exec
+# provider lane was dropped (2026-09) — models.toml no longer declares any
+# codex-provider model entry. The block below is kept for reference only and
+# is disabled. Credentials stay in codex's own auth store and are never logged
+# or persisted by Loop.
 [providers.codex]
 command = "codex"
-enabled = true
+enabled = false
 auth = "native"
 mode = "exec"
 
