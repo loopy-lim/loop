@@ -1,6 +1,7 @@
 import type { RunListOutput, SnapshotOutput, TaskContextOutput } from "@loop/protocol";
 
 import { compactLines, compactItems, singleLine, type OutputLimits } from "./compact";
+import { emptyState, moreItems, separator } from "./tokens";
 
 /** Options for the live worker-activity feed (docs/decisions/2026-09-23-worker-visibility.md D3/D5). */
 export interface SnapshotRenderOptions {
@@ -21,25 +22,25 @@ export function renderSnapshot(
 }
 
 export function renderRuns(runs: RunListOutput[], limits: OutputLimits): string {
-  if (runs.length === 0) return "No runs";
-  return compactLines(runs.map((run) => `${run.runId} · ${run.state}`), {
+  if (runs.length === 0) return emptyState.noRuns;
+  return compactLines(runs.map((run) => `${run.runId} ${separator.list} ${run.state}`), {
     lineLimit: limits.listLineLimit,
     lineTextLimit: limits.lineTextLimit,
-    overflow: (omitted) => `… ${omitted} more runs`,
+    overflow: (omitted) => moreItems(omitted, "runs"),
   }).join("\n");
 }
 
 export function renderTaskContext(context: TaskContextOutput, limits: OutputLimits): string {
   const task = context.task;
   const lines = [
-    `Task ${task.id} · ${task.kind} · attempt ${context.attempt} · ${task.title}`,
+    `Task ${task.id} ${separator.list} ${task.kind} ${separator.list} attempt ${context.attempt} ${separator.list} ${task.title}`,
     `Dependencies: ${list([...task.dependencies].sort())}`,
-    `Read: ${list(task.readScope)} · Write: ${list(task.writeScope)}`,
+    `Read: ${list(task.readScope)} ${separator.list} Write: ${list(task.writeScope)}`,
     ...(context.resultSummary ? [`Result: ${context.resultSummary}`] : []),
     ...(context.previousFailure ? [`Failure: ${context.previousFailure}`] : []),
     ...context.previousChecks.map((check) => {
       const evidence = check.exitCode === 0 ? check.stdout : check.stderr || check.stdout;
-      return `Check ${check.id} · exit ${check.exitCode}${evidence ? ` · ${evidence}` : ""}`;
+      return `Check ${check.id} ${separator.list} exit ${check.exitCode}${evidence ? ` ${separator.list} ${evidence}` : ""}`;
     }),
     ...context.dependencyResults.map((result) => `Result ${result.taskId}: ${result.summary}`),
     ...context.guidance.map((guidance) => `Guidance: ${guidance}`),
@@ -48,44 +49,44 @@ export function renderTaskContext(context: TaskContextOutput, limits: OutputLimi
   return compactLines(lines, {
     lineLimit: limits.statusLineLimit,
     lineTextLimit: limits.lineTextLimit,
-    overflow: (omitted) => `… ${omitted} more task details`,
+    overflow: (omitted) => moreItems(omitted, "task details"),
   }).join("\n");
 }
 
 function renderGraph(snapshot: SnapshotOutput, limits: OutputLimits): string {
-  if (snapshot.tasks.length === 0) return "No tasks";
+  if (snapshot.tasks.length === 0) return emptyState.noTasks;
   return compactLines(snapshot.tasks.map((task) => {
     const details = [
-      `${task.id} ← ${list([...task.dependencies].sort(), "root")}`,
+      `${task.id} ${separator.depends} ${list([...task.dependencies].sort(), "root")}`,
       task.state,
       ...(task.blockedBy.length > 0 ? [`blocked: ${[...task.blockedBy].sort().join(", ")}`] : []),
       `r: ${list([...task.readScope].sort())}`,
       `w: ${list([...task.writeScope].sort())}`,
       ...taskDetails(task),
     ];
-    return details.join(" · ");
+    return details.join(` ${separator.list} `);
   }), {
     lineLimit: limits.listLineLimit,
     lineTextLimit: limits.lineTextLimit,
-    overflow: (omitted) => `… ${omitted} more tasks`,
+    overflow: (omitted) => moreItems(omitted, "tasks"),
   }).join("\n");
 }
 
 function renderWorkers(snapshot: SnapshotOutput, limits: OutputLimits): string {
-  if (snapshot.activeWorkers.length === 0) return "No active workers";
+  if (snapshot.activeWorkers.length === 0) return emptyState.noActiveWorkers;
   return compactLines(
-    snapshot.activeWorkers.map((worker) => `${worker.id} · ${worker.taskId}`),
+    snapshot.activeWorkers.map((worker) => `${worker.id} ${separator.list} ${worker.taskId}`),
     {
       lineLimit: limits.listLineLimit,
       lineTextLimit: limits.lineTextLimit,
-      overflow: (omitted) => `… ${omitted} more workers`,
+      overflow: (omitted) => moreItems(omitted, "workers"),
     },
   ).join("\n");
 }
 
 function renderAttention(snapshot: SnapshotOutput, limits: OutputLimits): string {
   const openIds = snapshot.openAttentionIds;
-  if (openIds.length === 0) return "OK";
+  if (openIds.length === 0) return emptyState.attentionOk;
   const attentionById = new Map(snapshot.attention.map((item) => [item.id, item]));
   const items = openIds.map((id) => {
     const item = attentionById.get(id);
@@ -94,7 +95,7 @@ function renderAttention(snapshot: SnapshotOutput, limits: OutputLimits): string
       `${item.kind} ${item.id}`,
       item.taskId,
       item.summary,
-    ].filter(Boolean).join(" · ");
+    ].filter(Boolean).join(` ${separator.list} `);
   });
   const next = `Next: /loop resolve ${snapshot.runId} ${openIds[0]} <resolution>`;
   if (limits.attentionLineLimit <= 1) {
@@ -108,7 +109,7 @@ function renderAttention(snapshot: SnapshotOutput, limits: OutputLimits): string
   const compacted = compactLines(items, {
     lineLimit: availableItems,
     lineTextLimit: limits.lineTextLimit,
-    overflow: (omitted) => `… ${omitted} more attention items`,
+    overflow: (omitted) => moreItems(omitted, "attention items"),
   });
   return compactLines([
     `Attention: ${openIds.length} open`,
@@ -117,7 +118,7 @@ function renderAttention(snapshot: SnapshotOutput, limits: OutputLimits): string
   ], {
     lineLimit: limits.attentionLineLimit,
     lineTextLimit: limits.lineTextLimit,
-    overflow: (omitted) => `… ${omitted} more attention lines`,
+    overflow: (omitted) => moreItems(omitted, "attention lines"),
   }).join("\n");
 }
 
@@ -127,7 +128,7 @@ function renderStatus(snapshot: SnapshotOutput, limits: OutputLimits, options: S
     return taskPriority(left.state) - taskPriority(right.state);
   }).map((task) => {
     const details = [...(task.title !== task.id ? [task.title] : []), ...taskDetails(task)];
-    return `${task.id} · ${task.state}${details.length > 0 ? ` · ${details.join(" · ")}` : ""}`;
+    return `${task.id} ${separator.list} ${task.state}${details.length > 0 ? ` ${separator.list} ${details.join(` ${separator.list} `)}` : ""}`;
   });
   const taskLineLimit = Math.min(
     limits.findingsLineLimit,
@@ -136,17 +137,17 @@ function renderStatus(snapshot: SnapshotOutput, limits: OutputLimits, options: S
   const visibleTasks = taskLineLimit === 0 ? [] : compactLines(taskLines, {
     lineLimit: taskLineLimit,
     lineTextLimit: limits.lineTextLimit,
-    overflow: (omitted) => `… ${omitted} more task findings`,
+    overflow: (omitted) => moreItems(omitted, "task findings"),
   });
   const status = compactLines([
     `Run ${snapshot.runId}`,
     `State: ${snapshot.state}`,
-    `Tasks: ${done}/${snapshot.tasks.length} · Workers: ${snapshot.activeWorkers.length} · Attention: ${snapshot.openAttentionIds.length}`,
+    `Tasks: ${done}/${snapshot.tasks.length} ${separator.list} Workers: ${snapshot.activeWorkers.length} ${separator.list} Attention: ${snapshot.openAttentionIds.length}`,
     ...visibleTasks,
   ], {
     lineLimit: limits.statusLineLimit,
     lineTextLimit: limits.lineTextLimit,
-    overflow: (omitted) => `… ${omitted} more status lines`,
+    overflow: (omitted) => moreItems(omitted, "status lines"),
   }).join("\n");
   const feed = renderActivityFeed(snapshot, limits, options);
   return feed ? `${status}\n${feed}` : status;
@@ -167,13 +168,13 @@ function renderActivityFeed(snapshot: SnapshotOutput, limits: OutputLimits, opti
     const recent = task.activities.slice(-budget);
     return [
       `${task.id} activity:`,
-      ...recent.map((line) => `  │ ${singleLine(line, limits.lineTextLimit)}`),
+      ...recent.map((line) => `  ${separator.activity} ${singleLine(line, limits.lineTextLimit)}`),
     ];
   });
   const visible = compactItems(blocks, limits.findingsLineLimit);
   const lines = visible.items.flat();
   if (visible.omitted > 0) {
-    lines.push(`… ${visible.omitted} more workers with activity`);
+    lines.push(moreItems(visible.omitted, "workers with activity"));
   }
   return lines.join("\n");
 }
@@ -202,6 +203,6 @@ function taskPriority(state: SnapshotOutput["tasks"][number]["state"]): number {
   }[state];
 }
 
-function list(values: string[], empty = "-"): string {
+function list(values: string[], empty: string = emptyState.list): string {
   return values.length > 0 ? values.join(", ") : empty;
 }

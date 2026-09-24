@@ -12,6 +12,7 @@ import {
   type LoopConfig,
 } from "@loop/orchestrator/config";
 import { compactLines, renderSnapshot, renderTaskContext, type OutputLimits, type SnapshotRenderOptions } from "@loop/presentation";
+import { cleanupBullet, emptyState, moreItems, separator, statusGlyph } from "@loop/presentation";
 import { observeRun, spawnOwner } from "./dispatcher";
 import type { BenchmarkReport } from "@loop/orchestrator";
 import type { ProviderRegistry } from "@loop/providers";
@@ -127,7 +128,7 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
       await protocol.rustra.ready();
       const runs = await protocol.listRuns({ databasePath: config.databasePath });
       if (parsed.json) print(runs, true, io);
-      else io.stdout(compactLines(runs.map(run => `${run.runId} · ${run.state}`), { lineLimit: config.output.listLineLimit, lineTextLimit: config.output.lineTextLimit, overflow: n => `… ${n} more runs` }).join("\n") + "\n");
+      else io.stdout(compactLines(runs.map(run => `${run.runId} ${separator.list} ${run.state}`), { lineLimit: config.output.listLineLimit, lineTextLimit: config.output.lineTextLimit, overflow: n => moreItems(n, "runs") }).join("\n") + "\n");
       return 0;
     }
     if (["status", "graph", "workers", "attention", "cancel", "pause", "resume", "steer", "resolve", "reconcile", "task", "watch"].includes(parsed.command)) {
@@ -139,7 +140,7 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
         if (parsed.command === "status" || parsed.command === "watch") {
           const runs = await protocol.listRuns({ databasePath: config.databasePath });
           if (runs.length === 0) {
-            io.stdout("No runs\n");
+            io.stdout(`${emptyState.noRuns}\n`);
             return 0;
           }
           runId = runs[0].runId;
@@ -543,19 +544,19 @@ export function formatCleanupSnapshot(
     `Skipped: ${snapshot.skippedArtifacts.length}`,
   ];
   if (herdrRemoved > 0) {
-    lines.push(...snapshot.removedHerdrWorkspaces!.map(w => `- Workspace ${w} (leaked)`));
+    lines.push(...snapshot.removedHerdrWorkspaces!.map(w => `${cleanupBullet} Workspace ${w} (leaked)`));
   }
   if (snapshot.removedArtifacts.length > 0) {
-    lines.push(...snapshot.removedArtifacts.map(a => `- ${a}`));
+    lines.push(...snapshot.removedArtifacts.map(a => `${cleanupBullet} ${a}`));
   }
   if (snapshot.skippedArtifacts.length > 0) {
-    lines.push(...snapshot.skippedArtifacts.map(a => `! ${a.artifact} (${a.reason})`));
+    lines.push(...snapshot.skippedArtifacts.map(a => `${statusGlyph.warning} ${a.artifact} (${a.reason})`));
   }
 
   return `${compactLines(lines, {
     lineLimit: limits.statusLineLimit,
     lineTextLimit: limits.lineTextLimit,
-    overflow: (omitted) => `… ${omitted} more lines`,
+    overflow: (omitted) => moreItems(omitted, "lines"),
   }).join("\n")}\n`;
 }
 
@@ -564,30 +565,30 @@ export function formatBenchmarkReport(report: BenchmarkReport, limits: OutputLim
   const lines = [
     `Benchmark: ${benchmark.name}`,
     `Intent: ${benchmark.intent}`,
-    `Profiles: ${benchmark.profiles.join(", ")} · ${benchmark.iterations} iteration(s) each`,
+    `Profiles: ${benchmark.profiles.join(", ")} ${separator.list} ${benchmark.iterations} iteration(s) each`,
   ];
   for (const run of report.runs) {
     const created = run.summary.tasks_created ?? 0;
     const completed = run.summary.tasks_completed ?? 0;
     const attempts = (run.summary.verification_passes ?? 0) + (run.summary.verification_failures ?? 0);
     lines.push(
-      `${run.status === "completed" ? "✓" : "!"} ${run.profile} iter ${run.iteration} · ${run.runId}` +
-        ` · ${run.status} · tasks ${completed}/${created} · attempts ${attempts}` +
-        ` · retries ${run.summary.verification_failures ?? 0} · attention ${run.summary.attention_created ?? 0}`,
+      `${run.status === "completed" ? statusGlyph.success : statusGlyph.warning} ${run.profile} iter ${run.iteration} ${separator.list} ${run.runId}` +
+        ` ${separator.list} ${run.status} ${separator.list} tasks ${completed}/${created} ${separator.list} attempts ${attempts}` +
+        ` ${separator.list} retries ${run.summary.verification_failures ?? 0} ${separator.list} attention ${run.summary.attention_created ?? 0}`,
     );
   }
   lines.push("Ranking (total score, highest first)");
   report.comparison.rankings.forEach((ranking, index) => {
     const total = ranking.score.reliability + ranking.score.autonomy + ranking.score.first_pass;
     lines.push(
-      `${index + 1}. ${ranking.label} · total ${total}` +
-        ` (reliability ${ranking.score.reliability} · autonomy ${ranking.score.autonomy} · first-pass ${ranking.score.first_pass})`,
+      `${index + 1}. ${ranking.label} ${separator.list} total ${total}` +
+        ` (reliability ${ranking.score.reliability} ${separator.list} autonomy ${ranking.score.autonomy} ${separator.list} first-pass ${ranking.score.first_pass})`,
     );
   });
   return `${compactLines(lines, {
     lineLimit: limits.statusLineLimit,
     lineTextLimit: limits.lineTextLimit,
-    overflow: (omitted) => `… ${omitted} more report lines (use --json for the full report)`,
+    overflow: (omitted) => moreItems(omitted, "report lines", "use --json for the full report"),
   }).join("\n")}\n`;
 }
 
@@ -595,11 +596,11 @@ export function formatModelList(
   models: Array<{ computeClass: string; id: string }>,
   limits: OutputLimits,
 ): string {
-  if (models.length === 0) return "No models configured\n";
-  return `${compactLines(models.map((model) => `${model.computeClass} · ${model.id}`), {
+  if (models.length === 0) return `${emptyState.noModels}\n`;
+  return `${compactLines(models.map((model) => `${model.computeClass} ${separator.list} ${model.id}`), {
     lineLimit: limits.listLineLimit,
     lineTextLimit: limits.lineTextLimit,
-    overflow: (omitted) => `… ${omitted} more models`,
+    overflow: (omitted) => moreItems(omitted, "models"),
   }).join("\n")}\n`;
 }
 
@@ -614,13 +615,13 @@ export function formatDoctorChecks(
     "Loop doctor",
     ...ordered.map((check) => {
       const auth = check.auth ? `; auth ${check.auth}` : "";
-      return `${check.ok ? "✓" : "!"} ${check.name}: ${check.detail}${auth}`;
+      return `${check.ok ? statusGlyph.success : statusGlyph.warning} ${check.name}: ${check.detail}${auth}`;
     }),
   ];
   return `${compactLines(lines, {
     lineLimit: limits.listLineLimit,
     lineTextLimit: limits.lineTextLimit,
-    overflow: (omitted) => `… ${omitted} more checks (${failed} failed, ${passed} passed)`,
+    overflow: (omitted) => moreItems(omitted, "checks", `${failed} failed, ${passed} passed`),
   }).join("\n")}\n`;
 }
 

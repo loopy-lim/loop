@@ -1,3 +1,5 @@
+import { ellipsis } from "./tokens";
+
 export interface OutputLimits {
   statusLineLimit: number;
   attentionLineLimit: number;
@@ -23,8 +25,8 @@ export function singleLine(value: string, limit: number): string {
   const normalized = value.replace(/\r\n?|\n/g, " ");
   const graphemes = [...graphemeSegmenter.segment(normalized)].map((part) => part.segment);
   if (graphemes.length <= limit) return normalized;
-  if (limit === 1) return "…";
-  return `${graphemes.slice(0, limit - 1).join("")}…`;
+  if (limit === 1) return ellipsis;
+  return `${graphemes.slice(0, limit - 1).join("")}${ellipsis}`;
 }
 
 export function compactLines(lines: string[], options: CompactLinesOptions): string[] {
