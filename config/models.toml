@@ -87,6 +87,36 @@ capabilities = { coding = 3, reasoning = 3, tools = 2, vision = 0, long_context 
 latency = 1
 cost_weight = 2
 
+# zai strong lane (2026-09-25): keeps compute escalation inside the zai
+# volume classes so verification-failure escalation does not drain the
+# openai-codex quota. Same id as the balanced entry with an explicit higher
+# thinking pattern, mirroring the flashx balanced/high split above.
+[[models]]
+id = "zai/glm-5.3-flash:high"
+provider = "pi"
+compute_class = "strong"
+capabilities = { coding = 4, reasoning = 4, tools = 2, vision = 0, long_context = 5 }
+latency = 1
+cost_weight = 1
+
+# Quota fallback for volume workers stays inside the requested compute class.
+# Explicit thinking patterns keep these profiles distinct from the balanced lane.
+[[models]]
+id = "openai-codex/gpt-6-luna:off"
+provider = "pi"
+compute_class = "tiny"
+capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 0, long_context = 4 }
+latency = 2
+cost_weight = 2
+
+[[models]]
+id = "openai-codex/gpt-6-luna:low"
+provider = "pi"
+compute_class = "fast"
+capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 0, long_context = 4 }
+latency = 2
+cost_weight = 2
+
 # gpt-6 luna/sol primary lane: pi's openai-codex provider with ChatGPT native
 # login (smoke evidence OK-LUNA-PI / OK-SOL-PI, pi 0.87.1). Both ids ship in
 # pi 0.87.1's built-in catalog, so per the 2026-09-22 model-environment

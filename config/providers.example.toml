@@ -3,12 +3,13 @@
 
 [lead]
 command = "pi"
-provider = "zai"
-model = "glm-5.3-flashx"
+provider = "openai-codex"
+model = "gpt-6-sol"
 
-# Custom model registration (2026-09-22 decision): this id and every worker
-# pattern in models.toml are resolved against pi's built-in provider catalog.
-# Loop's adapters sync the active profiles from models.toml into a pi models.json
+# Lead uses pi's built-in openai-codex catalog entry and native ChatGPT login.
+# Custom worker model registration (2026-09-22 decision): every worker pattern
+# in models.toml is resolved against pi's built-in provider catalog. Loop's
+# adapters sync the active profiles from models.toml into a pi models.json
 # fragment (upsert by id; built-in entries are kept), so ids missing from the
 # catalog — like glm-5.3-flashx — spawn without the
 # "Warning: Model ... not found ... Using custom model id." fallback and carry
