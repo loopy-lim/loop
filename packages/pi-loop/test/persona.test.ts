@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { TaskSpecInput } from "@loop/protocol";
+import { derivePersonaVocabulary, KIND_DEFAULT_PERSONAS } from "@loop/orchestrator/persona";
 
 import {
   registerLoopExtension,
@@ -25,6 +26,10 @@ const limits = {
 
 const VALID_IDS = "implementer, reviewer, debugger, architect, designer";
 
+// Disk-independent default-install fixture: the compile-time persona floor
+// with no registry (matches the derivation for an uninstalled personas dir).
+const settings = { limits, vocabulary: derivePersonaVocabulary({}) };
+
 test("loop_run forwards a per-task persona into the submitted plan", async () => {
   const host = fakePi();
   const submitted: TaskSpecInput[][] = [];
@@ -34,7 +39,7 @@ test("loop_run forwards a per-task persona into the submitted plan", async () =>
       return completed(input.tasks.length);
     },
   });
-  registerLoopExtension(host.api, backend, undefined, limits);
+  registerLoopExtension(host.api, backend, undefined, settings);
 
   await host.tools.get("loop_run")!.execute(
     "tool-persona",
@@ -66,7 +71,7 @@ test("loop_run rejects unknown persona ids at submission and lists the valid ids
       return completed(1);
     },
   });
-  registerLoopExtension(host.api, backend, undefined, limits);
+  registerLoopExtension(host.api, backend, undefined, settings);
 
   const pending = host.tools.get("loop_run")!.execute(
     "tool-persona-invalid",
@@ -97,7 +102,7 @@ test("absent, blank, and unpadded persona values forward as null or the trimmed 
       return completed(input.tasks.length);
     },
   });
-  registerLoopExtension(host.api, backend, undefined, limits);
+  registerLoopExtension(host.api, backend, undefined, settings);
 
   await host.tools.get("loop_run")!.execute(
     "tool-persona-absent",
@@ -126,7 +131,7 @@ test("absent, blank, and unpadded persona values forward as null or the trimmed 
 
 test("loop_run tool description documents the optional persona field and kind defaults", () => {
   const host = fakePi();
-  registerLoopExtension(host.api, fakeBackend(), undefined, limits);
+  registerLoopExtension(host.api, fakeBackend(), undefined, settings);
 
   const tool = host.tools.get("loop_run")!;
   expect(tool.description).toContain("optional persona id");
@@ -138,6 +143,78 @@ test("loop_run tool description documents the optional persona field and kind de
   expect(tasksDescription).toContain('"persona"');
   expect(tasksDescription).toContain("unknown ids are rejected at submission");
   expect(tasksDescription).toContain("research→debugger");
+});
+
+test("loop_run validation and prose reflect a configured persona vocabulary", async () => {
+  // A user adds config/personas/pirate.md and overrides decision→designer:
+  // the registry addition joins the valid ids (registry drift fix) and the
+  // kind-default override flows into both the tool description and the
+  // tasksJson prompt prose — statically derived prose would not track this.
+  const vocabulary = derivePersonaVocabulary(
+    {
+      implementer: "IMPL",
+      reviewer: "REV",
+      debugger: "DBG",
+      architect: "ARCH",
+      designer: "DES",
+      pirate: "YARR",
+    },
+    { ...KIND_DEFAULT_PERSONAS, decision: "designer" },
+  );
+  const host = fakePi();
+  const submitted: TaskSpecInput[][] = [];
+  const backend = fakeBackend({
+    async run(input) {
+      submitted.push(input.tasks);
+      return completed(input.tasks.length);
+    },
+  });
+  registerLoopExtension(host.api, backend, undefined, { limits, vocabulary });
+
+  await host.tools.get("loop_run")!.execute(
+    "tool-persona-vocabulary",
+    {
+      intent: "Implement feature X",
+      runId: "run-persona-vocabulary",
+      tasksJson: JSON.stringify([
+        task("decision", "decision", [], ["docs/adr.md"], "pirate"),
+        task("implementation", "implementation", ["decision"], ["src/**"]),
+      ]),
+    },
+    new AbortController().signal,
+    undefined,
+    context(),
+  );
+  expect(submitted[0]?.map((value) => value.persona)).toEqual(["pirate", null]);
+
+  const pending = host.tools.get("loop_run")!.execute(
+    "tool-persona-vocabulary-invalid",
+    {
+      intent: "Implement feature X",
+      runId: "run-persona-vocabulary-invalid",
+      tasksJson: JSON.stringify([
+        task("implementation", "implementation", [], ["src/**"], "wizard"),
+      ]),
+    },
+    new AbortController().signal,
+    undefined,
+    context(),
+  );
+  expect(pending).rejects.toThrow(
+    new RegExp(`Valid persona ids: implementer, reviewer, debugger, designer, architect, pirate`),
+  );
+  await pending.catch(() => {});
+
+  const tool = host.tools.get("loop_run")!;
+  expect(tool.description).toContain("decision→designer");
+  expect(tool.description).toContain("pirate");
+  // designer is now a kind default; pirate (registry-only) is the explicit-only remainder.
+  expect(tool.description).toContain("pirate is explicit-request only");
+  expect(tool.description).not.toContain("designer is explicit-request only");
+
+  const tasksDescription = tool.parameters.properties.tasksJson.description as string;
+  expect(tasksDescription).toContain("implementer | reviewer | debugger | designer | architect | pirate");
+  expect(tasksDescription).toContain("decision→designer");
 });
 
 test("runLoopPlan serializes persona into the SubmitPlanInput stdin payload", async () => {

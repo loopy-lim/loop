@@ -8,7 +8,7 @@ import { CompletionVerifier, NodeCompletionRunner } from "./completion";
 import { cleanupRun, type CleanupRunReport, type CleanupRunRequest } from "./cleanup";
 import type { WorkerVisibility } from "./config";
 import type { OrchestrationControl } from "./control";
-import type { PersonaRegistry } from "./persona";
+import type { PersonaKindDefaults, PersonaRegistry } from "./persona";
 import { executeTask, type TaskExecution } from "./task-execution";
 import { redact } from "./redact";
 
@@ -21,6 +21,7 @@ interface OrchestratorOptions {
   completionVerifier?: CompletionVerifier;
   herdr?: HerdrWorkerRuntime;
   personas?: PersonaRegistry;
+  personaKindDefaults?: PersonaKindDefaults;
   workerVisibility?: WorkerVisibility;
 }
 export interface RunRequest {
@@ -49,6 +50,7 @@ export class Orchestrator {
   readonly #completionVerifier: CompletionVerifier;
   readonly #herdr?: HerdrWorkerRuntime;
   readonly #personas: PersonaRegistry;
+  readonly #personaKindDefaults?: PersonaKindDefaults;
   readonly #workerVisibility: WorkerVisibility;
   constructor(options: OrchestratorOptions) {
     this.#control = options.control;
@@ -58,6 +60,7 @@ export class Orchestrator {
     this.#completionVerifier = options.completionVerifier ?? new CompletionVerifier(new NodeCompletionRunner());
     this.#herdr = options.herdr;
     this.#personas = options.personas ?? {};
+    this.#personaKindDefaults = options.personaKindDefaults;
     this.#workerVisibility = options.workerVisibility ?? "off";
   }
   cleanupRun(request: CleanupRunRequest): Promise<CleanupRunReport> {
@@ -105,6 +108,7 @@ export class Orchestrator {
       control: this.#control,
       verifier: this.#completionVerifier,
       personas: this.#personas,
+      personaKindDefaults: this.#personaKindDefaults,
       recordRawActivity: this.#workerVisibility === "off",
     };
     const active = new Map<string, TaskExecution>();

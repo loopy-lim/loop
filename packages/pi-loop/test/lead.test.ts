@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { SnapshotOutput, TaskContextOutput, TaskSpecInput } from "@loop/protocol";
+import { derivePersonaVocabulary } from "@loop/orchestrator/persona";
 
 import {
   registerLoopExtension,
@@ -19,10 +20,14 @@ const limits = {
   listLineLimit: 8,
   lineTextLimit: 160,
 };
+// Disk-independent fixture matching a default install: the compile-time
+// persona floor with no registry (the same derivation the default settings
+// path would produce for an uninstalled personas directory).
+const settings = { limits, vocabulary: derivePersonaVocabulary({}) };
 
 test("natural-language Pi turns receive the Loop Lead contract", async () => {
   const host = fakePi();
-  registerLoopExtension(host.api, fakeBackend(), undefined, limits);
+  registerLoopExtension(host.api, fakeBackend(), undefined, settings);
 
   const hook = host.hooks.get("before_agent_start")!;
   const result = await hook(
@@ -64,7 +69,7 @@ test("loop_run validates the DAG and delegates execution to Loop", async () => {
       };
     },
   });
-  registerLoopExtension(host.api, backend, undefined, limits);
+  registerLoopExtension(host.api, backend, undefined, settings);
 
   const tool = host.tools.get("loop_run")!;
   const result = await tool.execute(
@@ -99,6 +104,7 @@ test("Pi updates, notify, tool result, and commands share injected output limits
     attentionLineLimit: 3,
     listLineLimit: 3,
   };
+  const customSettings = { limits: customLimits, vocabulary: derivePersonaVocabulary({}) };
   const snapshot = {
     ...emptySnapshot("run-limited"),
     tasks: Array.from({ length: 6 }, (_, index) => ({
@@ -134,7 +140,7 @@ test("Pi updates, notify, tool result, and commands share injected output limits
       return Array.from({ length: 6 }, (_, index) => `fast · model-${index + 1}`);
     },
   });
-  registerLoopExtension(host.api, backend, undefined, customLimits);
+  registerLoopExtension(host.api, backend, undefined, customSettings);
   const piContext = context(notifications);
 
   const result = await host.tools.get("loop_run")!.execute(
@@ -187,7 +193,7 @@ test("loop control commands preserve free-form messages and render discovery and
       return [{ runId: "restart-me", state: "paused" }];
     },
   });
-  registerLoopExtension(host.api, backend, undefined, limits);
+  registerLoopExtension(host.api, backend, undefined, settings);
   const piContext = context(notifications);
   const command = host.commands.get("loop")!;
 
@@ -223,7 +229,7 @@ test("loop_run reports observer interruption as still running", async () => {
         finishedAt: {},
       };
     },
-  }), undefined, limits);
+  }), undefined, settings);
 
   const result = await host.tools.get("loop_run")!.execute(
     "tool-running",

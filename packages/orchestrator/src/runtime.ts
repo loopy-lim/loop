@@ -5,7 +5,7 @@ import type { ProviderRegistry } from "@loop/providers";
 import type { CompletionVerifier } from "./completion";
 import type { WorkerVisibility } from "./config";
 import type { OrchestrationControl } from "./control";
-import type { PersonaRegistry } from "./persona";
+import type { PersonaKindDefaults, PersonaRegistry } from "./persona";
 import { Orchestrator, type CleanupRunReport, type CleanupRunRequest, type RunSummary } from "./coordinator";
 
 export type ObservedWorkerState = "running" | "completed" | "lost" | "unknown";
@@ -23,6 +23,7 @@ export interface LoopRuntimeOptions {
   completionVerifier?: CompletionVerifier;
   herdr?: HerdrWorkerRuntime;
   personas?: PersonaRegistry;
+  personaKindDefaults?: PersonaKindDefaults;
   workerVisibility?: WorkerVisibility;
 }
 
@@ -50,6 +51,7 @@ export class LoopRuntime {
       completionVerifier: options.completionVerifier,
       herdr: options.herdr,
       personas: options.personas,
+      personaKindDefaults: options.personaKindDefaults,
       workerVisibility: options.workerVisibility,
     });
   }

@@ -6,9 +6,8 @@ import type { RunSummary } from "@loop/orchestrator";
 // Subpath import: the persona module is a leaf (no bridge dependency), so the
 // Node-targeted pi extension bundle stays free of Bun-only imports (bun:ffi).
 import {
-  EXPLICIT_ONLY_PERSONA_IDS,
-  KIND_DEFAULT_PERSONAS,
-  PERSONA_IDS,
+  derivePersonaVocabulary,
+  type PersonaVocabulary,
 } from "@loop/orchestrator/persona";
 import { loadLoopConfig } from "@loop/orchestrator/config";
 import { compactLines, type OutputLimits, singleLine } from "@loop/presentation";
@@ -23,12 +22,24 @@ import { validateDecomposition } from "./lead/decompose";
 import { decompositionPrompt, taskSpecInputDescription } from "./lead/prompts";
 
 /**
- * Persona vocabulary is single-sourced from the orchestrator's persona
- * registry (@loop/orchestrator persona module); this adapter only renders it.
+ * Lead-facing settings derived once per process from Loop configuration:
+ * output limits plus the persona vocabulary (valid ids, merged kind defaults,
+ * explicit-only ids). One loadLoopConfig call derives both together. The
+ * vocabulary is fixed for the session — like models/routing, config edits
+ * need a Lead restart to take effect.
  */
-const PERSONA_KIND_DEFAULTS_PROSE = `${Object.entries(KIND_DEFAULT_PERSONAS)
-  .map(([kind, id]) => `${kind}→${id}`)
-  .join(", ")}; ${EXPLICIT_ONLY_PERSONA_IDS.join(", ")} is explicit-request only`;
+export interface LeadSettings {
+  limits: OutputLimits;
+  vocabulary: PersonaVocabulary;
+}
+
+function loadLeadSettings(): LeadSettings {
+  const config = loadLoopConfig();
+  return {
+    limits: config.output,
+    vocabulary: derivePersonaVocabulary(config.personas, config.personaKindDefaults),
+  };
+}
 import {
   HerdrLifecycleReporter,
   registerHerdrLifecycle,
@@ -112,8 +123,9 @@ export function registerLoopExtension(
   pi: PiExtensionApi,
   backend: LoopLeadBackend = new DefaultLoopLeadBackend(),
   lifecycle: HerdrLifecycleSink = new HerdrLifecycleReporter(),
-  limits: OutputLimits = loadLoopConfig().output,
+  settings: LeadSettings = loadLeadSettings(),
 ): void {
+  const { limits, vocabulary } = settings;
   let currentRunId: string | undefined;
 
   registerHerdrLifecycle(pi, lifecycle);
@@ -125,18 +137,18 @@ export function registerLoopExtension(
       "Submit a dependency DAG to Loop after understanding an engineering request.",
       "Loop owns scheduling, worker dispatch, verification, retries, and durable state.",
       "Pass tasksJson as a JSON array using the generated Loop task fields.",
-      `Each task may carry an optional persona id (${PERSONA_IDS.join(" | ")}). Kind defaults: ${PERSONA_KIND_DEFAULTS_PROSE}.`,
+      `Each task may carry an optional persona id (${vocabulary.ids.join(" | ")}). Kind defaults: ${personaKindDefaultsProse(vocabulary)}.`,
     ].join(" "),
     parameters: Type.Object({
       intent: Type.String({ description: "The user's complete engineering intent" }),
       tasksJson: Type.String({
-        description: taskSpecInputDescription(),
+        description: taskSpecInputDescription(vocabulary),
       }),
       runId: Type.Optional(Type.String({ description: "Stable run id; omit to generate one" })),
     }),
     async execute(_toolCallId, params, signal, onUpdate, context) {
       const runId = params.runId?.trim() || `loop-${randomUUID()}`;
-      const tasks = normalizePersonas(parseTasks(params.tasksJson));
+      const tasks = normalizePersonas(parseTasks(params.tasksJson), vocabulary);
       currentRunId = runId;
       onUpdate?.(result([
         singleLine(`Run ${runId}`, limits.lineTextLimit),
@@ -229,7 +241,7 @@ export function registerLoopExtension(
   });
 
   pi.on("before_agent_start", (event) => ({
-    systemPrompt: `${event.systemPrompt}\n\n${leadInstructions(event.prompt)}`,
+    systemPrompt: `${event.systemPrompt}\n\n${leadInstructions(event.prompt, vocabulary)}`,
   }));
 }
 
@@ -470,28 +482,42 @@ function parseTasks(value: string): TaskSpecInput[] {
  * Worker persona contract: unknown ids are rejected deterministically at
  * submission time (never silently diverge from the orchestrator's runtime
  * fallback), and blank/absent values forward as null so the orchestrator
- * applies its kind-based default.
+ * applies its kind-based default. The valid id set comes from the derived
+ * vocabulary — registry additions and kind-default overrides are honored
+ * without code changes.
  */
-function normalizePersonas(tasks: TaskSpecInput[]): TaskSpecInput[] {
+function normalizePersonas(tasks: TaskSpecInput[], vocabulary: PersonaVocabulary): TaskSpecInput[] {
+  const ids = [...vocabulary.ids];
   return tasks.map((task) => {
     const persona = task.persona?.trim();
-    if (persona && !PERSONA_IDS.includes(persona)) {
+    if (persona && !ids.includes(persona)) {
       throw new Error(
-        `unknown persona '${persona}' in task ${task.id}. Valid persona ids: ${PERSONA_IDS.join(", ")}`,
+        `unknown persona '${persona}' in task ${task.id}. Valid persona ids: ${ids.join(", ")}`,
       );
     }
     return { ...task, persona: persona || null };
   });
 }
 
-function leadInstructions(intent: string): string {
+/** kind→persona pairs plus the explicit-only tail, rendered from the derived vocabulary. */
+function personaKindDefaultsProse(vocabulary: PersonaVocabulary): string {
+  const pairs = Object.entries(vocabulary.kindDefaults)
+    .map(([kind, id]) => `${kind}→${id}`)
+    .join(", ");
+  const explicit = vocabulary.explicitOnly.length
+    ? `; ${vocabulary.explicitOnly.join(", ")} is explicit-request only`
+    : "";
+  return `${pairs}${explicit}`;
+}
+
+function leadInstructions(intent: string, vocabulary: PersonaVocabulary): string {
   return [
     "You are the interactive Lead for Loop.",
     "For an engineering execution request, inspect only enough context to create a small dependency DAG, then call loop_run exactly once.",
     "Every task must declare dependencies, exact read and write ownership, requirements, preferredCompute, minimumCompute, maximumCompute, maxAttempts, and at least one machine-verifiable completionChecks entry.",
     "Requirements must name the result and evidence the worker returns; downstream tasks receive dependency result summaries rather than implicit context.",
     "Research tasks may run in parallel. Decision and integration tasks must be serialized. Do not claim completion yourself; Loop verifies it.",
-    decompositionPrompt(intent),
+    decompositionPrompt(intent, vocabulary),
   ].join("\n");
 }
 

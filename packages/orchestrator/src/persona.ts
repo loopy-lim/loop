@@ -12,12 +12,19 @@
 
 export type PersonaRegistry = Record<string, string>;
 
+/** kind → default persona id mapping (single source: docs/decisions/2026-09-24-persona-defaults-config.md C2). */
+export type PersonaKindDefaults = Record<string, string>;
+
 /**
- * kind → default persona id used when the task specifies no persona. Key
- * insertion order doubles as the canonical presentation order for PERSONA_IDS
- * derived below, so adapters never hand-order persona id lists.
+ * kind → default persona id used when the task specifies no persona.
+ *
+ * Compile-time fallback: `config/personas/defaults.toml` overrides these
+ * values per kind (merged in LoopConfig.personaKindDefaults), so an
+ * uninstalled or partial config file never leaves a kind without a floor.
+ * Key insertion order doubles as the canonical presentation order for the
+ * vocabulary derived below, so adapters never hand-order persona id lists.
  */
-export const KIND_DEFAULT_PERSONAS: Record<string, string> = {
+export const KIND_DEFAULT_PERSONAS: PersonaKindDefaults = {
   implementation: "implementer",
   verification: "reviewer",
   research: "debugger",
@@ -25,13 +32,56 @@ export const KIND_DEFAULT_PERSONAS: Record<string, string> = {
   integration: "architect",
 };
 
-/** Persona ids no task kind defaults to; honored only when requested explicitly. */
+/**
+ * Persona ids no task kind defaults to; honored only when requested
+ * explicitly. Floor for the not-installed case only — once a persona
+ * registry or a kind-defaults mapping exists, the explicit-only set is
+ * derived (see derivePersonaVocabulary) instead of read from here.
+ */
 export const EXPLICIT_ONLY_PERSONA_IDS: readonly string[] = ["designer"];
 
-/** Every persona id accepted at submission, derived from the defaults above. */
+/**
+ * Every persona id accepted at submission when the feature is not installed.
+ * Derived from the compile-time floor above; a configured registry derives
+ * its own vocabulary (see derivePersonaVocabulary).
+ */
 export const PERSONA_IDS: readonly string[] = [
   ...new Set([...Object.values(KIND_DEFAULT_PERSONAS), ...EXPLICIT_ONLY_PERSONA_IDS]),
 ];
+
+/**
+ * Submission-facing persona vocabulary derived from the registry and the
+ * merged kind defaults (docs/decisions/2026-09-24-persona-defaults-config.md
+ * C3/C4). The Lead validates TaskSpecInput.persona against `ids` and renders
+ * `kindDefaults`/`explicitOnly` into its prompt prose — always from a derived
+ * instance, never from module constants.
+ */
+export interface PersonaVocabulary {
+  /** Every persona id accepted at submission, in canonical presentation order. */
+  ids: readonly string[];
+  /** Merged kind → default persona id mapping (config overrides over the compile-time floor). */
+  kindDefaults: Readonly<PersonaKindDefaults>;
+  /** Ids no task kind defaults to; honored only when requested explicitly. */
+  explicitOnly: readonly string[];
+}
+
+/**
+ * Derive the persona vocabulary: valid ids are the registry keys plus the
+ * kind-default values (fixing registry drift — a new config/personas/pirate.md
+ * is accepted at submission without code changes); explicit-only is the
+ * complement of the default values. An empty registry means the feature is
+ * not installed — the compile-time floor set (PERSONA_IDS) is used so
+ * submission validation and prose never collapse.
+ */
+export function derivePersonaVocabulary(
+  registry: PersonaRegistry,
+  kindDefaults: PersonaKindDefaults = KIND_DEFAULT_PERSONAS,
+): PersonaVocabulary {
+  const defaultIds = Object.values(kindDefaults);
+  const base = Object.keys(registry).length > 0 ? Object.keys(registry) : PERSONA_IDS;
+  const explicitOnly = [...new Set(base)].filter((id) => !defaultIds.includes(id)).sort();
+  return { ids: [...new Set(defaultIds), ...explicitOnly], kindDefaults, explicitOnly };
+}
 
 export interface PersonaResolution {
   /** Id whose registry text was selected; undefined when the section is omitted. */
@@ -47,11 +97,18 @@ export interface ResolvePersonaInput {
   requested?: string | null;
   kind: string;
   registry: PersonaRegistry;
+  /** Merged kind defaults (config overrides over the compile-time floor). */
+  defaults?: PersonaKindDefaults;
 }
 
-export function resolvePersona({ requested, kind, registry }: ResolvePersonaInput): PersonaResolution {
+export function resolvePersona({
+  requested,
+  kind,
+  registry,
+  defaults = KIND_DEFAULT_PERSONAS,
+}: ResolvePersonaInput): PersonaResolution {
   const id = requested?.trim();
-  const defaultId = KIND_DEFAULT_PERSONAS[kind];
+  const defaultId = defaults[kind];
   const defaultInstructions = defaultId ? registry[defaultId] : undefined;
   if (id) {
     const explicit = registry[id];

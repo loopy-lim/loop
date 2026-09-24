@@ -1,6 +1,9 @@
-// Subpath import: the persona module is a leaf (see extension.ts), keeping the
-// prompt prose single-sourced with the orchestrator's persona registry.
-import { KIND_DEFAULT_PERSONAS, PERSONA_IDS } from "@loop/orchestrator/persona";
+// Subpath import: the persona module is a leaf (see extension.ts), keeping
+// the prompt prose single-sourced with the orchestrator's persona derivation.
+// The vocabulary arrives as a parameter derived once from configuration at
+// extension registration — statically precomputed prose from the module
+// constants is a regression this file must not reintroduce.
+import type { PersonaVocabulary } from "@loop/orchestrator/persona";
 import type { TaskSpecInput } from "@loop/protocol";
 
 export const TASK_SPEC_INPUT_EXAMPLE = {
@@ -24,31 +27,30 @@ export const TASK_SPEC_INPUT_EXAMPLE = {
   maxAttempts: 3,
 } satisfies TaskSpecInput;
 
-/** Persona prose derived from the orchestrator's persona registry so new
- * personas sync into the Lead prompt without editing this file. Order follows
- * PERSONA_IDS / KIND_DEFAULT_PERSONAS insertion order (the canonical
- * presentation order per the persona module contract). */
-const PERSONA_LIST_PROSE = PERSONA_IDS.join(" | ");
-const KIND_DEFAULTS_PROSE = Object.entries(KIND_DEFAULT_PERSONAS)
-  .map(([kind, id]) => `${kind}→${id}`)
-  .join(", ");
-
-export function taskSpecInputDescription(): string {
+/** Persona prose rendered from the caller's vocabulary so config changes
+ * (registry additions, kind-default overrides) flow into the Lead prompt
+ * without editing this file. Order follows the vocabulary's canonical
+ * presentation order (kind-default values first, remainder sorted). */
+export function taskSpecInputDescription(vocabulary: PersonaVocabulary): string {
+  const personaListProse = vocabulary.ids.join(" | ");
+  const kindDefaultsProse = Object.entries(vocabulary.kindDefaults)
+    .map(([kind, id]) => `${kind}→${id}`)
+    .join(", ");
   return [
     "JSON TaskSpecInput[] using the generated protocol fields.",
     "Dependencies must reference task ids; scopes must state exact read and write ownership; completion checks must be machine-verifiable.",
-    `Each task may carry an optional "persona" id (${PERSONA_LIST_PROSE}); unknown ids are rejected at submission with the valid id list. Kind defaults: ${KIND_DEFAULTS_PROSE}.`,
+    `Each task may carry an optional "persona" id (${personaListProse}); unknown ids are rejected at submission with the valid id list. Kind defaults: ${kindDefaultsProse}.`,
     `Typed example: ${JSON.stringify([TASK_SPEC_INPUT_EXAMPLE])}`,
   ].join(" ");
 }
 
-export function decompositionPrompt(intent: string): string {
+export function decompositionPrompt(intent: string, vocabulary: PersonaVocabulary): string {
   return [
     "Decompose this engineering intent into a small dependency DAG.",
     "Return typed tasks only. Facts may run in parallel; decisions and integration are serialized.",
     "Every task needs dependencies, exact read and write ownership, compute bounds, and machine-verifiable completion checks.",
     "Describe expected outputs in requirements so each worker returns a concise result summary with evidence; dependent tasks receive dependency result summaries.",
-    taskSpecInputDescription(),
+    taskSpecInputDescription(vocabulary),
     intent.trim(),
   ].join("\n");
 }

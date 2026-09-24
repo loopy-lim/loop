@@ -2,7 +2,7 @@ import type { TaskContextOutput } from "@loop/protocol";
 import type { AgentProvider, StartWorkerInput, WorkerHandle, WorkerResult } from "@loop/providers";
 import type { CompletionVerifier } from "./completion";
 import type { OrchestrationControl } from "./control";
-import { resolvePersona, type PersonaRegistry } from "./persona";
+import { resolvePersona, type PersonaKindDefaults, type PersonaRegistry } from "./persona";
 import { redact } from "./redact";
 
 export interface TaskExecution { done: Promise<void>; settled: boolean; error?: unknown; abort(): void }
@@ -15,6 +15,8 @@ interface Options {
   control: OrchestrationControl;
   verifier: CompletionVerifier;
   personas?: PersonaRegistry;
+  /** Merged kind-default overrides (config over the compile-time floor); omitted = floor. */
+  personaKindDefaults?: PersonaKindDefaults;
   /**
    * When worker visibility renders lines into the store via the mirror sink,
    * the raw 1 Hz recorder is suppressed so the history is not double-fed
@@ -28,10 +30,10 @@ export function executeTask(options: Options): TaskExecution {
   execution.done = run(options, controller.signal).catch(error => { execution.error = error; }).finally(() => { execution.settled = true; });
   return execution;
 }
-async function run({ input, context, workerId, provider, control, verifier, personas, recordRawActivity = true }: Options, signal: AbortSignal): Promise<void> {
+async function run({ input, context, workerId, provider, control, verifier, personas, personaKindDefaults, recordRawActivity = true }: Options, signal: AbortSignal): Promise<void> {
   const taskId = context.task.id;
   const workerInput = { ...input, taskId, workerId };
-  const persona = resolvePersona({ requested: context.task.persona, kind: context.task.kind, registry: personas ?? {} });
+  const persona = resolvePersona({ requested: context.task.persona, kind: context.task.kind, registry: personas ?? {}, defaults: personaKindDefaults });
   const withPersonaWarning = (summary: string) => (persona.warning ? `${persona.warning}\n${summary}` : summary);
   let handleId: string | undefined;
   let workerFinished = false;

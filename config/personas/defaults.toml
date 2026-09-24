@@ -1,0 +1,17 @@
+# kind → default persona id used when a task specifies no persona
+# (docs/decisions/2026-09-24-persona-defaults-config.md C1/C2).
+#
+# Keys are the closed TaskKind set (research, decision, implementation,
+# verification, integration). Values must name a persona id — ideally one
+# present in the registry (a config/personas/<id>.md file stem); an id the
+# registry cannot resolve degrades to a one-line warning, never a hard fail.
+# Kinds omitted here keep the compile-time fallback in
+# packages/orchestrator/src/persona.ts (KIND_DEFAULT_PERSONAS). This file's
+# values mirror that fallback exactly: a default install behaves identically
+# with or without it, and an equality test alarms on drift between the two.
+[kind_defaults]
+implementation = "implementer"
+verification = "reviewer"
+research = "debugger"
+decision = "architect"
+integration = "architect"

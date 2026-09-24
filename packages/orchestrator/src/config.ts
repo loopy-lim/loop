@@ -2,10 +2,10 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import type { ComputeClass } from "@loop/protocol";
+import type { ComputeClass, TaskKind } from "@loop/protocol";
 import { parse as parseToml } from "smol-toml";
 
-import type { PersonaRegistry } from "./persona";
+import { KIND_DEFAULT_PERSONAS, type PersonaKindDefaults, type PersonaRegistry } from "./persona";
 
 export interface ModelProfile {
   id: string;
@@ -62,6 +62,12 @@ export interface LoopConfig {
   models: ModelProfile[];
   providers: Record<string, ProviderConfig>;
   personas: PersonaRegistry;
+  /**
+   * kind → default persona id: `personas/defaults.toml` overrides merged over
+   * the compile-time floor (KIND_DEFAULT_PERSONAS) — key-by-key, never a full
+   * replacement, so a partial file cannot silently strip a kind's default.
+   */
+  personaKindDefaults: PersonaKindDefaults;
 }
 
 /** Live worker-activity surface (docs/decisions/2026-09-23-worker-visibility.md D5). */
@@ -185,6 +191,10 @@ export function loadLoopConfig(options: LoadLoopConfigOptions = {}): LoopConfig 
     models,
     providers: parseProviders(providersDocument),
     personas: loadPersonaRegistry(configDirectory),
+    personaKindDefaults: {
+      ...KIND_DEFAULT_PERSONAS,
+      ...loadPersonaKindDefaults(configDirectory),
+    },
   };
 }
 
@@ -209,6 +219,41 @@ export function loadPersonaRegistry(configDirectory: string): PersonaRegistry {
   return registry;
 }
 
+/**
+ * kind → default persona id overrides from `personas/defaults.toml`
+ * (docs/decisions/2026-09-24-persona-defaults-config.md C1–C3). A missing
+ * file means no overrides — the feature is optional, same silence as a
+ * missing registry. Structure is strict at load time (keys must be the
+ * closed TaskKind set; values non-empty strings) so operator typos fail
+ * fast; whether a value names a registered persona stays advisory at
+ * runtime (D3 — resolvePersona warns, never hard-fails).
+ */
+export function loadPersonaKindDefaults(configDirectory: string): PersonaKindDefaults {
+  const path = join(configDirectory, "personas", "defaults.toml");
+  if (!existsSync(path)) return {};
+  let document: Record<string, unknown>;
+  try {
+    document = record(parseToml(readFileSync(path, "utf8")), path);
+  } catch (error) {
+    if (error instanceof ConfigError) throw error;
+    throw new ConfigError("config.parse_failed", `failed to parse ${path}: ${String(error)}`);
+  }
+  const table = document.kind_defaults === undefined
+    ? {}
+    : record(document.kind_defaults, "personas.defaults.kind_defaults");
+  const defaults: PersonaKindDefaults = {};
+  for (const [kind, value] of Object.entries(table)) {
+    if (!taskKinds.has(kind as TaskKind)) {
+      throw new ConfigError(
+        "config.unknown_task_kind",
+        `unknown task kind at personas.defaults.kind_defaults.${kind}`,
+      );
+    }
+    defaults[kind] = text(value, `personas.defaults.kind_defaults.${kind}`);
+  }
+  return defaults;
+}
+
 const computeClasses = new Set<ComputeClass>([
   "deterministic",
   "typed_decision",
@@ -217,6 +262,20 @@ const computeClasses = new Set<ComputeClass>([
   "balanced",
   "strong",
   "frontier",
+]);
+
+/**
+ * Closed TaskKind set — the generated protocol exports the union type, not a
+ * runtime set, so config.ts keeps this validation table exactly like
+ * computeClasses (a TS-side check of a Rust bridge enum, not a hand-written
+ * copy of a domain type).
+ */
+const taskKinds = new Set<TaskKind>([
+  "research",
+  "decision",
+  "implementation",
+  "verification",
+  "integration",
 ]);
 
 function readToml(path: string): Record<string, unknown> {

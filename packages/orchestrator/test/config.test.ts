@@ -1,10 +1,16 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { ConfigError, loadLoopConfig, resolveConfigDirectory } from "../src/config";
+import {
+  ConfigError,
+  loadLoopConfig,
+  loadPersonaKindDefaults,
+  resolveConfigDirectory,
+} from "../src/config";
 import { ModelRegistry } from "../src/model-registry";
+import { KIND_DEFAULT_PERSONAS } from "../src/persona";
 
 const root = resolve(import.meta.dir, "../../..");
 
@@ -188,6 +194,63 @@ test.each([
   const directory = configurationDirectory(`${policy(2, 1).split("[output]")[0]}[output]\n${output.join("\n")}\n`);
 
   expect(() => loadLoopConfig({ configDirectory: directory })).toThrow(/positive integer/);
+});
+
+test("persona kind defaults stay at the compile-time floor without the optional file", () => {
+  const directory = configurationDirectory(policy(2, 1));
+  expect(loadPersonaKindDefaults(directory)).toEqual({});
+  expect(loadLoopConfig({ configDirectory: directory }).personaKindDefaults).toEqual(
+    KIND_DEFAULT_PERSONAS,
+  );
+});
+
+test("persona kind defaults merge per key over the compile-time floor", () => {
+  const directory = configurationDirectory(policy(2, 1));
+  mkdirSync(join(directory, "personas"), { recursive: true });
+  writeFileSync(join(directory, "personas", "defaults.toml"), '[kind_defaults]\ndecision = "designer"\n');
+
+  expect(loadPersonaKindDefaults(directory)).toEqual({ decision: "designer" });
+  expect(loadLoopConfig({ configDirectory: directory }).personaKindDefaults).toEqual({
+    ...KIND_DEFAULT_PERSONAS,
+    decision: "designer",
+  });
+});
+
+test("a defaults.toml without a kind_defaults table yields no overrides", () => {
+  const directory = configurationDirectory(policy(2, 1));
+  mkdirSync(join(directory, "personas"), { recursive: true });
+  writeFileSync(join(directory, "personas", "defaults.toml"), "# intentional\n");
+
+  expect(loadPersonaKindDefaults(directory)).toEqual({});
+});
+
+test("rejects unknown task kinds in personas/defaults.toml with a stable error code", () => {
+  const directory = configurationDirectory(policy(2, 1));
+  mkdirSync(join(directory, "personas"), { recursive: true });
+  writeFileSync(join(directory, "personas", "defaults.toml"), '[kind_defaults]\nplanning = "architect"\n');
+
+  try {
+    loadLoopConfig({ configDirectory: directory });
+    throw new Error("expected configuration loading to fail");
+  } catch (error) {
+    expect(error).toBeInstanceOf(ConfigError);
+    expect((error as ConfigError).code).toBe("config.unknown_task_kind");
+    expect((error as ConfigError).message).toContain("unknown task kind");
+  }
+});
+
+test("rejects invalid persona kind default values", () => {
+  const directory = configurationDirectory(policy(2, 1));
+  mkdirSync(join(directory, "personas"), { recursive: true });
+  writeFileSync(join(directory, "personas", "defaults.toml"), '[kind_defaults]\ndecision = ""\n');
+
+  expect(() => loadPersonaKindDefaults(directory)).toThrow(/non-empty string/);
+});
+
+test("repository personas/defaults.toml mirrors the compile-time floor (drift alarm)", () => {
+  // Either side drifting (file or constant) fails this equality: a default
+  // install must behave identically with or without the file.
+  expect(loadPersonaKindDefaults(join(root, "config"))).toEqual(KIND_DEFAULT_PERSONAS);
 });
 
 function models(options: { duplicate?: boolean; computeClass?: string }): string {

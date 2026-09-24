@@ -5,6 +5,7 @@ import * as protocol from "@loop/protocol";
 import { FakeProvider, MirroringProvider } from "@loop/providers";
 
 import type { LoopConfig } from "../src/config";
+import { KIND_DEFAULT_PERSONAS } from "../src/persona";
 import { buildProviderRegistry, StoreActivitySink, wrapForVisibility, type ActivityRecorder } from "../src/composition";
 
 beforeAll(() => protocol.rustra.ready());
@@ -77,6 +78,7 @@ function loopConfig(workerVisibility: LoopConfig["output"]["workerVisibility"]):
     }],
     providers: { pi: { command: "pi", enabled: true, mode: "interactive" } },
     personas: {},
+    personaKindDefaults: KIND_DEFAULT_PERSONAS,
   };
 }
 

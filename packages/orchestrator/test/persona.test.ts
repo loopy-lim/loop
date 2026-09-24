@@ -7,11 +7,11 @@ import * as protocol from "@loop/protocol";
 import type { TaskContextOutput, TaskSpecInput } from "@loop/protocol";
 import { FakeProvider, ProviderRegistry, type StartWorkerInput } from "@loop/providers";
 
-import { loadPersonaRegistry } from "../src/config";
+import { loadLoopConfig, loadPersonaKindDefaults, loadPersonaRegistry } from "../src/config";
 import { Orchestrator } from "../src/coordinator";
 import { CompletionVerifier } from "../src/completion";
 import type { OrchestrationControl } from "../src/control";
-import { KIND_DEFAULT_PERSONAS, resolvePersona } from "../src/persona";
+import { derivePersonaVocabulary, KIND_DEFAULT_PERSONAS, PERSONA_IDS, resolvePersona } from "../src/persona";
 import { executeTask } from "../src/task-execution";
 
 const registry = {
@@ -97,10 +97,95 @@ test("KIND_DEFAULT_PERSONAS covers every task kind", () => {
   ]);
 });
 
-test("designer persona is explicit-only and loadable from the repository registry", () => {
-  // No task kind defaults to designer: it is requested explicitly via TaskSpecInput.persona.
-  expect(Object.values(KIND_DEFAULT_PERSONAS)).not.toContain("designer");
+test("resolvePersona honors kind-default overrides and keeps the floor for unlisted kinds", () => {
+  const registryWithDesigner = { ...registry, designer: "DESIGNER TEXT" };
+  const defaults = { ...KIND_DEFAULT_PERSONAS, decision: "designer" };
+  expect(resolvePersona({ requested: null, kind: "decision", registry: registryWithDesigner, defaults })).toEqual({
+    id: "designer",
+    instructions: "DESIGNER TEXT",
+  });
+  // A partial override never strips the compile-time floor for other kinds.
+  expect(resolvePersona({ requested: null, kind: "research", registry, defaults })).toEqual({
+    id: "debugger",
+    instructions: "DEBUGGER TEXT",
+  });
+});
+
+test("resolvePersona warns — never fails — when an overridden default id is missing from the registry", () => {
+  const resolution = resolvePersona({
+    requested: null,
+    kind: "research",
+    registry,
+    defaults: { ...KIND_DEFAULT_PERSONAS, research: "pirate" },
+  });
+  expect(resolution.id).toBeUndefined();
+  expect(resolution.instructions).toBeUndefined();
+  expect(resolution.warning).toBe(
+    "[persona] default persona 'pirate' missing for kind=research; section omitted",
+  );
+});
+
+test("derivePersonaVocabulary floors to the constant set when personas are not installed", () => {
+  const vocabulary = derivePersonaVocabulary({});
+  expect(vocabulary.ids).toEqual([...PERSONA_IDS]);
+  expect(vocabulary.kindDefaults).toEqual(KIND_DEFAULT_PERSONAS);
+  expect(vocabulary.explicitOnly).toEqual(["designer"]);
+});
+
+test("derivePersonaVocabulary unions registry keys with the kind-default values", () => {
+  // Registry drift fix: a new config/personas/pirate.md joins the vocabulary.
+  const vocabulary = derivePersonaVocabulary({
+    implementer: "IMPL",
+    designer: "DESIGN",
+    pirate: "YARR",
+  });
+  expect(vocabulary.ids).toEqual([
+    "implementer",
+    "reviewer",
+    "debugger",
+    "architect",
+    "designer",
+    "pirate",
+  ]);
+  expect(vocabulary.explicitOnly).toEqual(["designer", "pirate"]);
+});
+
+test("derivePersonaVocabulary drops explicit-only status once a kind defaults to the id", () => {
+  const vocabulary = derivePersonaVocabulary(
+    { designer: "DESIGN" },
+    { ...KIND_DEFAULT_PERSONAS, decision: "designer" },
+  );
+  expect(vocabulary.explicitOnly).toEqual([]);
+  expect(vocabulary.ids).toContain("designer");
+});
+
+test("loadPersonaKindDefaults returns no overrides when the optional file is absent", () => {
+  expect(loadPersonaKindDefaults(mkdtempSync(join(tmpdir(), "loop-persona-defaults-none-")))).toEqual({});
+  const withDirectory = mkdtempSync(join(tmpdir(), "loop-persona-defaults-empty-"));
+  mkdirSync(join(withDirectory, "personas"), { recursive: true });
+  expect(loadPersonaKindDefaults(withDirectory)).toEqual({});
+});
+
+test("repository personas/defaults.toml mirrors the compile-time floor (drift alarm)", () => {
+  // Either side drifting (file or constant) fails this equality: a default
+  // install must behave identically with or without the file.
+  expect(loadPersonaKindDefaults(join(import.meta.dir, "..", "..", "..", "config"))).toEqual(
+    KIND_DEFAULT_PERSONAS,
+  );
+  const merged = loadLoopConfig({
+    configDirectory: join(import.meta.dir, "..", "..", "..", "config"),
+    databasePath: "/tmp/loop-persona-defaults-test.sqlite",
+  });
+  expect(merged.personaKindDefaults).toEqual(KIND_DEFAULT_PERSONAS);
+});
+
+test("designer persona is explicit-only by derivation and loadable from the repository registry", () => {
+  // No task kind defaults to designer (derived, not hardcoded): it is
+  // requested explicitly via TaskSpecInput.persona.
   const repository = loadPersonaRegistry(join(import.meta.dir, "..", "..", "..", "config"));
+  const vocabulary = derivePersonaVocabulary(repository, KIND_DEFAULT_PERSONAS);
+  expect(vocabulary.ids).toEqual([...PERSONA_IDS]);
+  expect(vocabulary.explicitOnly).toEqual(["designer"]);
   for (const id of ["architect", "debugger", "designer", "implementer", "reviewer"]) {
     expect(repository[id]).toBeTypeOf("string");
   }
@@ -238,4 +323,68 @@ test("orchestrator resolves kind-default personas for durable persona-less conte
   expect(received[0]?.personaInstructions).toBe("REVIEWER TEXT");
   const snapshot = await protocol.getSnapshot(input);
   expect(snapshot.tasks[0]?.resultSummary).toBe("defaulted complete");
+});
+
+test("executeTask resolves kind defaults through configured overrides", async () => {
+  const received: Array<StartWorkerInput & { personaInstructions?: string }> = [];
+  class CapturingProvider extends FakeProvider {
+    override async start(input: StartWorkerInput) {
+      received.push(input);
+      return super.start(input);
+    }
+  }
+  const provider = new CapturingProvider("fake", ["fast"], { delayMs: 1 });
+  const recorded: Array<{ success: boolean; summary: string }> = [];
+  const input = { databasePath: join(mkdtempSync(join(tmpdir(), "loop-persona-exec-")), "run.db"), runId: "run", executionOwner: "test" };
+  const run = (task: TaskSpecInput) =>
+    executeTask({
+      input,
+      context: contextFor(task),
+      workerId: `w-${task.id}`,
+      provider,
+      control: fakeControl(recorded),
+      verifier,
+      personas: { architect: "ARCHITECT TEXT", reviewer: "REVIEWER TEXT", designer: "DESIGNER TEXT" },
+      personaKindDefaults: { ...KIND_DEFAULT_PERSONAS, decision: "designer" },
+    }).done;
+
+  await run(spec("overridden", "decision"));
+  await run(spec("floored", "research"));
+
+  const prompts = new Map(received.map((worker) => [worker.taskId, worker]));
+  expect(prompts.get("overridden")?.personaInstructions).toBe("DESIGNER TEXT");
+  // The floor id for research (debugger) is not in this registry — advisory
+  // warning only (D3), prepended to the recorded result summary.
+  expect(prompts.get("floored")?.personaInstructions).toBeUndefined();
+  expect(recorded[1]?.summary).toBe(
+    "[persona] default persona 'debugger' missing for kind=research; section omitted\nfloored complete",
+  );
+});
+
+test("orchestrator applies configured personaKindDefaults end to end", async () => {
+  const received: Array<StartWorkerInput & { personaInstructions?: string }> = [];
+  class CapturingProvider extends FakeProvider {
+    override async start(input: StartWorkerInput) {
+      received.push(input);
+      return super.start(input);
+    }
+  }
+  const provider = new CapturingProvider("fake", ["fast"], { delayMs: 1 });
+  const directory = mkdtempSync(join(tmpdir(), "loop-persona-run-"));
+  const input = { databasePath: join(directory, "run.db"), runId: "run" };
+  const orchestrator = new Orchestrator({
+    control: protocol,
+    providers: new ProviderRegistry([provider]),
+    maxWorkers: 2,
+    completionVerifier: verifier,
+    personas: { architect: "ARCHITECT TEXT", reviewer: "REVIEWER TEXT" },
+    personaKindDefaults: { ...KIND_DEFAULT_PERSONAS, verification: "architect" },
+  });
+  const summary = await orchestrator.run({
+    ...input,
+    tasks: [spec("overridden", "verification")],
+    workingDirectory: directory,
+  });
+  expect(summary.status).toBe("completed");
+  expect(received[0]?.personaInstructions).toBe("ARCHITECT TEXT");
 });
