@@ -51,6 +51,26 @@ mod minimal_intervention_tests {
     }
 
     #[test]
+    fn timeout_retry_exhaustion_can_require_attention() {
+        let policy = FailurePolicy::new(
+            [RetryBudget::new(
+                FailureClass::Timeout,
+                RetryScope::Worker,
+                1,
+                BackoffPolicy::none(),
+                OnExhaustion::RequireAttention,
+            )],
+            OnExhaustion::FailTask,
+        );
+
+        assert_eq!(policy.evaluate(FailureClass::Timeout, 0), RetryOutcome::Retry {
+            scope: RetryScope::Worker,
+            delay_ms: 0,
+        });
+        assert_eq!(policy.evaluate(FailureClass::Timeout, 1), RetryOutcome::Exhausted(OnExhaustion::RequireAttention));
+    }
+
+    #[test]
     fn unbudgeted_failure_fails_closed() {
         let policy = FailurePolicy::default();
 

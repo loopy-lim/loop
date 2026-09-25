@@ -28,11 +28,14 @@ export interface ProcessRunner {
   ): RunningProcess;
 }
 
+export const DEFAULT_RUN_TIMEOUT_MS = 30 * 60 * 1000;
+
 export interface NodeProcessRunnerOptions {
   cancelGraceMs?: number;
   drainTimeoutMs?: number;
   killWaitMs?: number;
   probeTimeoutMs?: number;
+  runTimeoutMs?: number;
 }
 
 export class NodeProcessRunner implements ProcessRunner {
@@ -40,12 +43,14 @@ export class NodeProcessRunner implements ProcessRunner {
   readonly #drainTimeoutMs: number;
   readonly #killWaitMs: number;
   readonly #probeTimeoutMs: number;
+  readonly #runTimeoutMs: number | undefined;
 
   constructor(options: NodeProcessRunnerOptions = {}) {
     this.#cancelGraceMs = options.cancelGraceMs ?? 3_000;
     this.#drainTimeoutMs = options.drainTimeoutMs ?? 100;
     this.#killWaitMs = options.killWaitMs ?? 1_000;
     this.#probeTimeoutMs = options.probeTimeoutMs ?? 10_000;
+    this.#runTimeoutMs = options.runTimeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
   }
 
   async probe(command: string, args: string[]): Promise<ProcessResult> {
@@ -94,11 +99,13 @@ export class NodeProcessRunner implements ProcessRunner {
     });
     let settled = false;
     let drainTimer: ReturnType<typeof setTimeout> | undefined;
+    let runTimer: ReturnType<typeof setTimeout> | undefined;
     const result = new Promise<ProcessResult>((resolve) => {
       const finish = (exitCode: number) => {
         if (settled) return;
         settled = true;
         if (drainTimer) clearTimeout(drainTimer);
+        if (runTimer) clearTimeout(runTimer);
         resolve({ exitCode, stdout, stderr: bounded(stderr) });
       };
       child.on("error", (error) => {
@@ -110,7 +117,26 @@ export class NodeProcessRunner implements ProcessRunner {
         drainTimer = setTimeout(() => finish(exitCode), this.#drainTimeoutMs);
       });
       child.on("close", (code, signal) => finish(code ?? (signal ? 128 : 1)));
+      if (this.#runTimeoutMs !== undefined) {
+        runTimer = setTimeout(() => {
+          if (settled) return;
+          stderr = bounded(`${stderr}\nworker timed out after ${this.#runTimeoutMs}ms`);
+          // Resolve only after cancellation has been attempted. Cancellation is
+          // itself bounded below, so a timeout never inherits an unbounded wait.
+          void cancelProcess().finally(() => finish(124));
+        }, this.#runTimeoutMs);
+      }
     });
+    const cancelProcess = async () => {
+      const groupPid = process.platform === "win32" ? undefined : child.pid;
+      signal(child, groupPid, "SIGTERM");
+      if (groupPid !== undefined && !(await waitForGroupExit(groupPid, this.#cancelGraceMs))) {
+        signal(child, groupPid, "SIGKILL");
+      } else if (groupPid === undefined) {
+        await Promise.race([result, delay(this.#cancelGraceMs)]);
+        if (!settled) child.kill("SIGKILL");
+      }
+    };
     return {
       id: `process-${child.pid ?? randomUUID()}`,
       result,
@@ -122,11 +148,11 @@ export class NodeProcessRunner implements ProcessRunner {
           const stoppedGracefully = await waitForGroupExit(groupPid, this.#cancelGraceMs);
           if (!stoppedGracefully) {
             signal(child, groupPid, "SIGKILL");
-            if (!(await waitForGroupExit(groupPid, this.#killWaitMs))) {
-              throw new Error(`process group ${groupPid} did not stop after SIGKILL`);
-            }
+            // SIGKILL cannot be ignored; don't let a broken OS/process state
+            // keep the worker result pending indefinitely.
+            await Promise.race([waitForGroupExit(groupPid, this.#killWaitMs), delay(this.#killWaitMs)]);
           }
-          await result;
+          await Promise.race([result, delay(this.#killWaitMs)]);
           return;
         }
         await Promise.race([result, delay(this.#cancelGraceMs)]);

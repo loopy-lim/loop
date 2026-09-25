@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 
-import { NodeProcessRunner } from "../src/process";
+import { DEFAULT_RUN_TIMEOUT_MS, NodeProcessRunner } from "../src/process";
 import { CodexProvider } from "../src/codex/adapter";
+import { normalizeProcessResult } from "../src/process-provider";
 import type { StartWorkerInput } from "../src/types";
 
 const strayPids = new Set<number>();
@@ -48,6 +49,29 @@ test.skipIf(process.platform === "win32")(
     strayPids.delete(pid);
   },
 );
+
+test("NodeProcessRunner leaves a stalled worker running before its deadline, then kills it and reports retryable timeout", async () => {
+  const runner = new NodeProcessRunner({ runTimeoutMs: 120, cancelGraceMs: 20 });
+  const running = runner.start(process.execPath, ["-e", "process.stdout.write(String(process.pid) + '\\n'); setInterval(() => {}, 1000)"]);
+  let settled = false;
+  void running.result.then(() => { settled = true; });
+  await new Promise(resolve => setTimeout(resolve, 40));
+  expect(settled).toBe(false);
+
+  const processResult = await running.result;
+  const result = normalizeProcessResult(processResult);
+  const childPid = Number(processResult.stdout.trim());
+
+  expect(result.success).toBe(false);
+  expect(result.failure).toEqual({ kind: "timeout", retryable: true });
+  expect(result.summary).toContain("timed out");
+  expect(Number.isInteger(childPid)).toBe(true);
+  expect(() => process.kill(childPid, 0)).toThrow();
+});
+
+test("NodeProcessRunner applies a 30 minute default run deadline", async () => {
+  expect(DEFAULT_RUN_TIMEOUT_MS).toBe(30 * 60 * 1000);
+});
 
 test("NodeProcessRunner probe remains asynchronous while enforcing its deadline", async () => {
   const runner = new NodeProcessRunner({ probeTimeoutMs: 40, cancelGraceMs: 20 });

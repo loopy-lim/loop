@@ -113,15 +113,23 @@ async function run({ input, context, workerId, provider, selectFallback, control
       releaseAttempted = false;
       lastActivity = 0;
     }
+    const exhaustedTimeout = !result.success
+      && result.failure?.kind === "timeout"
+      && result.failure.retryable
+      && context.attempt + 1 >= context.task.maxAttempts;
+    if (!result.success && (exhaustedTimeout || result.failure?.retryable === false || ["authentication", "quota"].includes(result.failure?.kind ?? ""))) {
+      await control.requestAttention({
+        ...input,
+        taskId,
+        attentionId: `failure-${input.runId}-${taskId}-${context.attempt}-${exhaustedTimeout ? "timeout-exhausted" : "environment"}`,
+        kind: "failure",
+        summary: exhaustedTimeout ? `Worker timeout retry budget exhausted: ${redact(result.summary)}` : redact(result.summary),
+      });
+    }
     await control.recordWorkerResult({ ...workerInput, success: result.success, summary: withPersonaWarning(redact(result.summary)) });
     workerFinished = true;
     await release();
-    if (!result.success) {
-      if (result.failure?.retryable === false || ["authentication", "quota"].includes(result.failure?.kind ?? "")) {
-        await control.requestAttention({ ...input, taskId, attentionId: `failure-${input.runId}-${taskId}-${context.attempt}-environment`, kind: "failure", summary: redact(result.summary) });
-      }
-      return;
-    }
+    if (!result.success) return;
     const evidence = await verifier.verify(context.task.completionChecks, context.workingDirectory, signal);
     if (signal.aborted) { await control.stopVerification({ ...input, taskId }); return; }
     await control.recordCheckReceipts({ ...input, taskId, checks: evidence.map(check => ({ id: check.id, command: check.command, args: check.args, workingDirectory: check.workingDirectory, exitCode: check.exitCode, stdout: redact(check.stdout), stderr: redact(check.stderr), timedOut: check.timedOut, durationMs: check.durationMs })) });

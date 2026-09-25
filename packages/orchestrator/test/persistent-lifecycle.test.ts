@@ -21,19 +21,19 @@ test("a completed persistent worker exits before the graph returns its summary",
   } finally { fixture.cleanup(); }
 });
 
-test("persistent worker timeouts exhaust bounded retries and terminalize without attention", async () => {
+test("persistent worker timeouts retry and promote exhausted timeout failures to attention", async () => {
   const fixture = scenario("timeout");
   try {
     const result = await fixture.run();
-    // Decision §4: exhausted retryable failures are terminal failures, not questions.
-    expect(result.status).toBe("failed");
+    expect(result.status).toBe("attention");
     expect(fixture.pids()).toHaveLength(2);
     for (const pid of fixture.pids()) expect(alive(pid)).toBe(false);
     const snapshot = await protocol.getSnapshot(fixture.input);
-    expect(snapshot.state).toBe("failed");
+    expect(snapshot.state).toBe("attention");
     expect(snapshot.tasks[0]).toMatchObject({ state: "failed", attempt: 2 });
     expect(snapshot.activeWorkers).toEqual([]);
-    expect(snapshot.attention).toHaveLength(0);
+    expect(snapshot.attention).toHaveLength(1);
+    expect(snapshot.attention[0]?.summary).toContain("retry budget exhausted");
   } finally { fixture.cleanup(); }
 });
 
