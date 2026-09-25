@@ -29,6 +29,14 @@ interface HerdrAgentProviderOptions {
   available?: boolean;
   pollIntervalMs?: number;
   startGraceMs?: number;
+  /**
+   * Total wall-clock budget for one worker run while the herdr agent keeps
+   * reporting "running". Mirrors the process runner's run deadline
+   * (2026-09-25 network-stall-hang fix): a stalled lane must classify as a
+   * retryable timeout so the orchestrator's fallback chain takes over
+   * instead of the run waiting forever. `0` disables the deadline.
+   */
+  runDeadlineMs?: number;
 }
 
 interface Session {
@@ -50,6 +58,7 @@ export class HerdrAgentProvider implements AgentProvider {
   readonly #available: boolean;
   readonly #pollIntervalMs: number;
   readonly #startGraceMs: number;
+  readonly #runDeadlineMs: number;
   readonly #sessions = new Map<string, Session>();
 
   constructor(options: HerdrAgentProviderOptions) {
@@ -62,6 +71,7 @@ export class HerdrAgentProvider implements AgentProvider {
     this.#available = options.available ?? true;
     this.#pollIntervalMs = options.pollIntervalMs ?? 250;
     this.#startGraceMs = options.startGraceMs ?? 5_000;
+    this.#runDeadlineMs = options.runDeadlineMs ?? DEFAULT_RUN_DEADLINE_MS;
   }
 
   async capabilities(): Promise<ProviderCapabilities> {
@@ -187,11 +197,27 @@ export class HerdrAgentProvider implements AgentProvider {
 
   async #wait(session: Session): Promise<WorkerResult> {
     const startDeadline = Date.now() + this.#startGraceMs;
+    const runDeadline = this.#runDeadlineMs > 0 ? Date.now() + this.#runDeadlineMs : Number.POSITIVE_INFINITY;
     let observedWorking = false;
     for (;;) {
       const observed = await this.#runtime.status(session.handle);
       if (observed === "running") {
         observedWorking = true;
+        if (Date.now() >= runDeadline) {
+          // Stop the stalled lane (never resolveCancellation: the returned
+          // result must be a retryable timeout, not "cancelled") so the
+          // orchestrator walks its fallback chain instead of hanging.
+          session.cancelRequested = true;
+          await this.#runtime.cancel(session.handle).catch(() => {});
+          session.status = "lost";
+          this.#emit(session, { type: "lifecycle", status: "lost" });
+          return {
+            success: false,
+            summary: `herdr worker exceeded its ${this.#runDeadlineMs}ms run deadline without reporting a terminal state`,
+            sessionId: session.handle.agentName,
+            failure: { kind: "timeout", retryable: true },
+          };
+        }
         await delay(this.#pollIntervalMs);
         continue;
       }
@@ -268,6 +294,8 @@ function cancelledResult(session: Session): WorkerResult {
     failure: { kind: "cancelled", retryable: false },
   };
 }
+
+const DEFAULT_RUN_DEADLINE_MS = 30 * 60 * 1000;
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, milliseconds)));

@@ -5,7 +5,19 @@ import type { OrchestrationControl } from "./control";
 import { resolvePersona, type PersonaKindDefaults, type PersonaRegistry } from "./persona";
 import { redact } from "./redact";
 
-export interface TaskExecution { done: Promise<void>; settled: boolean; error?: unknown; abort(): void }
+export interface TaskExecution {
+  done: Promise<void>;
+  settled: boolean;
+  error?: unknown;
+  abort(): void;
+  /**
+   * Live steer channel bound to the CURRENT provider handle (set once the
+   * handle exists, reassigned across quota fallbacks, cleared when no handle
+   * is live). The coordinator's mailbox delegates here, so steering follows
+   * the provider's own handle id rather than the durable worker id.
+   */
+  steer?: (message: string) => Promise<void>;
+}
 // PersonaWorkerStartInput 임시 구조 타입은 제거됨(2026-09): StartWorkerInput.personaInstructions 복원으로 상위 타입을 직접 사용한다.
 interface Options {
   input: { databasePath: string; runId: string; executionOwner: string };
@@ -29,10 +41,10 @@ interface Options {
 export function executeTask(options: Options): TaskExecution {
   const controller = new AbortController();
   const execution: TaskExecution = { done: Promise.resolve(), settled: false, abort: () => controller.abort() };
-  execution.done = run(options, controller.signal).catch(error => { execution.error = error; }).finally(() => { execution.settled = true; });
+  execution.done = run(options, controller.signal, execution).catch(error => { execution.error = error; }).finally(() => { execution.settled = true; });
   return execution;
 }
-async function run({ input, context, workerId, provider, selectFallback, control, verifier, personas, personaKindDefaults, recordRawActivity = true }: Options, signal: AbortSignal): Promise<void> {
+async function run({ input, context, workerId, provider, selectFallback, control, verifier, personas, personaKindDefaults, recordRawActivity = true }: Options, signal: AbortSignal, execution: TaskExecution): Promise<void> {
   const taskId = context.task.id;
   const workerInput = { ...input, taskId, workerId };
   const persona = resolvePersona({ requested: context.task.persona, kind: context.task.kind, registry: personas ?? {}, defaults: personaKindDefaults });
@@ -61,7 +73,11 @@ async function run({ input, context, workerId, provider, selectFallback, control
     const excludedProviderIds = new Set<string>();
     let result: WorkerResult;
     // One durable reservation spans these sequential handles. Never release
-    // ownership or consume a scheduler attempt merely because quota ran out.
+    // ownership or consume a scheduler attempt merely because the provider
+    // lane failed: any retryable failure (quota exhaustion, transport fault,
+    // process error, timeout) releases the handle and walks the routing
+    // fallback chain (e.g. zai → openai-codex) before a scheduler retry
+    // would rerun the same lane.
     while (true) {
       const starting = provider.start(startInput);
       let handle: WorkerHandle;
@@ -75,6 +91,11 @@ async function run({ input, context, workerId, provider, selectFallback, control
         throw error;
       }
       handleId = handle.id;
+      // Bind the live steer channel to this handle so the mailbox (which
+      // only knows the durable worker id) reaches the provider session.
+      execution.steer = provider.steer
+        ? message => provider.steer!(handleId!, message)
+        : undefined;
       // The subscription must stay attached even when raw recording is
       // suppressed: the mirroring layer renders sink lines from these events.
       unsubscribe = provider.subscribe?.(handle.id, event => {
@@ -92,16 +113,18 @@ async function run({ input, context, workerId, provider, selectFallback, control
         return;
       }
       result = received;
-      if (result.success || result.failure?.kind !== "quota" || !selectFallback) break;
+      const failureKind = result.failure?.kind;
+      const fallbackEligible = result.failure !== undefined && (result.failure.retryable || failureKind === "quota");
+      if (result.success || !fallbackEligible || !selectFallback) break;
       await release();
       unsubscribe?.();
       unsubscribe = undefined;
       excludedProviderIds.add(provider.id);
-      await control.recordActivity({ ...input, taskId, activity: redact(`Quota exhausted (${provider.id}); released worker and selecting an untried quota pool. ${result.summary}`, 500) });
+      await control.recordActivity({ ...input, taskId, activity: redact(`Provider failure (${provider.id}, ${failureKind}); released worker and selecting an untried provider. ${result.summary}`, 500) });
       let next: AgentProvider | undefined;
       try { next = await selectFallback(excludedProviderIds); }
       catch (error) {
-        result = { ...result, summary: `${result.summary}\nQuota fallback exhausted or unavailable: ${redact(error)}` };
+        result = { ...result, summary: `${result.summary}\nProvider fallback exhausted or unavailable: ${redact(error)}` };
         break;
       }
       if (!next || signal.aborted) {
@@ -110,6 +133,7 @@ async function run({ input, context, workerId, provider, selectFallback, control
       }
       provider = next;
       handleId = undefined;
+      execution.steer = undefined;
       releaseAttempted = false;
       lastActivity = 0;
     }
@@ -156,6 +180,7 @@ async function run({ input, context, workerId, provider, selectFallback, control
     if (!workerFinished) await control.recordWorkerResult({ ...workerInput, success: false, summary: withPersonaWarning(redact(error)) });
     else await control.recordVerification({ ...input, taskId, passed: false, checks: [], reason: redact(error) });
   } finally {
+    execution.steer = undefined;
     unsubscribe?.();
     try { await release(); } catch (error) { if (!(error instanceof CleanupFailed)) throw error; }
   }

@@ -1,6 +1,34 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Case-insensitive substrings that identify a connection/transport fault
+/// against the remote inference link: TCP resets and refusals, DNS resolution
+/// failures, socket/pipe breakage, and request-level timeouts. Bare
+/// "timeout" is deliberately absent — completion-check timeouts are
+/// evidence-classified from check receipts, not from reason strings.
+const TRANSPORT_MARKERS: [&str; 20] = [
+    "connection error",
+    "connection refused",
+    "connection reset",
+    "connection closed",
+    "connection terminated",
+    "connection timed out",
+    "request timed out",
+    "gateway timeout",
+    "econnrefused",
+    "econnreset",
+    "econnaborted",
+    "etimedout",
+    "ehostunreach",
+    "enetunreach",
+    "epipe",
+    "enotfound",
+    "eai_again",
+    "socket hang up",
+    "fetch failed",
+    "network error",
+];
+
 /// Infrastructure-neutral classification of an execution or verification failure.
 #[derive(
     Clone, Copy, Debug, Deserialize, Eq, Hash, JsonSchema, Ord, PartialEq, PartialOrd, Serialize,
@@ -13,6 +41,23 @@ pub enum FailureClass {
     InvalidContract,
     Interrupted,
     Environment,
+}
+
+impl FailureClass {
+    /// Deterministic transport-fault detection over a failure reason string.
+    ///
+    /// Returns `Some(FailureClass::Interrupted)` when the reason matches a
+    /// known connection/transport marker so the run takes the
+    /// attention/retry path instead of a terminal deterministic failure.
+    /// `None` leaves classification to the caller's existing rule — unknown
+    /// reasons fail closed with no behavior change.
+    pub fn classify_transport(reason: &str) -> Option<Self> {
+        let haystack = reason.to_ascii_lowercase();
+        TRANSPORT_MARKERS
+            .iter()
+            .any(|marker| haystack.contains(marker))
+            .then_some(Self::Interrupted)
+    }
 }
 
 /// The smallest operation a retry budget permits the executor to repeat.
@@ -160,5 +205,53 @@ impl FailurePolicy {
                 RetryOutcome::Exhausted(self.on_unbudgeted_failure),
                 |budget| budget.outcome(retries_used),
             )
+    }
+}
+
+#[cfg(test)]
+mod transport_classification_tests {
+    use super::*;
+
+    #[test]
+    fn connection_error_reason_classifies_as_interrupted() {
+        assert_eq!(
+            FailureClass::classify_transport("Error: Connection error."),
+            Some(FailureClass::Interrupted)
+        );
+    }
+
+    #[test]
+    fn transport_markers_are_case_insensitive() {
+        for reason in [
+            "fetch failed: ECONNRESET",
+            "Socket hang up",
+            "getaddrinfo ENOTFOUND api.relay.test",
+            "Request timed out after 30000ms",
+            "connect ETIMEDOUT 1.2.3.4:443",
+            "504 Gateway Timeout",
+            "network error: connection refused",
+        ] {
+            assert_eq!(
+                FailureClass::classify_transport(reason),
+                Some(FailureClass::Interrupted),
+                "expected transport classification for: {reason}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_transport_reasons_stay_unclassified() {
+        for reason in [
+            "failed after escalation",
+            "tests timed out",
+            "assertion failed: expected 3, got 4",
+            "",
+        ] {
+            assert_eq!(
+                FailureClass::classify_transport(reason),
+                None,
+                "expected no transport classification for: {reason}"
+            );
+        }
     }
 }
