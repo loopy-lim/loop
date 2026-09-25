@@ -212,11 +212,10 @@ test("doctor auth checks native stores without requesting or printing credential
     ],
   ]);
   expect(probed).toContainEqual(["pi", ["--version"]]);
-  // `codex login status` is a read-only status probe; doctor must never
-  // trigger an interactive login or read credential material.
-  expect(probed.filter(([command, args]) => args.includes("login"))).toEqual([
-    ["codex", ["login", "status"]],
-  ]);
+  // Native auth probes are read-only; doctor must never trigger an
+  // interactive login or read credential material. The codex-exec lane was
+  // removed (2026-09), so only antigravity gets a native probe.
+  expect(probed.filter(([command, args]) => args.includes("login"))).toEqual([]);
   expect(probed.flat(2)).not.toContain("--credentials");
   const report = JSON.parse(capture.stdout()) as {
     checks: Array<{ name: string; ok: boolean; auth?: string }>;
@@ -225,11 +224,9 @@ test("doctor auth checks native stores without requesting or printing credential
     expect.objectContaining({ name: "pi", ok: true, auth: "ready" }),
   );
   expect(report.checks).toContainEqual(
-    expect.objectContaining({ name: "codex", ok: true, auth: "ready" }),
-  );
-  expect(report.checks).toContainEqual(
     expect.objectContaining({ name: "antigravity", ok: true }),
   );
+  expect(report.checks.find((check) => check.name === "codex")).toBeUndefined();
 });
 
 test("offline installation verification proves the fake-provider milestone", async () => {
@@ -372,7 +369,7 @@ test("human models output is a bounded list while JSON remains complete", async 
   expect(human.stdout()).not.toContain("[{");
   expect(human.stdout()).not.toContain("}]");
   expect(human.stdout()).toContain("fast · zai/glm-5.3-flashx");
-  expect(JSON.parse(json.stdout())).toHaveLength(19);
+  expect(JSON.parse(json.stdout())).toHaveLength(13);
 });
 
 function output(): {

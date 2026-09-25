@@ -48,24 +48,39 @@ test("loads the repository configuration into typed runtime data", () => {
   expect(registry.get("glm-5.3-flashx").computeClass).toBe("typed_decision");
   expect(registry.get("zai/glm-5.3-flashx:high").computeClass).toBe("balanced");
   expect(registry.get("zai/glm-5.3-flash").computeClass).toBe("balanced");
-  expect(registry.get("gpt-5.6-luna").computeClass).toBe("balanced");
-  expect(registry.get("gpt-5.6-terra").computeClass).toBe("strong");
-  expect(registry.get("gpt-5.6-sol").computeClass).toBe("frontier");
+  expect(registry.get("zai/glm-5.3-flash:high").computeClass).toBe("strong");
+  expect(registry.get("openai-codex/gpt-6-luna:off").computeClass).toBe("tiny");
+  expect(registry.get("openai-codex/gpt-6-luna").computeClass).toBe("typed_decision");
+  expect(registry.get("openai-codex/gpt-6-luna:low").computeClass).toBe("fast");
+  expect(registry.get("openai-codex/gpt-6-luna:high").computeClass).toBe("balanced");
+  expect(registry.get("openai-codex/gpt-6-sol:low").computeClass).toBe("strong");
+  expect(registry.get("openai-codex/gpt-6-sol").computeClass).toBe("frontier");
+  // Every class keeps a zai primary followed by the unified openai-codex
+  // fallback; registry orders by cost_weight + latency, so higher openai
+  // weights place them after the zai primaries (antigravity gemini profiles
+  // are no longer fallback candidates).
+  expect(registry.forComputeClass("tiny").map((model) => model.id)).toEqual([
+    "zai/glm-5.3-flashx:off",
+    "openai-codex/gpt-6-luna:off",
+  ]);
+  expect(registry.forComputeClass("fast").map((model) => model.id)).toEqual([
+    "zai/glm-5.3-flashx",
+    "openai-codex/gpt-6-luna:low",
+  ]);
+  expect(registry.forComputeClass("typed_decision").map((model) => model.id)).toEqual([
+    "glm-5.3-flashx",
+    "openai-codex/gpt-6-luna",
+  ]);
   expect(registry.forComputeClass("balanced").map((model) => model.id)).toEqual([
     "zai/glm-5.3-flashx:high",
     "zai/glm-5.3-flash",
-    "gemini-3.8-flash-high",
-    "gpt-5.6-luna",
-    "gpt-6-luna",
-    "openai-codex/gpt-6-luna",
+    "openai-codex/gpt-6-luna:high",
   ]);
-  // Registry orders by cost_weight + latency, ties broken by id: all four
-  // frontier models tie at 4+3 and sort lexicographically (the restored
-  // gpt-6-luna/sol lanes mirror the codex fallback figures).
+  expect(registry.forComputeClass("strong").map((model) => model.id)).toEqual([
+    "zai/glm-5.3-flash:high",
+    "openai-codex/gpt-6-sol:low",
+  ]);
   expect(registry.forComputeClass("frontier").map((model) => model.id)).toEqual([
-    "gemini-3.1-pro-low",
-    "gpt-5.6-sol",
-    "gpt-6-sol",
     "openai-codex/gpt-6-sol",
   ]);
 });
