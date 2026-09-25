@@ -1,4 +1,31 @@
-# Wallbloom runs: pin every non-deterministic Loop worker to authenticated OpenAI Codex (pi).
+# DEPLOYED runtime models (Lead deployment of models.toml.next, mirrors
+# config/models.toml). The [pi] / [pi.models] catalog-provisioning tables
+# are ignored by the orchestrator model parser and consumed by the pi
+# models.json provisioning adapter.
+# Routing policy (2026-09, openai-fallback unification): every compute class
+# routes the zai volume lane first, with the openai-codex gpt-6 lane as the
+# unified fallback. Antigravity profiles are excluded from the
+# fallback chains; the antigravity provider configuration itself is retained.
+[pi]
+default_provider = "zai"
+
+[pi.models."glm-5.3-flashx"]
+name = "GLM-5.3-FlashX"
+reasoning = true
+context_window = 1000000
+max_tokens = 131072
+input = ["text"]
+cost = { input = 0.375, output = 1.25, cache_read = 0.075, cache_write = 0 }
+
+[pi.models."glm-5.3-flashx".compat]
+supports_store = false
+supports_developer_role = false
+supports_reasoning_effort = true
+max_tokens_field = "max_tokens"
+thinking_format = "zai"
+supports_strict_mode = true
+zai_tool_stream = true
+
 [[models]]
 id = "deterministic-local"
 provider = "local"
@@ -8,7 +35,7 @@ latency = 0
 cost_weight = 0
 
 [[models]]
-id = "openai-codex/gpt-5.3-codex-spark"
+id = "glm-5.3-flashx"
 provider = "pi"
 compute_class = "typed_decision"
 capabilities = { coding = 3, reasoning = 3, tools = 2, vision = 0, long_context = 3 }
@@ -16,41 +43,96 @@ latency = 1
 cost_weight = 1
 
 [[models]]
-id = "openai-codex/gpt-5.3-codex-spark:off"
+id = "zai/glm-5.3-flashx:off"
 provider = "pi"
 compute_class = "tiny"
+capabilities = { coding = 2, reasoning = 2, tools = 2, vision = 0, long_context = 3 }
+latency = 1
+cost_weight = 1
+
+[[models]]
+id = "zai/glm-5.3-flashx"
+provider = "pi"
+compute_class = "fast"
 capabilities = { coding = 3, reasoning = 3, tools = 2, vision = 0, long_context = 3 }
 latency = 1
 cost_weight = 1
 
+# Balanced work prefers the higher-thinking zai profiles; the openai-codex
+# lane is the unified fallback.
 [[models]]
-id = "openai-codex/gpt-5.6-sol"
+id = "zai/glm-5.3-flashx:high"
 provider = "pi"
-compute_class = "fast"
-capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 1, long_context = 4 }
+compute_class = "balanced"
+capabilities = { coding = 4, reasoning = 3, tools = 2, vision = 0, long_context = 5 }
 latency = 1
 cost_weight = 1
 
 [[models]]
-id = "openai-codex/gpt-6-sol"
+id = "zai/glm-5.3-flash"
 provider = "pi"
 compute_class = "balanced"
-capabilities = { coding = 4, reasoning = 5, tools = 3, vision = 1, long_context = 5 }
+capabilities = { coding = 3, reasoning = 3, tools = 2, vision = 0, long_context = 3 }
+latency = 1
+cost_weight = 2
+
+# Strong keeps the zai lane primary and reserves the openai-codex lane for
+# escalation only.
+[[models]]
+id = "zai/glm-5.3-flash:high"
+provider = "pi"
+compute_class = "strong"
+capabilities = { coding = 4, reasoning = 4, tools = 2, vision = 0, long_context = 5 }
+latency = 1
+cost_weight = 1
+
+# Unified openai-codex fallback lane. Explicit thinking patterns keep the
+# profiles distinct; openai entries carry higher cost_weight/latency than the
+# zai primaries so registry ordering reproduces the fallback order.
+[[models]]
+id = "openai-codex/gpt-6-luna:off"
+provider = "pi"
+compute_class = "tiny"
+capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 0, long_context = 4 }
+latency = 2
+cost_weight = 2
+
+[[models]]
+id = "openai-codex/gpt-6-luna:low"
+provider = "pi"
+compute_class = "fast"
+capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 0, long_context = 4 }
 latency = 2
 cost_weight = 2
 
 [[models]]
 id = "openai-codex/gpt-6-luna"
 provider = "pi"
-compute_class = "strong"
-capabilities = { coding = 5, reasoning = 5, tools = 4, vision = 2, long_context = 5 }
+compute_class = "typed_decision"
+capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 0, long_context = 4 }
 latency = 2
 cost_weight = 2
 
 [[models]]
-id = "openai-codex/gpt-6-astra"
+id = "openai-codex/gpt-6-luna:high"
 provider = "pi"
-compute_class = "frontier"
-capabilities = { coding = 5, reasoning = 5, tools = 4, vision = 3, long_context = 5 }
+compute_class = "balanced"
+capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 0, long_context = 4 }
+latency = 2
+cost_weight = 2
+
+[[models]]
+id = "openai-codex/gpt-6-sol:low"
+provider = "pi"
+compute_class = "strong"
+capabilities = { coding = 5, reasoning = 5, tools = 3, vision = 0, long_context = 5 }
 latency = 3
 cost_weight = 3
+
+[[models]]
+id = "openai-codex/gpt-6-sol"
+provider = "pi"
+compute_class = "frontier"
+capabilities = { coding = 5, reasoning = 5, tools = 3, vision = 0, long_context = 5 }
+latency = 3
+cost_weight = 4
