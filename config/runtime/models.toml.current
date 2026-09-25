@@ -1,0 +1,56 @@
+# Wallbloom runs: pin every non-deterministic Loop worker to authenticated OpenAI Codex (pi).
+[[models]]
+id = "deterministic-local"
+provider = "local"
+compute_class = "deterministic"
+capabilities = { coding = 0, reasoning = 0, tools = 0, vision = 0, long_context = 0 }
+latency = 0
+cost_weight = 0
+
+[[models]]
+id = "openai-codex/gpt-5.3-codex-spark"
+provider = "pi"
+compute_class = "typed_decision"
+capabilities = { coding = 3, reasoning = 3, tools = 2, vision = 0, long_context = 3 }
+latency = 1
+cost_weight = 1
+
+[[models]]
+id = "openai-codex/gpt-5.3-codex-spark:off"
+provider = "pi"
+compute_class = "tiny"
+capabilities = { coding = 3, reasoning = 3, tools = 2, vision = 0, long_context = 3 }
+latency = 1
+cost_weight = 1
+
+[[models]]
+id = "openai-codex/gpt-5.6-sol"
+provider = "pi"
+compute_class = "fast"
+capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 1, long_context = 4 }
+latency = 1
+cost_weight = 1
+
+[[models]]
+id = "openai-codex/gpt-6-sol"
+provider = "pi"
+compute_class = "balanced"
+capabilities = { coding = 4, reasoning = 5, tools = 3, vision = 1, long_context = 5 }
+latency = 2
+cost_weight = 2
+
+[[models]]
+id = "openai-codex/gpt-6-luna"
+provider = "pi"
+compute_class = "strong"
+capabilities = { coding = 5, reasoning = 5, tools = 4, vision = 2, long_context = 5 }
+latency = 2
+cost_weight = 2
+
+[[models]]
+id = "openai-codex/gpt-6-astra"
+provider = "pi"
+compute_class = "frontier"
+capabilities = { coding = 5, reasoning = 5, tools = 4, vision = 3, long_context = 5 }
+latency = 3
+cost_weight = 3

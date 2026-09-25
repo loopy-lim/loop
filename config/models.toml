@@ -1,10 +1,12 @@
 # Business logic selects compute classes. Concrete provider/model identifiers live here.
-# Mixed routing (2026-09, updated after the codex lane drop): pi carries the zai
-# volume classes (pi pattern syntax "zai/glm-5.3-flashx", ":<thinking>") plus
-# the gpt-6 luna/sol lane (openai-codex, ChatGPT native login; smoke evidence
-# OK-LUNA-PI / OK-SOL-PI on pi 0.87.1), and antigravity gemini remains
-# fallback. The codex-exec provider lane was removed (2026-09): gpt-6 traffic
-# runs solely on the pi openai-codex lane.
+# Routing policy (2026-09, openai-fallback unification): every compute class
+# lists the zai volume lane first (pi pattern syntax "zai/glm-5.3-flashx",
+# ":<thinking>") followed by an openai-codex gpt-6 lane fallback (pi lane,
+# ChatGPT native login; smoke evidence OK-LUNA-PI / OK-SOL-PI on pi 0.87.1).
+# Antigravity profiles are no longer fallback candidates; the
+# antigravity provider configuration itself is retained. The codex-exec
+# provider lane was removed (2026-09): gpt-6 traffic runs solely on the pi
+# openai-codex lane.
 
 # pi catalog provisioning (2026-09-22 model-environment decision): ids below
 # that are missing from pi's built-in catalogs are synced into pi's
@@ -69,8 +71,8 @@ latency = 1
 cost_weight = 1
 
 # flashx consumes 2.5x the quota of regular flash per call; this pattern was
-# smoke-verified. Preferred balanced candidate so escalation absorbs surplus
-# quota while zai/glm-5.3-flash and gemini-3.8-flash-high remain fallbacks.
+# smoke-verified. Preferred balanced primary so escalation absorbs surplus
+# quota while zai/glm-5.3-flash and the openai-codex lane remain fallbacks.
 [[models]]
 id = "zai/glm-5.3-flashx:high"
 provider = "pi"
@@ -100,7 +102,9 @@ latency = 1
 cost_weight = 1
 
 # Quota fallback for volume workers stays inside the requested compute class.
-# Explicit thinking patterns keep these profiles distinct from the balanced lane.
+# Explicit thinking patterns keep these profiles distinct from each other and
+# from the zai primaries; openai entries carry higher cost_weight/latency so
+# registry ordering reproduces the intended fallback order.
 [[models]]
 id = "openai-codex/gpt-6-luna:off"
 provider = "pi"
@@ -117,13 +121,16 @@ capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 0, long_context 
 latency = 2
 cost_weight = 2
 
-# gpt-6 luna/sol primary lane: pi's openai-codex provider with ChatGPT native
-# login (smoke evidence OK-LUNA-PI / OK-SOL-PI, pi 0.87.1). Both ids ship in
-# pi 0.87.1's built-in catalog, so per the 2026-09-22 model-environment
-# decision no [pi.models] metadata is declared (figures copied from the
-# removed codex-lane fallback entries).
 [[models]]
 id = "openai-codex/gpt-6-luna"
+provider = "pi"
+compute_class = "typed_decision"
+capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 0, long_context = 4 }
+latency = 2
+cost_weight = 2
+
+[[models]]
+id = "openai-codex/gpt-6-luna:high"
 provider = "pi"
 compute_class = "balanced"
 capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 0, long_context = 4 }
@@ -131,36 +138,22 @@ latency = 2
 cost_weight = 2
 
 [[models]]
+id = "openai-codex/gpt-6-sol:low"
+provider = "pi"
+compute_class = "strong"
+capabilities = { coding = 5, reasoning = 5, tools = 3, vision = 0, long_context = 5 }
+latency = 3
+cost_weight = 3
+
+# gpt-6 frontier lane: pi's openai-codex provider with ChatGPT native login
+# (smoke evidence OK-SOL-PI, pi 0.87.1). Both luna/sol base ids ship in
+# pi 0.87.1's built-in catalog, so per the 2026-09-22 model-environment
+# decision no [pi.models] metadata is declared (figures copied from the
+# removed codex-lane fallback entries).
+[[models]]
 id = "openai-codex/gpt-6-sol"
 provider = "pi"
 compute_class = "frontier"
 capabilities = { coding = 5, reasoning = 5, tools = 3, vision = 0, long_context = 5 }
-latency = 3
-cost_weight = 4
-
-# Antigravity 영속 드라이버 후보(agy 사용량): openai-codex(pi 레인) 다음 순서의
-# 대안으로 편성된다.
-
-[[models]]
-id = "gemini-3.8-flash-high"
-provider = "antigravity"
-compute_class = "balanced"
-capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 2, long_context = 4 }
-latency = 2
-cost_weight = 2
-
-[[models]]
-id = "gemini-3.1-pro-high"
-provider = "antigravity"
-compute_class = "strong"
-capabilities = { coding = 5, reasoning = 5, tools = 4, vision = 4, long_context = 5 }
-latency = 3
-cost_weight = 3
-
-[[models]]
-id = "gemini-3.1-pro-low"
-provider = "antigravity"
-compute_class = "frontier"
-capabilities = { coding = 5, reasoning = 5, tools = 4, vision = 4, long_context = 5 }
 latency = 3
 cost_weight = 4
