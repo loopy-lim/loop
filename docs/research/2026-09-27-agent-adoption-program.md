@@ -31,4 +31,4 @@ Loop의 목표 시간은 **사용자 요청부터 변경된 요구까지 검사�
 
 ## 현재 경계
 
-`bun run check`는 2026-09-27의 현재 미커밋 작업 트리에서 architecture 8개와 Bun 661개를 포함해 통과했다. 기존 benchmark의 `process.exit(0)` 검사는 개발 과제의 완료 품질을 측정하지 않는다. Pi Lead의 단일 작업 지시, Herdr worker 탭 종료, mailbox 전달 watermark, Rust requirement/check coverage는 이미 존재한다. bridge·generated protocol·gateway·turnloop에는 병행 중인 미커밋 변경이 있어 묶음 C/D의 구현 전에 해당 변경의 소유와 상태를 다시 확인한다.
+최초 계획 시점의 `bun run check`는 architecture 8개와 Bun 661개를 통과했다. 이후 A의 Pi 계측·고정 과제 계약과 첫 A/D 실사용을 [검증 기록](../findings/lead-turnaround-measurement-verification.md)에 남겼으며, 최신 전체 검사는 Bun 672개를 통과했다. 단일 worker 기준선과 B/C fixture, 반복 P50/P95가 없어 빠른 착수의 개선율은 미측정이다. 실행 중 D에서는 종속 task 등록·자동 dispatch를 확인했고, attention 해결 후 owner 재기동 누락을 찾아 Pi Lead에 수정했다. 기존 benchmark의 `process.exit(0)` 검사는 개발 과제의 완료 품질을 측정하지 않는다. Pi Lead의 단일 작업 지시, Herdr worker 탭 종료, mailbox 전달 watermark, Rust requirement/check coverage는 이미 존재한다. bridge·generated protocol·gateway·turnloop에는 병행 중인 미커밋 변경이 있어 묶음 C/D의 추가 구현 전에 해당 변경의 소유와 상태를 다시 확인한다.
