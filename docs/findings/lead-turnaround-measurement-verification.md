@@ -12,7 +12,7 @@
 
 Pi Lead의 시간 영수증은 요청 turn, `loop_run` 호출, 확인된 owner 인계, terminal 결과 표시의 경계만 측정한다. 세션 재연결로 요청 시각을 잃었거나 handoff가 실패하면 없는 구간을 숫자로 채우지 않는다. 표시된 `요청→결과`는 **해당 run의 결과 표시**까지다. 자동 후속 run이 필요한 원래 목표의 전체 완료 시간은 fixture 실행에서 별도로 기록해야 한다.
 
-첫 실사용에서 Pi의 `sendMessage(..., triggerTurn: true)`로 시작한 내부 재검토는 `before_agent_start`를 호출하지 않았다. 이전 구현은 다음 **사용자** turn을 내부 재검토로 잘못 분류해 자동 후속 run 표시를 붙이고 다음 완료 재검토를 생략했다. Pi 0.87.1의 실제 turn 경로와 세션 기록을 확인한 뒤, 내부 `loop-final-review`의 `message_start`와 `agent_end`로 구분하도록 고쳤다. 내부 재검토와 이후 사용자 정정을 연속 실행하는 회귀 테스트가 통과했다. 수정 후의 별도 Herdr 실사용 재현은 아직 수행하지 않았다.
+첫 실사용에서 Pi의 `sendMessage(..., triggerTurn: true)`로 시작한 내부 재검토는 `before_agent_start`를 호출하지 않았다. 이전 구현은 다음 **사용자** turn을 내부 재검토로 잘못 분류해 자동 후속 run 표시를 붙이고 다음 완료 재검토를 생략했다. Pi 0.87.1의 실제 turn 경로와 세션 기록을 확인한 뒤, 내부 `loop-final-review`의 `message_start`와 `agent_end`로 구분하도록 고쳤다. 내부 재검토와 이후 사용자 정정을 연속 실행하는 회귀 테스트가 통과했다. 수정본을 Pi TUI에서 `/reload`한 뒤 새 사용자 작업 두 개를 연속 실행했고, 각 완료마다 `loop-final-review`가 한 번씩 기록되며 두 run 모두 `loop-run-auto-follow-up`으로 잘못 표시되지 않음을 세션 기록에서 확인했다.
 
 ## 실행 증거
 
@@ -25,6 +25,7 @@ Pi Lead의 시간 영수증은 요청 turn, `loop_run` 호출, 확인된 owner �
 | Pi native Z.AI 인증 | `ready` (`pi auth check --provider zai --model glm-5.3-flash --json --no-refresh`) | native auth 저장소의 준비 상태 |
 | Pi `glm-5.3-flashx` 짧은 실호출 | 일반 Pi 6.7초, 설치된 Loop 확장 포함 Pi 1.68초; 둘 다 예상 문구, exit 0, 관측 429 없음 | 현재 quota의 두 단일 호출과 확장 로드. 개발 과제 수행·worker 실행·Herdr 화면 완료 증거는 아님 |
 | Herdr 실사용 A | 서버 0.8.2, Pi Lead pane `w53:p6B`에서 `loop_run` 제출; worker pane `w53:p6C`가 실행 중 보이고 완료 후 agent 목록에서 사라짐 | 단일 fixture의 TUI 표시·정리 관찰. 다른 실패·중단 경우까지 일반화하지 않음 |
+| 수정 후 연속 사용자 작업 | 62.4초 테스트 run: 요청→인계 4.2초, 요청→결과 21.4초. 이어진 120초 테스트 run: 요청→인계 3.4초, 요청→결과 20.6초. 두 run 모두 focused 6 pass·typecheck 통과, 완료 후 자동 재검토 메시지 기록 | 실제 Pi-native Z.AI·Herdr TUI의 turn 분류 및 worker 탭 종료 회귀. 동일 작업 반복 속도 비교는 아님 |
 
 ## 고정 과제 A의 첫 실사용
 
