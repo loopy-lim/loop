@@ -177,7 +177,53 @@ test("missing provider capability becomes human attention before workers start",
   expect(result.status).toBe("attention");
 });
 
-test("deterministic verification failure is not retried or promoted to completion", async () => {
+test("failed completion check is returned to a new worker attempt with its failure evidence", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "loop-verification-repair-"));
+  const databasePath = join(directory, "loop.db");
+  const markerPath = join(directory, "implementation.txt");
+  await writeFile(markerPath, "broken");
+  class RepairingProvider extends FakeProvider {
+    starts: string[] = [];
+    previousFailures: Array<string | null | undefined> = [];
+
+    override async start(input: Parameters<FakeProvider["start"]>[0]) {
+      this.starts.push(`${input.taskId}:${input.attempt}`);
+      this.previousFailures.push(input.context?.previousFailure);
+      if (input.attempt === 1) await writeFile(markerPath, "fixed");
+      return super.start(input);
+    }
+  }
+  const provider = new RepairingProvider("fast", ["fast", "balanced", "strong"]);
+  const orchestrator = new Orchestrator({
+    control: protocol,
+    providers: new ProviderRegistry([provider]),
+    maxWorkers: 1,
+  });
+  const repairable = task("repairable", "implementation", [], ["src/**"]);
+  repairable.maxAttempts = 3;
+  repairable.completionChecks = [{
+    id: "expected-content",
+    command: process.execPath,
+    args: ["--eval", `process.exit(require("node:fs").readFileSync(${JSON.stringify(markerPath)}, "utf8") === "fixed" ? 0 : 7)`],
+    workingDirectory: null,
+    timeoutMs: 5_000,
+  }];
+
+  const dependent = task("after-repair", "verification", ["repairable"]);
+  const result = await orchestrator.run({ databasePath, runId: "verification-repair", tasks: [repairable, dependent] });
+  const snapshot = await protocol.getSnapshot({ databasePath, runId: "verification-repair" });
+
+  expect(result.status).toBe("completed");
+  expect(provider.starts).toEqual(["repairable:0", "repairable:1", "after-repair:0"]);
+  expect(provider.previousFailures[1]).toContain("expected-content: exit 7");
+  expect(snapshot.tasks).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: "repairable", state: "done", attempt: 1 }),
+    expect.objectContaining({ id: "after-repair", state: "done", attempt: 0 }),
+  ]));
+  expect(snapshot.attention).toHaveLength(0);
+});
+
+test("a repeatedly failing completion check requests attention after its attempt budget", async () => {
   const directory = await mkdtemp(join(tmpdir(), "loop-verification-failure-"));
   const databasePath = join(directory, "loop.db");
   const counterPath = join(directory, "verification-attempts.txt");
@@ -205,11 +251,11 @@ test("deterministic verification failure is not retried or promoted to completio
   const result = await orchestrator.run({ databasePath, runId: "verification-failure", tasks: [unverified] });
   const snapshot = await protocol.getSnapshot({ databasePath, runId: "verification-failure" });
 
-  expect(await readFile(counterPath, "utf8")).toBe("1");
-  expect(result.status as string).toBe("failed");
-  expect(snapshot.tasks[0]).toMatchObject({ state: "failed", attempt: 1 });
+  expect(await readFile(counterPath, "utf8")).toBe("3");
+  expect(result.status as string).toBe("attention");
+  expect(snapshot.tasks[0]).toMatchObject({ state: "attention", attempt: 3 });
   expect(snapshot.tasks[0]?.state).not.toBe("done");
-  expect(snapshot.attention).toHaveLength(0);
+  expect(snapshot.openAttentionIds).toHaveLength(1);
 });
 
 test("overlapping implementation write scopes are serialized", async () => {

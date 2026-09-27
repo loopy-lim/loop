@@ -211,16 +211,26 @@ impl RunProjection {
                         return Err(ProjectionError::InvalidVerificationState(task_id.clone()));
                     }
                     task.attempt = task.attempt.saturating_add(1);
-                    let deterministic = matches!(
-                        failure_class,
-                        FailureClass::Assertion | FailureClass::InvalidContract
-                    );
+                    // A failed executable check is evidence that the worker's
+                    // change is incomplete. Give the next bounded attempt its
+                    // failure receipt so it can repair the code. A malformed
+                    // completion contract cannot be repaired by rerunning a
+                    // worker, so it remains terminal.
+                    let invalid_contract = *failure_class == FailureClass::InvalidContract;
                     if *failure_class == FailureClass::Interrupted {
                         task.transition(TaskState::Attention, None)?;
                         false
-                    } else if deterministic || task.attempt >= task.max_attempts {
+                    } else if invalid_contract {
                         task.transition(TaskState::Failed, None)?;
                         true
+                    } else if task.attempt >= task.max_attempts {
+                        if *failure_class == FailureClass::Assertion {
+                            task.transition(TaskState::Attention, None)?;
+                            false
+                        } else {
+                            task.transition(TaskState::Failed, None)?;
+                            true
+                        }
                     } else {
                         if let Some(next) = next_compute_class(task.preferred_compute) {
                             task.preferred_compute = next.min(task.maximum_compute);
