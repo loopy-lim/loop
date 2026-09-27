@@ -12,6 +12,8 @@
 
 실행 중 정정 과제 D에서는 검사 실패 attention을 `retry`로 해결한 뒤 Rust graph가 `active`/`ready`가 됐지만, 종료된 detached owner는 재기동되지 않았다. Pi Lead의 `loop_resolve`와 `/loop resolve`는 상태 변경만 호출하던 경로였다. 두 경로가 attention 해결 후 active이며 worker가 없을 때 `resume`으로 owner 시작을 요청하게 바꿨다. 시작 요청이 실패하면 완료됐다고 말하지 않고 재시작 실패를 반환한다. 그 이전 버전의 Pi에서 별도 `loop_control resume`을 호출하자 `timing-format` 완료 직후 등록된 `hour-format`이 자동 실행됐다. 새 자동 재기동 경로는 fake backend 회귀 검사를 통과했으며 실제 attention 재현으로는 아직 다시 검증하지 않았다.
 
+같은 D 결과의 Pi 최종 메시지는 `timing-format: done` 옆에 이전 시도의 `typecheck exit 1`을 결과처럼 표시했다. 완료된 task는 최신 성공 요약을 우선하고 이전 실패는 최종 결과 줄에서 제외하도록 고쳤다. 실제 검사 기록은 영속 task 상세에 남는다.
+
 Pi Lead의 시간 영수증은 요청 turn, `loop_run` 호출, 확인된 owner 인계, terminal 결과 표시의 경계만 측정한다. 세션 재연결로 요청 시각을 잃었거나 handoff가 실패하면 없는 구간을 숫자로 채우지 않는다. 표시된 `요청→결과`는 **해당 run의 결과 표시**까지다. 자동 후속 run이 필요한 원래 목표의 전체 완료 시간은 fixture 실행에서 별도로 기록해야 한다.
 
 첫 실사용에서 Pi의 `sendMessage(..., triggerTurn: true)`로 시작한 내부 재검토는 `before_agent_start`를 호출하지 않았다. 이전 구현은 다음 **사용자** turn을 내부 재검토로 잘못 분류해 자동 후속 run 표시를 붙이고 다음 완료 재검토를 생략했다. Pi 0.87.1의 실제 turn 경로와 세션 기록을 확인한 뒤, 내부 `loop-final-review`의 `message_start`와 `agent_end`로 구분하도록 고쳤다. 내부 재검토와 이후 사용자 정정을 연속 실행하는 회귀 테스트가 통과했다. 수정본을 Pi TUI에서 `/reload`한 뒤 새 사용자 작업 두 개를 연속 실행했고, 각 완료마다 `loop-final-review`가 한 번씩 기록되며 두 run 모두 `loop-run-auto-follow-up`으로 잘못 표시되지 않음을 세션 기록에서 확인했다.
@@ -20,8 +22,8 @@ Pi Lead의 시간 영수증은 요청 turn, `loop_run` 호출, 확인된 owner �
 
 | 검사 | 결과 | 증거 범위 |
 | --- | --- | --- |
-| `bun test packages/pi-loop/test/lead.test.ts packages/pi-loop/test/timing.test.ts` | 35 pass, 0 fail | fake Pi의 내부 재검토·다음 사용자 turn 구분, attention 후 owner 재시작·실패 보고, 시간 누락 |
-| `bun run check` | exit 0; architecture 8 pass, Bun 671 pass/0 fail, Rust workspace tests 및 codegen/typecheck 통과 | 현재 작업 트리의 오프라인 회귀 검사. 병행 미커밋 변경도 포함됨 |
+| `bun test packages/pi-loop/test/lead.test.ts packages/pi-loop/test/timing.test.ts` | 36 pass, 0 fail | fake Pi의 내부 재검토·다음 사용자 turn 구분, attention 후 owner 재시작·실패 보고, 이전 실패의 최종 결과 오표시 방지 |
+| `bun run check` | exit 0; architecture 8 pass, Bun 672 pass/0 fail, Rust workspace tests 및 codegen/typecheck 통과 | 현재 작업 트리의 오프라인 회귀 검사. 병행 미커밋 변경도 포함됨 |
 | `bun run build:cli` | exit 0; Node Pi 확장과 CLI 빌드, native bridge staging | 패키지 생성 |
 | 설치된 Pi 확장 비교 | `dist/loop-pi-extension.js`와 `~/.local/bin/loop-pi-extension.js` SHA-256 동일 | 새 Pi Lead 세션에서 이 버전 로드 가능. 이미 실행 중인 Pi 프로세스는 재시작 전까지 구버전일 수 있음 |
 | Pi native Z.AI 인증 | `ready` (`pi auth check --provider zai --model glm-5.3-flash --json --no-refresh`) | native auth 저장소의 준비 상태 |
