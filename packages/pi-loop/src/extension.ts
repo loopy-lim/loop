@@ -212,9 +212,12 @@ export function registerLoopExtension(
         const detail = await backend.task(snapshot.runId, task.id, context.cwd);
         const passed = detail.previousChecks.filter(check => check.exitCode === 0 && !check.timedOut);
         const checks = passed.length ? ` · checks ${passed.map(check => check.id).join(", ")}` : "";
-        const finding = task.lastFailure ?? task.resultSummary;
+        const finding = task.state === "done" ? task.resultSummary : task.lastFailure ?? task.resultSummary;
         return `${task.id}: ${task.state}${checks}${finding ? ` · ${finding}` : ""}`;
-      } catch { return `${task.id}: ${task.state} · ${task.lastFailure ?? "check details unavailable"}`; }
+      } catch {
+        const finding = task.state === "done" ? task.resultSummary : task.lastFailure;
+        return `${task.id}: ${task.state} · ${finding ?? "check details unavailable"}`;
+      }
     }));
     if (currentRunId !== snapshot.runId) return;
     const done = snapshot.tasks.filter(task => task.state === "done").length;

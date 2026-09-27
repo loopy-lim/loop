@@ -708,6 +708,27 @@ test("final message prioritizes a late failed task over earlier successful tasks
   await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
 });
 
+test("a repaired task final message does not present an earlier failure as its result", async () => {
+  const host = fakePi();
+  const messages: string[] = [];
+  host.api.sendMessage = message => { if (message.customType === "loop-final") messages.push(message.content); };
+  const repaired = {
+    ...snapshot("run-repaired"),
+    state: "completed" as const,
+    tasks: [{ ...snapshot("run-repaired").tasks[0]!, state: "done" as const, lastFailure: "old typecheck exit 1", resultSummary: "Formatting verified" }],
+    lastSequence: 5,
+  };
+  registerLoopExtension(host.api, fakeBackend({ async snapshot() { return repaired; } }), undefined, settings);
+  const piContext = { ...context(), ui: { notify() {}, setStatus() {} }, sessionManager: { getBranch: () => [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-repaired", workingDirectory: "/project" } }] } };
+
+  await host.events.get("session_start")?.at(-1)?.({}, piContext);
+  await Bun.sleep(20);
+  expect(messages).toHaveLength(1);
+  expect(messages[0]).toContain("Formatting verified");
+  expect(messages[0]).not.toContain("old typecheck exit 1");
+  await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
+});
+
 test("Pi Lead surfaces a verifier FAIL even when executable checks marked the run completed", async () => {
   const host = fakePi();
   const messages: string[] = [];
