@@ -2,13 +2,15 @@
 
 - 날짜: 2026-09-27
 - 범위: `bbc6670` 검사 실패 재시도, `f0fcf2f` 완료 후 목표 재검토, `a89ec9c`·`db06a35` Pi Lead 시간 계측과 첫 실사용에서 찾은 재검토 turn 분류 수정.
-- 비교 과제: [고정 fixture](../benchmarks/lead-turnaround-fixtures.md). A의 Pi Lead 경로를 한 번 실행했다. 단일 worker 기준선과 B~D, P50/P95는 아직 `미측정`이다.
+- 비교 과제: [고정 fixture](../benchmarks/lead-turnaround-fixtures.md). A의 Pi Lead 경로를 한 번 실행했다. D는 환경 오류와 사람 개입이 섞인 진단 실행이다. 단일 worker 기준선과 B·C, P50/P95는 아직 `미측정`이다.
 
 ## 재현과 변경
 
 저장된 402개 run snapshot을 읽기 전용으로 훑었을 때, 지속 중인 active run에 실행 가능한 task가 남았는데 전진하지 않는 영속 상태는 발견되지 않았다. 최근 실패 사례에는 검증 명령의 nonzero exit가 첫 시도에서 `Assertion`으로 분류되고, 허용된 `maxAttempts`가 남아 있어도 run이 terminal failed로 끝나 종속 task가 blocked되는 경로가 있었다. 이 분기는 제한된 재시도 후 소진 시 attention으로 전환하도록 수정했다. 잘못된 completion contract는 즉시 실패로 남는다. 기존 terminal run의 기록을 자동 변경하지는 않는다.
 
 원래 요청의 일부가 graph에 없으면 모든 등록 task가 done이어도 graph 자체는 이를 알 수 없다. Pi Lead는 이제 terminal 결과를 대화에 표시한 뒤 원래 요청·후속 정정·실행 검사와 대조하는 turn을 한 번 시작한다. 빠진 기준이 있으면 명시적 검사와 함께 후속 run을 만들 수 있다. 자동 후속 run은 같은 재검토를 다시 예약하지 않는다. 명시적으로 취소한 run도 자동 재검토하지 않는다. 이 판단은 모델이 하므로 실제 요청에서 빠진 기준을 항상 찾아낸다는 보장은 아직 없다.
+
+실행 중 정정 과제 D에서는 검사 실패 attention을 `retry`로 해결한 뒤 Rust graph가 `active`/`ready`가 됐지만, 종료된 detached owner는 재기동되지 않았다. Pi Lead의 `loop_resolve`와 `/loop resolve`는 상태 변경만 호출하던 경로였다. 두 경로가 attention 해결 후 active이며 worker가 없을 때 `resume`으로 owner 시작을 요청하게 바꿨다. 시작 요청이 실패하면 완료됐다고 말하지 않고 재시작 실패를 반환한다. 그 이전 버전의 Pi에서 별도 `loop_control resume`을 호출하자 `timing-format` 완료 직후 등록된 `hour-format`이 자동 실행됐다. 새 자동 재기동 경로는 fake backend 회귀 검사를 통과했으며 실제 attention 재현으로는 아직 다시 검증하지 않았다.
 
 Pi Lead의 시간 영수증은 요청 turn, `loop_run` 호출, 확인된 owner 인계, terminal 결과 표시의 경계만 측정한다. 세션 재연결로 요청 시각을 잃었거나 handoff가 실패하면 없는 구간을 숫자로 채우지 않는다. 표시된 `요청→결과`는 **해당 run의 결과 표시**까지다. 자동 후속 run이 필요한 원래 목표의 전체 완료 시간은 fixture 실행에서 별도로 기록해야 한다.
 
@@ -18,14 +20,15 @@ Pi Lead의 시간 영수증은 요청 turn, `loop_run` 호출, 확인된 owner �
 
 | 검사 | 결과 | 증거 범위 |
 | --- | --- | --- |
-| `bun test packages/pi-loop/test/lead.test.ts packages/pi-loop/test/timing.test.ts` | 33 pass, 0 fail | fake Pi의 내부 재검토·다음 사용자 turn 구분, 취소·시간 누락, 가짜 시계 경계 |
-| `bun run check` | exit 0; architecture 8 pass, Bun 669 pass/0 fail, Rust workspace tests 및 codegen/typecheck 통과 | 현재 작업 트리의 오프라인 회귀 검사. 병행 미커밋 변경도 포함됨 |
+| `bun test packages/pi-loop/test/lead.test.ts packages/pi-loop/test/timing.test.ts` | 35 pass, 0 fail | fake Pi의 내부 재검토·다음 사용자 turn 구분, attention 후 owner 재시작·실패 보고, 시간 누락 |
+| `bun run check` | exit 0; architecture 8 pass, Bun 671 pass/0 fail, Rust workspace tests 및 codegen/typecheck 통과 | 현재 작업 트리의 오프라인 회귀 검사. 병행 미커밋 변경도 포함됨 |
 | `bun run build:cli` | exit 0; Node Pi 확장과 CLI 빌드, native bridge staging | 패키지 생성 |
 | 설치된 Pi 확장 비교 | `dist/loop-pi-extension.js`와 `~/.local/bin/loop-pi-extension.js` SHA-256 동일 | 새 Pi Lead 세션에서 이 버전 로드 가능. 이미 실행 중인 Pi 프로세스는 재시작 전까지 구버전일 수 있음 |
 | Pi native Z.AI 인증 | `ready` (`pi auth check --provider zai --model glm-5.3-flash --json --no-refresh`) | native auth 저장소의 준비 상태 |
 | Pi `glm-5.3-flashx` 짧은 실호출 | 일반 Pi 6.7초, 설치된 Loop 확장 포함 Pi 1.68초; 둘 다 예상 문구, exit 0, 관측 429 없음 | 현재 quota의 두 단일 호출과 확장 로드. 개발 과제 수행·worker 실행·Herdr 화면 완료 증거는 아님 |
 | Herdr 실사용 A | 서버 0.8.2, Pi Lead pane `w53:p6B`에서 `loop_run` 제출; worker pane `w53:p6C`가 실행 중 보이고 완료 후 agent 목록에서 사라짐 | 단일 fixture의 TUI 표시·정리 관찰. 다른 실패·중단 경우까지 일반화하지 않음 |
 | 수정 후 연속 사용자 작업 | 62.4초 테스트 run: 요청→인계 4.2초, 요청→결과 21.4초. 이어진 120초 테스트 run: 요청→인계 3.4초, 요청→결과 20.6초. 두 run 모두 focused 6 pass·typecheck 통과, 완료 후 자동 재검토 메시지 기록 | 실제 Pi-native Z.AI·Herdr TUI의 turn 분류 및 worker 탭 종료 회귀. 동일 작업 반복 속도 비교는 아님 |
+| 실행 중 정정 D | Lead가 `hour-format` 종속 task를 즉시 등록. 환경 오류로 3회 재시도 뒤 attention; 환경 복구 후 `retry`가 active/ready만 만든 것을 관찰. 별도 resume 뒤 첫 task 1/2, 종속 task 자동 시작, 최종 2/2 완료 | graph 추가·후속 자동 dispatch·복구 경계 실사용 증거. 환경 오류와 사람 입력이 있어 개발 속도 비교에서 제외 |
 
 ## 고정 과제 A의 첫 실사용
 
@@ -33,4 +36,4 @@ Pi Lead의 시간 영수증은 요청 turn, `loop_run` 호출, 확인된 owner �
 
 외부 diff 확인에서 `bun.lock` 2줄 추가·2줄 삭제가 보여 같은 Pi 대화에 변경 범위를 정정했다. Pi는 새 후속 run을 시도했으나 첫 graph 제출이 compute 범위 오류로 거부됐다. 둘째 제출로 worker를 시작해 `bun.lock`을 원복하고 테스트를 다시 통과했다. 정정 사용자 메시지→후속 run 최종 표시는 33.3초, 첫 요청→범위 정정 완료 표시는 152.1초였다. 이 값에는 첫 최종 표시 뒤 약 30초의 사람 확인 지연이 포함된다. 첫 제출 실패로 정정 run의 요청 시각은 계측 상태에서 사라져 `도구→인계 0.2초`와 `인계→결과 18.2초`만 표시됐다. 숫자를 합쳐 요청→완료 시간으로 꾸미지 않았다.
 
-실제 개발 속도 개선율, 네 fixture의 의미적 완료율, 실행 **중** steering 반영률은 추가 비교 실행 전까지 주장하지 않는다. 최근 10개 run에서 별도 scheduler 정지 사례를 특정하지 못했으므로 같은 증상이 재현되면 event 순서와 Pi 표시 시각을 함께 기록해 구분한다.
+실제 개발 속도 개선율, 네 fixture의 반복 완료율, 실행 **중** steering의 보편적 반영률은 추가 비교 실행 전까지 주장하지 않는다. 최근 10개 run의 영속 상태에서는 별도 scheduler 정지 사례를 특정하지 못했지만, 위 D 실행으로 attention 해결 후 owner 재기동 누락을 확인했다.
