@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use loop_core::attention::{Attention, AttentionKind};
 use loop_core::event::{Event, EventKind};
 use loop_core::policy::ComputeClass;
-use loop_core::task::{CompletionCheck, CompletionContract, Task, TaskId, TaskKind, TaskState};
+use loop_core::task::{CompletionCheck, CompletionContract, Task, TaskId, TaskKind, TaskState, VerificationEvidence};
 use loop_store::{ObservedWorkerState, RecoveredWorkerState, SqliteStore};
 
 fn task() -> Task {
@@ -20,6 +20,58 @@ fn task() -> Task {
     .completion_contract(CompletionContract::new([CompletionCheck::new("tests")]))
     .build()
     .unwrap()
+}
+
+#[test]
+fn append_task_validates_current_graph_and_run_state_atomically() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = SqliteStore::open(dir.path().join("loop.db")).unwrap();
+    store.append(&Event::new("run-1", EventKind::RunCreated)).unwrap();
+    let mut missing = task();
+    missing.dependencies = vec![TaskId::from("unknown")];
+    assert!(store.append_task(&Event::new("run-1", EventKind::TaskCreated(missing))).is_err());
+    assert!(store.projection("run-1").unwrap().tasks.is_empty());
+
+    let mut unchecked = task();
+    unchecked.completion_contract = CompletionContract::default();
+    assert!(store.append_task(&Event::new("run-1", EventKind::TaskCreated(unchecked))).is_err());
+    assert!(store.projection("run-1").unwrap().tasks.is_empty());
+
+    store.append_task(&Event::new("run-1", EventKind::TaskCreated(task()))).unwrap();
+    assert_eq!(store.projection("run-1").unwrap().tasks.len(), 1);
+    store.append(&Event::new("run-1", EventKind::RunCancellationRequested)).unwrap();
+    assert!(store.append_task(&Event::new("run-1", EventKind::TaskCreated({ let mut next = task(); next.id = TaskId::from("late"); next }))).is_err());
+    assert_eq!(store.projection("run-1").unwrap().tasks.len(), 1);
+}
+
+#[test]
+fn verification_completion_and_task_insertion_serialize_in_either_order() {
+    for add_first in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = SqliteStore::open(dir.path().join("loop.db")).unwrap();
+        let run = "race";
+        store.append_batch(&[
+            Event::new(run, EventKind::RunCreated),
+            Event::new(run, EventKind::TaskCreated(task())),
+            Event::new(run, EventKind::TaskReady(TaskId::from("impl"))),
+            Event::new(run, EventKind::WorkerStarted { task_id: TaskId::from("impl"), worker_id: "w".into() }),
+            Event::new(run, EventKind::WorkerFinished { task_id: TaskId::from("impl"), worker_id: "w".into() }),
+        ]).unwrap();
+        let mut late = task();
+        late.id = TaskId::from("late");
+        late.dependencies = vec![TaskId::from("impl")];
+        let insertion = Event::new(run, EventKind::TaskCreated(late));
+        let verification = Event::new(run, EventKind::VerificationPassed { task_id: TaskId::from("impl"), evidence: VerificationEvidence::new([("tests", true)]) });
+        if add_first { store.append_task(&insertion).unwrap(); }
+        store.append_verification_owned(&verification, None).unwrap();
+        if add_first {
+            assert_eq!(store.projection(run).unwrap().run_state, Some(loop_core::run::RunState::Active));
+            assert_eq!(store.projection(run).unwrap().tasks[&TaskId::from("late")].state, TaskState::Pending);
+        } else {
+            assert_eq!(store.projection(run).unwrap().run_state, Some(loop_core::run::RunState::Completed));
+            assert!(store.append_task(&insertion).is_err());
+        }
+    }
 }
 
 #[test]

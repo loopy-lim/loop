@@ -1,11 +1,28 @@
 import { expect, test } from "bun:test";
 import { spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import * as protocol from "@loop/protocol";
 import { Orchestrator } from "@loop/orchestrator";
 import { FakeProvider, ProviderRegistry } from "@loop/providers";
+import { waitForOwnerReady } from "../src/dispatcher";
+
+test("detached handoff waits for this child lease, rejects a stopped owner, and accepts fast terminal", async () => {
+  const active = { runId: "run-1", state: "active", lastSequence: 1, executionOwner: "99:other", executionExpiresAt: Date.now() + 5_000 } as protocol.SnapshotOutput;
+  const owner = { pid: 42, exitCode: null, signalCode: null } as ChildProcess;
+  let polls = 0;
+  const accepted = await waitForOwnerReady({ owner, snapshot: async () => {
+    polls++;
+    return polls === 1 ? active : { ...active, executionOwner: "42:nonce" };
+  }, ownerGraceMs: 300 });
+  expect(accepted.executionOwner).toBe("42:nonce");
+  expect(polls).toBe(2);
+  await expect(waitForOwnerReady({ owner: { ...owner, exitCode: 1 } as ChildProcess, snapshot: async () => active, ownerGraceMs: 20 })).rejects.toThrow("run-1");
+  await expect(waitForOwnerReady({ owner, snapshot: async () => ({ ...active, state: "completed", executionOwner: null, executionExpiresAt: null }), ownerGraceMs: 20 })).resolves.toMatchObject({ state: "completed" });
+  await expect(waitForOwnerReady({ owner, snapshot: async () => active, ownerGraceMs: 20 })).rejects.toThrow("lease");
+});
 
 test("detached owner completes the persisted graph after its UI observer exits", async () => {
   await protocol.rustra.ready();

@@ -1,7 +1,7 @@
 # Pi Lead 한 대화에서 끝나는 Loop 개발 흐름
 
 - 날짜: 2026-09-27
-- 상태: 대화 설계 승인, 문서 검토 대기
+- 상태: 구현 완료; 오프라인 검증의 기존 baseline 실패와 실공급자 속도 비교 한계는 검증 기록 참조
 - 범위: Herdr 안의 Pi Lead TUI, Loop CLI 인계·관찰, 기존 Rust 실행 그래프와 steering 경로
 - 근거: [개발 속도 비교 조사](../../research/2026-09-27-agent-development-velocity-comparison.md), [Herdr worker 탭 결정](../../decisions/2026-09-24-herdr-live-conversation-tabs.md), [출력 한도](../../decisions/ui-output-limits.md)
 

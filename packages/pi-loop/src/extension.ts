@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { Type } from "typebox";
 import type { RunSummary } from "@loop/orchestrator";
@@ -52,8 +54,17 @@ import { renderLoopRunSummary } from "./ui/summary";
 
 interface PiContext {
   cwd: string;
-  ui: { notify(message: string, level?: "info" | "success" | "warning" | "error"): void };
+  ui: {
+    notify(message: string, level?: "info" | "success" | "warning" | "error"): void;
+    setStatus?(key: string, text: string | undefined): void;
+  };
+  sessionManager?: { getBranch(): Array<{ type: string; customType?: string; data?: unknown }> };
 }
+
+type LeadToolParams = {
+  intent?: string; tasksJson?: string; runId?: string; taskId?: string;
+  taskJson?: string; attentionId?: string; resolution?: string; action?: string;
+};
 
 interface PiToolResult {
   content: Array<{ type: "text"; text: string }>;
@@ -75,15 +86,17 @@ export interface PiExtensionApi {
     parameters: unknown;
     execute(
       toolCallId: string,
-      params: { intent: string; tasksJson: string; runId?: string },
+      params: LeadToolParams,
       signal: AbortSignal,
       onUpdate: ((value: PiToolResult) => void) | undefined,
       context: PiContext,
     ): Promise<PiToolResult>;
   }): void;
+  appendEntry?(customType: string, data: unknown): void;
+  sendMessage?(message: { customType: string; content: string; display: boolean }, options?: { triggerTurn?: boolean }): void;
   on(
-    event: PiLifecycleEvent,
-    handler: () => Promise<void> | void,
+    event: PiLifecycleEvent | "session_tree",
+    handler: (event: unknown, context: PiContext) => Promise<void> | void,
   ): void;
   on(
     event: "before_agent_start",
@@ -117,6 +130,7 @@ export interface LoopLeadBackend {
   task(runId: string, taskId: string, cwd: string): Promise<TaskContextOutput>;
   runs(cwd: string): Promise<RunListOutput[]>;
   models(cwd: string): Promise<string[]>;
+  addTask(runId: string, task: TaskSpecInput, cwd: string): Promise<SnapshotOutput>;
 }
 
 export function registerLoopExtension(
@@ -127,6 +141,149 @@ export function registerLoopExtension(
 ): void {
   const { limits, vocabulary } = settings;
   let currentRunId: string | undefined;
+  let lastUserPrompt = "";
+  let observer: ReturnType<typeof setInterval> | undefined;
+  let observedSequence = -1;
+  let observedAttention = new Set<string>();
+  let observerBusy = false;
+  let observerVersion = 0;
+  let restoreVersion = 0;
+  const announcedAttention = new Set<string>();
+  const announcedFinal = new Set<string>();
+
+  const stopObserver = () => {
+    observerVersion++;
+    if (observer) clearInterval(observer);
+    observer = undefined;
+    observedSequence = -1;
+    observedAttention = new Set();
+  };
+  const reportFinal = async (snapshot: SnapshotOutput, context: PiContext) => {
+    const prioritized = [...snapshot.tasks].sort((left, right) => {
+      const priority = (state: string) => state === "failed" ? 0 : state === "cancelled" ? 1 : state === "done" ? 3 : 2;
+      return priority(left.state) - priority(right.state);
+    });
+    const findings = await Promise.all(prioritized.slice(0, limits.findingsLineLimit).map(async task => {
+      try {
+        const detail = await backend.task(snapshot.runId, task.id, context.cwd);
+        const passed = detail.previousChecks.filter(check => check.exitCode === 0 && !check.timedOut);
+        const checks = passed.length ? ` · checks ${passed.map(check => check.id).join(", ")}` : "";
+        const finding = task.lastFailure ?? task.resultSummary;
+        return `${task.id}: ${task.state}${checks}${finding ? ` · ${finding}` : ""}`;
+      } catch { return `${task.id}: ${task.state} · ${task.lastFailure ?? "check details unavailable"}`; }
+    }));
+    if (currentRunId !== snapshot.runId) return;
+    const done = snapshot.tasks.filter(task => task.state === "done").length;
+    const body = compactLines([
+      `Run ${snapshot.runId}`,
+      `State: ${snapshot.state}`,
+      `Verified tasks: ${done}/${snapshot.tasks.length}`,
+      ...findings,
+      ...(snapshot.tasks.length > findings.length ? [`… ${snapshot.tasks.length - findings.length} more tasks`] : []),
+    ], { lineLimit: limits.statusLineLimit, lineTextLimit: limits.lineTextLimit, overflow: omitted => `… ${omitted} more` }).join("\n");
+    pi.sendMessage?.({ customType: "loop-final", content: body, display: true }, { triggerTurn: false });
+  };
+  const acceptSnapshot = (snapshot: SnapshotOutput, context: PiContext) => {
+    if (canonical(snapshot.workingDirectory) !== canonical(context.cwd)) throw new Error("Loop run belongs to another working directory");
+    const sequence = Number(snapshot.lastSequence);
+    const done = snapshot.tasks.filter(task => task.state === "done").length;
+    context.ui.setStatus?.("loop", `Loop ${snapshot.state} · ${done}/${snapshot.tasks.length} · ${snapshot.activeWorkers.length} workers · ${snapshot.openAttentionIds.length} attention`);
+    if (sequence <= observedSequence) return;
+    observedSequence = sequence;
+    const newAttention = snapshot.openAttentionIds.filter(id => !observedAttention.has(id) && !announcedAttention.has(`${snapshot.runId}:${id}`));
+    for (const id of newAttention) {
+      announcedAttention.add(`${snapshot.runId}:${id}`);
+      pi.appendEntry?.("loop-run-attention", { runId: snapshot.runId, attentionId: id });
+      const detail = snapshot.attention.find(item => item.id === id);
+      pi.sendMessage?.({ customType: "loop-attention", content: compactLines([
+        `Loop attention ${id}`,
+        singleLine(detail?.summary ?? "Decision needed", limits.lineTextLimit),
+        "Answer in this conversation to resolve it.",
+      ], { lineLimit: limits.attentionLineLimit, lineTextLimit: limits.lineTextLimit, overflow: omitted => `… ${omitted} more` }).join("\n"), display: true }, { triggerTurn: false });
+    }
+    observedAttention = new Set(snapshot.openAttentionIds);
+    if (["completed", "failed", "cancelled"].includes(snapshot.state)) {
+      if (!announcedFinal.has(snapshot.runId)) {
+        announcedFinal.add(snapshot.runId);
+        pi.appendEntry?.("loop-run-final", { runId: snapshot.runId, lastSequence: sequence });
+        void reportFinal(snapshot, context);
+      }
+      stopObserver();
+    }
+  };
+  const observe = (runId: string, context: PiContext) => {
+    stopObserver();
+    const version = observerVersion;
+    const poll = async () => {
+      if (observerBusy || currentRunId !== runId) return;
+      observerBusy = true;
+      try {
+        const snapshot = await backend.snapshot(runId, context.cwd);
+        if (version === observerVersion && currentRunId === runId) acceptSnapshot(snapshot, context);
+      }
+      catch { if (version === observerVersion) context.ui.setStatus?.("loop", `Loop ${runId} · observation unavailable`); }
+      finally { observerBusy = false; }
+    };
+    void poll();
+    observer = setInterval(() => void poll(), 500);
+    observer.unref?.();
+  };
+  const bind = (runId: string, context: PiContext) => {
+    restoreVersion++;
+    currentRunId = runId;
+    pi.appendEntry?.("loop-run-binding", { runId, workingDirectory: canonical(context.cwd) });
+    if (context.ui.setStatus || pi.sendMessage) observe(runId, context);
+  };
+  const restore = async (_event: unknown, context: PiContext) => {
+    const version = ++restoreVersion;
+    stopObserver();
+    announcedAttention.clear();
+    announcedFinal.clear();
+    currentRunId = undefined;
+    const cwd = canonical(context.cwd);
+    let lastBinding: { runId?: string; workingDirectory?: string } | undefined;
+    for (const entry of context.sessionManager?.getBranch() ?? []) {
+      if (entry.type === "custom" && entry.customType === "loop-run-final") {
+        const data = entry.data as { runId?: string } | undefined;
+        if (data?.runId) announcedFinal.add(data.runId);
+      }
+      if (entry.type === "custom" && entry.customType === "loop-run-attention") {
+        const data = entry.data as { runId?: string; attentionId?: string } | undefined;
+        if (data?.runId && data.attentionId) announcedAttention.add(`${data.runId}:${data.attentionId}`);
+      }
+      if (entry.type !== "custom" || entry.customType !== "loop-run-binding") continue;
+      lastBinding = entry.data as { runId?: string; workingDirectory?: string } | undefined;
+    }
+    if (lastBinding?.runId) {
+      if (lastBinding.workingDirectory !== cwd) {
+        context.ui.setStatus?.("loop", "Loop binding belongs to another directory");
+        return;
+      }
+      currentRunId = lastBinding.runId;
+    }
+    try {
+      if (!currentRunId) {
+        const candidates: string[] = [];
+        for (const run of await backend.runs(context.cwd)) {
+          if (version !== restoreVersion) return;
+          if (!["active", "pausing", "paused", "attention", "cancelling"].includes(run.state)) continue;
+          const snapshot = await backend.snapshot(run.runId, context.cwd);
+          if (version !== restoreVersion) return;
+          if (canonical(snapshot.workingDirectory) === cwd) candidates.push(run.runId);
+        }
+        if (version !== restoreVersion) return;
+        if (candidates.length === 1) bind(candidates[0]!, context);
+        else if (candidates.length > 1) context.ui.setStatus?.("loop", `${candidates.length} Loop runs · choose one in conversation`);
+      } else {
+        const snapshot = await backend.snapshot(currentRunId, context.cwd);
+        if (version !== restoreVersion) return;
+        if (canonical(snapshot.workingDirectory) === cwd) observe(currentRunId, context);
+        else currentRunId = undefined;
+      }
+    } catch {
+      if (version === restoreVersion) context.ui.setStatus?.("loop", "Loop status unavailable");
+    }
+  };
 
   registerHerdrLifecycle(pi, lifecycle);
 
@@ -147,9 +304,13 @@ export function registerLoopExtension(
       runId: Type.Optional(Type.String({ description: "Stable run id; omit to generate one" })),
     }),
     async execute(_toolCallId, params, signal, onUpdate, context) {
+      if (!params.intent || !params.tasksJson) throw new Error("loop_run requires intent and tasksJson");
       const runId = params.runId?.trim() || `loop-${randomUUID()}`;
       const tasks = normalizePersonas(parseTasks(params.tasksJson), vocabulary);
-      currentRunId = runId;
+      const active = await activeRunsInDirectory(context);
+      if (active.length > 0) {
+        throw new Error(`Active Loop run ${active.map(run => run.runId).join(", ")} already exists in this directory. Ask whether to include this goal or queue it after completion.`);
+      }
       onUpdate?.(result([
         singleLine(`Run ${runId}`, limits.lineTextLimit),
         singleLine(`Starting ${tasks.length} tasks`, limits.lineTextLimit),
@@ -167,9 +328,116 @@ export function registerLoopExtension(
           }));
         },
       }), tasks.length);
+      bind(runId, context);
       const text = renderLeadRunSummary(runId, summary, limits);
-      context.ui.notify(text, summary.status === "completed" ? "success" : "warning");
+      context.ui.notify(text, summary.status === "completed" ? "success" : "info");
       return result(text, { runId, status: summary.status });
+    },
+  });
+
+  const current = async (context: PiContext, requested?: string) => {
+    const runId = requested?.trim() || currentRunId;
+    if (!runId) throw new Error("No unique current Loop run. Ask the user to identify the run.");
+    const snapshot = await backend.snapshot(runId, context.cwd);
+    if (canonical(snapshot.workingDirectory) !== canonical(context.cwd)) throw new Error("Loop run belongs to another working directory");
+    return snapshot;
+  };
+
+  const activeRunsInDirectory = async (context: PiContext) => {
+    const active: SnapshotOutput[] = [];
+    for (const run of await backend.runs(context.cwd)) {
+      if (!["active", "pausing", "paused", "attention", "cancelling"].includes(run.state)) continue;
+      const snapshot = await backend.snapshot(run.runId, context.cwd);
+      if (canonical(snapshot.workingDirectory) === canonical(context.cwd)) active.push(snapshot);
+    }
+    return active;
+  };
+
+  pi.registerTool({
+    name: "loop_status", label: "Loop Status",
+    description: "Read the current durable run status, graph, workers, or attention. With no bound run, list active runs and their intents so the user can choose in conversation.",
+    parameters: Type.Object({ runId: Type.Optional(Type.String()), action: Type.Optional(Type.Union([Type.Literal("status"), Type.Literal("graph"), Type.Literal("workers"), Type.Literal("attention")])) }),
+    async execute(_id, params, _signal, _update, context) {
+      if (!params.runId && !currentRunId) {
+        const candidates = await activeRunsInDirectory(context);
+        const lines = candidates.length
+          ? candidates.map(run => `${run.runId} · ${run.state} · ${run.intent}`)
+          : ["No active Loop run in this directory."];
+        return result(compactLines(lines, { lineLimit: limits.statusLineLimit, lineTextLimit: limits.lineTextLimit, overflow: omitted => `… ${omitted} more runs` }).join("\n"), { candidates: candidates.map(run => run.runId) });
+      }
+      const snapshot = await current(context, params.runId);
+      return result(renderLeadSnapshot(params.action ?? "status", snapshot, limits), { runId: snapshot.runId, state: snapshot.state });
+    },
+  });
+  pi.registerTool({
+    name: "loop_select_run", label: "Loop Select Run",
+    description: "Bind one run to this Pi conversation after the user identifies its goal among the run list. This changes the target for subsequent natural-language control.",
+    parameters: Type.Object({ runId: Type.String() }),
+    async execute(_id, params, _signal, _update, context) {
+      if (!params.runId?.trim()) throw new Error("runId is required");
+      const snapshot = await current(context, params.runId);
+      bind(snapshot.runId, context);
+      return result(renderLeadSnapshot("status", snapshot, limits), { runId: snapshot.runId, state: snapshot.state });
+    },
+  });
+  pi.registerTool({
+    name: "loop_steer", label: "Loop Steer",
+    description: "Record the latest user's exact correction for one running task. Select taskId from loop_status; use 'all' only when the user explicitly addresses every task. The original user text is forwarded unchanged.",
+    parameters: Type.Object({ taskId: Type.String(), runId: Type.Optional(Type.String()) }),
+    async execute(_id, params, _signal, _update, context) {
+      const snapshot = await current(context, params.runId);
+      if (!params.taskId?.trim() || !lastUserPrompt.trim()) throw new Error("Steering needs a task target and the latest user message");
+      const next = await backend.steer(snapshot.runId, params.taskId, lastUserPrompt, context.cwd);
+      acceptSnapshot(next, context);
+      return result(`Guidance recorded for ${params.taskId}. Worker delivery and completion remain pending.`, { runId: snapshot.runId, state: next.state });
+    },
+  });
+  pi.registerTool({
+    name: "loop_add_task", label: "Loop Add Task",
+    description: `Add one task to the current active graph. Provide generated TaskSpecInput JSON with explicit dependencies, read/write scopes, and completion checks. ${taskSpecInputDescription(vocabulary)}`,
+    parameters: Type.Object({ taskJson: Type.String(), runId: Type.Optional(Type.String()) }),
+    async execute(_id, params, _signal, _update, context) {
+      const snapshot = await current(context, params.runId);
+      if (!params.taskJson) throw new Error("taskJson is required");
+      const task = normalizePersonas([parseTask(params.taskJson)], vocabulary)[0]!;
+      try {
+        const next = await backend.addTask(snapshot.runId, task, context.cwd);
+        acceptSnapshot(next, context);
+        return result(`Task ${task.id} recorded in run ${snapshot.runId}; completion checks remain pending.`, { runId: snapshot.runId, taskId: task.id, state: next.state });
+      } catch (error) {
+        const latest = await backend.snapshot(snapshot.runId, context.cwd);
+        if (["completed", "failed", "cancelled"].includes(latest.state)) {
+          throw new Error(`Run ${snapshot.runId} is ${latest.state}; preserve the requested task for a new run: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        throw error;
+      }
+    },
+  });
+  pi.registerTool({
+    name: "loop_resolve", label: "Loop Resolve Attention",
+    description: "Resolve a material attention item only from the user's explicit answer. Inspect loop_status attention first; never guess approval.",
+    parameters: Type.Object({ attentionId: Type.String(), resolution: Type.String(), runId: Type.Optional(Type.String()) }),
+    async execute(_id, params, _signal, _update, context) {
+      const snapshot = await current(context, params.runId);
+      if (!params.attentionId || !params.resolution) throw new Error("attentionId and explicit resolution are required");
+      const next = await backend.resolve(snapshot.runId, params.attentionId, params.resolution, context.cwd);
+      acceptSnapshot(next, context);
+      return result(renderLeadSnapshot("status", next, limits), { runId: snapshot.runId, state: next.state });
+    },
+  });
+  pi.registerTool({
+    name: "loop_control", label: "Loop Control",
+    description: "Pause, resume, or cancel the current run when the user explicitly asks.",
+    parameters: Type.Object({ action: Type.Union([Type.Literal("pause"), Type.Literal("resume"), Type.Literal("cancel")]), runId: Type.Optional(Type.String()) }),
+    async execute(_id, params, _signal, _update, context) {
+      const snapshot = await current(context, params.runId);
+      const next = params.action === "pause" ? await backend.pause(snapshot.runId, context.cwd)
+        : params.action === "resume" ? await backend.resume(snapshot.runId, context.cwd)
+          : params.action === "cancel" ? await backend.cancel(snapshot.runId, context.cwd)
+            : undefined;
+      if (!next) throw new Error("Choose pause, resume, or cancel");
+      acceptSnapshot(next, context);
+      return result(renderLeadSnapshot("status", next, limits), { runId: snapshot.runId, state: next.state });
     },
   });
 
@@ -240,9 +508,13 @@ export function registerLoopExtension(
     },
   });
 
-  pi.on("before_agent_start", (event) => ({
-    systemPrompt: `${event.systemPrompt}\n\n${leadInstructions(event.prompt, vocabulary)}`,
-  }));
+  pi.on("session_start", restore);
+  pi.on("session_tree", restore);
+  pi.on("session_shutdown", () => { restoreVersion++; stopObserver(); });
+  pi.on("before_agent_start", (event) => {
+    lastUserPrompt = event.prompt;
+    return { systemPrompt: `${event.systemPrompt}\n\n${leadInstructions(event.prompt, vocabulary, currentRunId)}` };
+  });
 }
 
 class DefaultLoopLeadBackend implements LoopLeadBackend {
@@ -312,6 +584,11 @@ class DefaultLoopLeadBackend implements LoopLeadBackend {
     return models.map((model) => `${model.computeClass} · ${model.id}`);
   }
 
+  async addTask(runId: string, task: TaskSpecInput, cwd: string): Promise<SnapshotOutput> {
+    await this.#json<unknown>(["add-task", runId, "--json"], cwd, JSON.stringify(task));
+    return this.snapshot(runId, cwd);
+  }
+
   async #json<T>(
     args: string[],
     cwd: string,
@@ -336,101 +613,42 @@ export function runLoopPlan(input: {
   onProgress?: (snapshot: SnapshotOutput) => void;
 }): Promise<RunSummary> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.env.LOOP_BIN || "loop", ["__execute-plan", "--json", "--stream"], {
+    const child = spawn(process.env.LOOP_BIN || "loop", ["__execute-plan", "--json", "--detach"], {
       cwd: input.cwd,
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
     });
-    let buffer = "";
+    let stdout = "";
     let stderr = "";
-    let summary: RunSummary | undefined;
-    let settled = false;
-    let ownerObserved = false;
-    let disconnectRequested = false;
-    let stopTimer: ReturnType<typeof setTimeout> | undefined;
-    const stopObserver = () => {
-      if (child.exitCode !== null || child.signalCode !== null || stopTimer) return;
-      child.kill("SIGTERM");
-      stopTimer = setTimeout(() => child.kill("SIGKILL"), 1000);
-      stopTimer.unref();
-    };
-    const runningSummary = (): RunSummary => ({
-      status: "running",
-      tasks: input.tasks.length,
-      escalations: [],
-      providersByTask: {},
-      startedAt: {},
-      finishedAt: {},
-    });
-    const cleanup = () => input.signal.removeEventListener("abort", disconnectObserver);
-    const succeed = (value: RunSummary) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      resolve(value);
-    };
-    const fail = (error: unknown) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(error);
-    };
-    const disconnectObserver = () => {
-      if (settled) return;
-      if (!ownerObserved) {
-        disconnectRequested = true;
-        return;
-      }
-      stopObserver();
-      succeed(runningSummary());
-    };
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    child.stdin.on("error", (error) => {
-      if (!settled) fail(error);
-    });
-    child.stdout.on("data", (chunk: string) => {
-      buffer += chunk;
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() ?? "";
-      for (const line of lines.filter(Boolean)) {
-        try {
-          const event = JSON.parse(line) as { type?: string; value?: unknown };
-          if (event.type === "snapshot") {
-            ownerObserved = true;
-            input.onProgress?.(event.value as SnapshotOutput);
-          }
-          if (event.type === "summary") {
-            ownerObserved = true;
-            summary = normalizeRunSummary(event.value, input.tasks.length);
-            // A durable summary completes the tool protocol. Native handles or
-            // inherited pipes must not keep Pi waiting for the observer's exit.
-            succeed(summary);
-            stopObserver();
-          }
-          if (disconnectRequested && ownerObserved) disconnectObserver();
-        } catch {
-          stopObserver();
-          fail(new Error("Loop returned invalid progress JSON"));
-        }
+    child.stdout.on("data", (chunk: string) => (stdout += chunk));
+    child.stderr.on("data", (chunk: string) => (stderr += chunk));
+    child.stdin.on("error", () => { /* close handler reports the handoff result */ });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      input.signal.removeEventListener("abort", abort);
+      if (code !== 0) {
+        reject(new Error(`Run ${input.runId} handoff failed: ${(stderr || `Loop handoff exited ${code}`).slice(-4_000)}`));
+        return;
+      }
+      try {
+        const accepted = JSON.parse(stdout) as { runId?: string; state?: string; ownerPid?: number };
+        if (accepted.runId !== input.runId || !accepted.state || !accepted.ownerPid) throw new Error("invalid handoff receipt");
+        resolve(normalizeRunSummary({ status: accepted.state === "active" ? "running" : accepted.state, tasks: input.tasks.length }, input.tasks.length));
+      } catch {
+        reject(new Error("Loop returned invalid handoff JSON"));
       }
     });
-    child.stderr.on("data", (chunk: string) => (stderr += chunk));
-    child.on("error", fail);
-    child.on("close", (code) => {
-      if (stopTimer) clearTimeout(stopTimer);
-      if (settled) return;
-      if (code === 0 && summary) succeed(summary);
-      else fail(new Error((stderr || `Loop exited ${code} without a summary`).slice(-4_000)));
-    });
+    const abort = () => child.kill("SIGTERM");
     child.stdin.end(JSON.stringify({
       intent: input.intent,
       runId: input.runId,
       workingDirectory: input.cwd,
       tasks: input.tasks,
     }));
-    if (input.signal.aborted) disconnectObserver();
-    else input.signal.addEventListener("abort", disconnectObserver, { once: true });
+    if (input.signal.aborted) abort();
+    else input.signal.addEventListener("abort", abort, { once: true });
   });
 }
 
@@ -478,6 +696,14 @@ function parseTasks(value: string): TaskSpecInput[] {
   return validateDecomposition(parsed as TaskSpecInput[]);
 }
 
+function parseTask(value: string): TaskSpecInput {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as TaskSpecInput;
+  } catch { /* stable error below */ }
+  throw new Error("Loop task must be a TaskSpecInput JSON object");
+}
+
 /**
  * Worker persona contract: unknown ids are rejected deterministically at
  * submission time (never silently diverge from the orchestrator's runtime
@@ -510,17 +736,21 @@ function personaKindDefaultsProse(vocabulary: PersonaVocabulary): string {
   return `${pairs}${explicit}`;
 }
 
-function leadInstructions(intent: string, vocabulary: PersonaVocabulary): string {
+function leadInstructions(intent: string, vocabulary: PersonaVocabulary, currentRunId?: string): string {
   return [
     "You are the interactive Lead for Loop.",
-    "For an engineering execution request, inspect only the minimum path and contract context needed to create a small dependency DAG, then call loop_run exactly once.",
+    currentRunId
+      ? `Current bound run: ${currentRunId}. For progress questions use loop_status; for a correction use loop_steer with the relevant task, for an added requirement use loop_add_task, for attention use loop_resolve, and for explicit pause/resume/cancel use loop_control. Read the durable snapshot before acting. Do not submit another run for a follow-up within this goal. If the user asks for a separate goal while this run is active, ask whether to include it or queue it after completion.`
+      : "No run is bound. Use loop_status without arguments to list active runs and their intents, then loop_select_run after the user identifies the goal. Do not ask the user to supply an internal run ID.",
+    "For a new engineering execution request, inspect only the minimum path and contract context needed to create a small dependency DAG, then call loop_run exactly once.",
     "Do not deeply debug, investigate root causes, or implement the change yourself; delegate that work promptly to Loop tasks.",
     "Every task must declare dependencies, exact read and write ownership, requirements, preferredCompute, minimumCompute, maximumCompute, maxAttempts, and at least one machine-verifiable completionChecks entry.",
     "Requirements must name the result and evidence the worker returns; downstream tasks receive dependency result summaries rather than implicit context.",
     "Do not claim completion yourself; Loop owns verification through the declared completion checks and worker evidence.",
     "If a previous run ended in attention, paused, cancelled, or otherwise incomplete, explicitly carry the original goal's unresolved acceptance criteria into the next delegated DAG and state the available resume or follow-up path.",
     "Use only prior conversation and visible Loop output to identify unfinished work. Do not invent unavailable run or task details.",
-    decompositionPrompt(intent, vocabulary),
+    "Keep the user's mid-run correction text unchanged when calling loop_steer. Report recorded guidance, worker delivery, and verified completion as separate facts. A successful worker response alone is not verification.",
+    ...(currentRunId ? [] : [decompositionPrompt(intent, vocabulary)]),
   ].join("\n");
 }
 
@@ -541,19 +771,46 @@ function renderLeadRunSummary(
   summary: RunSummary,
   limits: OutputLimits,
 ): string {
-  if (summary.status !== "running") return renderLoopRunSummary(runId, summary, limits);
+  if (summary.status === "completed") return renderLoopRunSummary(runId, summary, limits);
+  if (summary.status !== "running") return compactLines([
+    `Run ${runId}`,
+    `State: ${summary.status}`,
+    "Goal: incomplete",
+    `Tasks: ${summary.tasks}`,
+    "Remaining: original acceptance criteria are not fully verified.",
+    summary.status === "attention" ? "Answer the attention here, then ask me to continue." : "Ask me to resume or adjust this run here.",
+  ], { lineLimit: limits.attentionLineLimit, lineTextLimit: limits.lineTextLimit, overflow: omitted => `… ${omitted} more` }).join("\n");
   return compactLines([
     `Run ${runId}`,
     "State: running",
     "Goal: incomplete",
     `Tasks: ${summary.tasks}`,
-    "Execution continues in the detached owner; this observer disconnected.",
-    `Next: /loop status ${runId}`,
+    "Execution continues in the detached owner.",
+    "Ask for progress or give corrections here at any time.",
   ], {
     lineLimit: limits.statusLineLimit,
     lineTextLimit: limits.lineTextLimit,
     overflow: (omitted) => `… ${omitted} more status lines`,
   }).join("\n");
+}
+
+function renderLeadSnapshot(action: string, snapshot: SnapshotOutput, limits: OutputLimits): string {
+  if (action !== "attention") return renderSnapshot(action, snapshot, limits);
+  if (snapshot.openAttentionIds.length === 0) return "No open attention items.";
+  const lines = [
+    `Attention: ${snapshot.openAttentionIds.length} open`,
+    ...snapshot.openAttentionIds.map(id => {
+      const item = snapshot.attention.find(value => value.id === id);
+      return item ? `${id} · ${item.kind} · ${item.summary}` : id;
+    }),
+    "Answer the relevant item here to continue.",
+  ];
+  return compactLines(lines, { lineLimit: limits.attentionLineLimit, lineTextLimit: limits.lineTextLimit, overflow: omitted => `… ${omitted} more attention items` }).join("\n");
+}
+
+function canonical(path: string): string {
+  try { return realpathSync.native(path); }
+  catch { return resolve(path); }
 }
 
 function result(text: string, details: Record<string, unknown>): PiToolResult {

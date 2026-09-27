@@ -408,6 +408,25 @@ test("runs, pause, guidance and attention resolution operate on durable state", 
   expect((await protocol.getSnapshot(input)).state).toBe("paused");
 });
 
+test("add-task accepts generated task JSON and reports graph rejection", async () => {
+  await protocol.rustra.ready();
+  const databasePath = join(mkdtempSync(join(tmpdir(), "loop-cli-add-task-")), "loop.sqlite");
+  const input = { databasePath, runId: "add-task-run" };
+  await protocol.createRun(input);
+  const flags = ["--config", join(root, "config"), "--database", databasePath, "--json"];
+  const task: protocol.TaskSpecInput = {
+    id: "fix", title: "Fix", kind: "implementation", dependencies: [], readScope: ["src/**"], writeScope: ["src/fix.ts"], requirements: ["Return test evidence"],
+    completionChecks: [{ id: "test", command: "true", args: [], timeoutMs: 1000 }], preferredCompute: "fast", minimumCompute: "tiny", maximumCompute: "strong", maxAttempts: 1,
+  };
+  const accepted = output();
+  expect(await runCli(["add-task", input.runId, ...flags], { io: accepted.io, stdin: JSON.stringify(task) })).toBe(0);
+  expect(JSON.parse(accepted.stdout())).toMatchObject({ accepted: true });
+  expect((await protocol.getSnapshot(input)).tasks.map(value => value.id)).toEqual(["fix"]);
+  const rejected = output();
+  expect(await runCli(["add-task", input.runId, ...flags], { io: rejected.io, stdin: JSON.stringify({ ...task, id: "next", dependencies: ["missing"] }) })).toBe(1);
+  expect((await protocol.getSnapshot(input)).tasks.map(value => value.id)).toEqual(["fix"]);
+});
+
 test("steer relay process command mirrors the owner spawn layout", () => {
   expect(buildSteerRelayCommand({
     executablePath: "/usr/bin/bun",

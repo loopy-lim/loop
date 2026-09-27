@@ -126,6 +126,9 @@ impl RunProjection {
             }
             EventKind::TaskCreated(task) => {
                 self.require_controllable()?;
+                if !matches!(self.run_state, Some(RunState::Active | RunState::Paused | RunState::Attention)) {
+                    return Err(ProjectionError::TaskInsertionState(self.run_state));
+                }
                 if self.tasks.insert(task.id.clone(), task.clone()).is_some() {
                     return Err(ProjectionError::TaskAlreadyCreated(task.id.clone()));
                 }
@@ -511,6 +514,8 @@ fn require_run(projection: &RunProjection) -> Result<(), ProjectionError> {
 
 #[derive(Debug, Error)]
 pub enum ProjectionError {
+    #[error("tasks can only be added to active, paused, or attention runs; current state: {0:?}")]
+    TaskInsertionState(Option<RunState>),
     #[error("run working directory cannot change after configuration")]
     ContextMismatch,
     #[error("terminal runs cannot be resumed or paused")]

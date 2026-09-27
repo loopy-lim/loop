@@ -229,7 +229,7 @@ test("runLoopPlan serializes persona into the SubmitPlanInput stdin payload", as
     "process.stdin.on('data', (chunk) => (input += chunk));",
     "process.stdin.on('end', () => {",
     "  writeFileSync(process.env.OUT, input);",
-    "  console.log(JSON.stringify({ type: 'summary', value: { status: 'completed', tasks: 2 } }));",
+    "  console.log(JSON.stringify({ runId: 'run-persona-stdin', state: 'active', ownerPid: 42 }));",
     "});",
   ].join("\n"));
   chmodSync(executable, 0o755);
@@ -348,6 +348,9 @@ function fakeBackend(overrides: Partial<LoopLeadBackend> = {}): LoopLeadBackend 
     },
     async models() {
       return [];
+    },
+    async addTask() {
+      throw new Error("not used in persona tests");
     },
     ...overrides,
   };

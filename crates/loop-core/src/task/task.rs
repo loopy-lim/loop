@@ -69,6 +69,10 @@ impl Task {
         TaskBuilder::new(id, title.into(), kind)
     }
 
+    pub fn validate_for_insertion(&self) -> Result<(), TaskBuildError> {
+        TaskBuilder { task: self.clone() }.build().map(|_| ())
+    }
+
     pub fn transition(
         &mut self,
         next: TaskState,

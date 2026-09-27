@@ -18,6 +18,32 @@ export async function spawnOwner(input: {
   return child;
 }
 
+/** A detached handoff is accepted only after the child owns a live lease or
+ * the run has already reached a durable terminal state. */
+export async function waitForOwnerReady(input: {
+  owner: ChildProcess;
+  snapshot(): Promise<SnapshotOutput>;
+  ownerGraceMs?: number;
+}): Promise<SnapshotOutput> {
+  // A previous owner's lease can remain valid for five seconds. Give a new
+  // owner enough time to wait for that lease and then claim its own.
+  const deadline = Date.now() + (input.ownerGraceMs ?? 15_000);
+  let latest: SnapshotOutput | undefined;
+  while (true) {
+    latest = await input.snapshot();
+    if (["completed", "failed", "cancelled"].includes(latest.state)) return latest;
+    const leaseAlive = latest.executionExpiresAt != null && Number(latest.executionExpiresAt) > Date.now();
+    if (leaseAlive && latest.executionOwner?.startsWith(`${input.owner.pid}:`)) return latest;
+    if (input.owner.exitCode !== null || input.owner.signalCode !== null) {
+      throw new Error(`Execution owner stopped before lease confirmation for run ${latest.runId} (${latest.state}).`);
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`Execution owner lease was not confirmed for run ${latest.runId} (${latest.state}). Inspect loop status ${latest.runId}.`);
+    }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+}
+
 export async function observeRun(input: {
   snapshot(): Promise<SnapshotOutput>;
   onSnapshot(snapshot: SnapshotOutput): void;

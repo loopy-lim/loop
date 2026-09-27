@@ -20,6 +20,25 @@ fn implementation_task() -> Task {
 }
 
 #[test]
+fn new_tasks_are_rejected_while_run_is_pausing_or_cancelling() {
+    for state in [RunState::Pausing, RunState::Cancelling] {
+        let mut projection = RunProjection::default();
+        projection.apply(&Event::new("run-1", EventKind::RunCreated)).unwrap();
+        projection.run_state = Some(state);
+        let result = projection.apply(&Event::new("run-1", EventKind::TaskCreated(implementation_task())));
+        assert!(result.is_err(), "task inserted while {state}");
+        assert!(projection.tasks.is_empty());
+    }
+    for state in [RunState::Active, RunState::Paused, RunState::Attention] {
+        let mut projection = RunProjection::default();
+        projection.apply(&Event::new("run-1", EventKind::RunCreated)).unwrap();
+        projection.run_state = Some(state);
+        projection.apply(&Event::new("run-1", EventKind::TaskCreated(implementation_task()))).unwrap();
+        assert_eq!(projection.tasks.len(), 1);
+    }
+}
+
+#[test]
 fn event_reducer_only_completes_a_task_after_verification_evidence() {
     let mut projection = RunProjection::default();
     let events = [

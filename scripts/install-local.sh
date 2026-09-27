@@ -103,6 +103,7 @@ herdr plugin link "$repo_root/plugins/loop-agent" --enabled
 [ -f "$config_dir/models.toml" ] || install -m 0644 "$repo_root/config/models.toml" "$config_dir/models.toml"
 [ -f "$config_dir/policy.toml" ] || install -m 0644 "$repo_root/config/policy.toml" "$config_dir/policy.toml"
 [ -f "$config_dir/providers.toml" ] || install -m 0600 "$repo_root/config/providers.example.toml" "$config_dir/providers.toml"
+LOOP_CONFIG_DIR="$config_dir" sh "$repo_root/scripts/install-personas.sh"
 
 echo "Installed Loop CLI: $bin_dir/loop"
 echo "Installed Loop Lead extension: $bin_dir/loop-pi-extension.js"

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -49,6 +49,31 @@ test("the Node-targeted Pi extension loads without Bun globals", async () => {
 
     expect(loaded.stderr).toBe("");
     expect(loaded.status).toBe(0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("persona installer fills missing defaults without replacing user edits or ignoring LOOP_CONFIG_DIR", () => {
+  const directory = mkdtempSync(join(tmpdir(), "loop-personas-install-"));
+  const configDirectory = join(directory, "custom config");
+  mkdirSync(join(configDirectory, "personas"), { recursive: true });
+  writeFileSync(join(configDirectory, "personas", "implementer.md"), "My custom worker\n");
+  symlinkSync("missing-user-target", join(configDirectory, "personas", "designer.md"));
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const installed = spawnSync("sh", [resolve(root, "scripts/install-personas.sh")], {
+        encoding: "utf8", env: { ...process.env, LOOP_CONFIG_DIR: configDirectory },
+      });
+      expect(installed.status).toBe(0);
+      expect(installed.stderr).toBe("");
+    }
+    expect(readFileSync(join(configDirectory, "personas", "implementer.md"), "utf8")).toBe("My custom worker\n");
+    expect(lstatSync(join(configDirectory, "personas", "designer.md")).isSymbolicLink()).toBe(true);
+    for (const name of ["defaults.toml", "architect.md", "debugger.md", "reviewer.md"]) {
+      expect(existsSync(join(configDirectory, "personas", name))).toBe(true);
+    }
+    expect(existsSync(join(directory, ".config", "loop", "personas"))).toBe(false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

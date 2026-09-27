@@ -13,7 +13,7 @@ import {
 } from "@loop/orchestrator/config";
 import { compactLines, renderSnapshot, renderTaskContext, type OutputLimits, type SnapshotRenderOptions } from "@loop/presentation";
 import { cleanupBullet, emptyState, moreItems, separator, statusGlyph } from "@loop/presentation";
-import { observeRun, spawnOwner } from "./dispatcher";
+import { observeRun, spawnOwner, waitForOwnerReady } from "./dispatcher";
 import type { BenchmarkReport } from "@loop/orchestrator";
 import type { ProviderRegistry } from "@loop/providers";
 import type { SnapshotOutput, TaskSpecInput } from "@loop/protocol";
@@ -129,6 +129,17 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
       const runs = await protocol.listRuns({ databasePath: config.databasePath });
       if (parsed.json) print(runs, true, io);
       else io.stdout(compactLines(runs.map(run => `${run.runId} ${separator.list} ${run.state}`), { lineLimit: config.output.listLineLimit, lineTextLimit: config.output.lineTextLimit, overflow: n => moreItems(n, "runs") }).join("\n") + "\n");
+      return 0;
+    }
+    if (parsed.command === "add-task") {
+      const runId = parsed.operands[0];
+      if (!runId) throw new UsageError("add-task requires <run-id>");
+      const task = parseTaskPayload(options.stdin ?? await Bun.stdin.text());
+      const config = configuration(parsed);
+      const protocol = await loadProtocol();
+      await protocol.rustra.ready();
+      const accepted = await protocol.addTask({ databasePath: config.databasePath, runId, task });
+      print(accepted, parsed.json, io);
       return 0;
     }
     if (["status", "graph", "workers", "attention", "cancel", "pause", "resume", "steer", "resolve", "reconcile", "task", "watch"].includes(parsed.command)) {
@@ -264,7 +275,11 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
       if (payload) {
         await runtime.prepare(payload);
         const owner = await launchOwner(parsed, config, runId, plan.workingDirectory, options);
-        if (parsed.detach) { print({ runId, state: "active", ownerPid: owner.pid }, true, io); return 0; }
+        if (parsed.detach) {
+          const ready = await waitForOwnerReady({ owner, snapshot: () => runtime.snapshot(runId) });
+          print({ runId, state: ready.state, ownerPid: owner.pid, lastSequence: ready.lastSequence }, true, io);
+          return 0;
+        }
         const summary = await observeRun({ snapshot: () => runtime.snapshot(runId), owner,
           onSnapshot: snapshot => { if (parsed.stream) io.stdout(JSON.stringify({ type: "snapshot", value: snapshot }) + "\n"); } });
         io.stdout(parsed.stream ? JSON.stringify({ type: "summary", value: summary }) + "\n" : JSON.stringify(summary) + "\n");
@@ -773,6 +788,14 @@ function parseExecutionPayload(value: string): {
   };
 }
 
+function parseTaskPayload(value: string): TaskSpecInput {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as TaskSpecInput;
+  } catch { /* stable usage error below */ }
+  throw new UsageError("add-task requires a TaskSpecInput JSON object on stdin");
+}
+
 function print(value: unknown, json: boolean, io: CliIo): void {
   if (json) io.stdout(`${JSON.stringify(value)}\n`);
   else io.stdout(`${JSON.stringify(value, null, 2)}\n`);
@@ -807,6 +830,7 @@ Usage:
   loop watch [run-id] [--json]
   loop reconcile <run-id> <task-id> stopped  Confirm an orphaned task stopped before retrying
   loop task <run-id> <task-id>       Show context, results and verification evidence
+  loop add-task <run-id> --json      Read TaskSpecInput JSON from stdin and add it atomically
   loop steer <run-id> <task-id|all> <message>
   loop resolve <run-id> <attention-id> <approved|retry|cancel|answer>
   loop cleanup [run-id] [--execute] [--keep <N>]

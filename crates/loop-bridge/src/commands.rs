@@ -14,7 +14,7 @@ use loop_core::task::{
     DependencyConsumption, EvidenceLevel, SemanticAccess, SemanticConflictResolution,
     SemanticTouchpoint, Task, TaskId, TaskKind, TaskState, VerificationEvidence, WorkOwnership,
 };
-use loop_store::SqliteStore;
+use loop_store::{SqliteStore, StoreError};
 use rustra::prelude::*;
 use std::sync::OnceLock;
 
@@ -438,14 +438,15 @@ pub fn submit_plan(input: SubmitPlanInput) -> Result<SubmitPlanOutput> {
 pub fn add_task(input: AddTaskInput) -> Result<OperationOutput> {
     let task = task_from_input(input.task)?;
     let mut store = store(&input.database_path)?;
-    let projection = store
-        .projection(&input.run_id)
-        .map_err(|error| bridge_error("run_not_found", error))?;
-    let mut tasks: Vec<_> = projection.tasks.into_values().collect();
-    tasks.push(task.clone());
-    TaskGraph::new(tasks).map_err(|error| bridge_error("invalid_graph", error))?;
     let event = Event::new(&input.run_id, EventKind::TaskCreated(task));
-    append_and_notify(&mut store, &event, "add_task_failed")?;
+    let sequence = store
+        .append_task(&event)
+        .map_err(|error| match error {
+            StoreError::RunNotFound(_) => bridge_error("run_not_found", error),
+            StoreError::Graph(_) | StoreError::Task(_) => bridge_error("invalid_graph", error),
+            _ => bridge_error("add_task_failed", error),
+        })?;
+    notify_run_changed(&input.run_id, sequence);
     Ok(OperationOutput { accepted: true })
 }
 
@@ -662,12 +663,10 @@ pub fn record_verification(input: VerificationInput) -> Result<OperationOutput> 
         }
     };
     let event = Event::new(&input.run_id, kind);
-    append_and_notify_owned(
-        &mut store,
-        &event,
-        execution_owner.as_deref(),
-        "verification_failed",
-    )?;
+    let sequence = store
+        .append_verification_owned(&event, execution_owner.as_deref())
+        .map_err(|error| bridge_error("verification_failed", error))?;
+    notify_run_changed(&input.run_id, sequence);
     if !passed {
         ensure_failure_attention(
             &mut store,
@@ -675,25 +674,6 @@ pub fn record_verification(input: VerificationInput) -> Result<OperationOutput> 
             &failed_task_id,
             &failure_reason,
             execution_owner.as_deref(),
-        )?;
-    }
-    let projection = store
-        .projection(&input.run_id)
-        .map_err(|error| bridge_error("snapshot_failed", error))?;
-    if projection.run_state == Some(RunState::Active)
-        && !projection.has_open_attention()
-        && !projection.tasks.is_empty()
-        && projection
-            .tasks
-            .values()
-            .all(|task| task.state == loop_core::task::TaskState::Done)
-    {
-        let event = Event::new(&input.run_id, EventKind::RunCompleted);
-        append_and_notify_owned(
-            &mut store,
-            &event,
-            execution_owner.as_deref(),
-            "complete_run_failed",
         )?;
     }
     Ok(OperationOutput { accepted: true })

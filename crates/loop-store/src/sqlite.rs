@@ -6,9 +6,10 @@ use loop_core::event::{
     verification_recovery_attention, worker_recovery_attention, Artifact, Event, EventKind,
     ProjectionError, RunProjection,
 };
+use loop_core::graph::{GraphError, TaskGraph};
 use loop_core::policy::{CleanupRefusal, ComputeClass, PurgePlan, RetentionPolicy};
 use loop_core::run::RunState;
-use loop_core::task::TaskState;
+use loop_core::task::{TaskBuildError, TaskState};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use thiserror::Error;
 
@@ -32,7 +33,7 @@ impl SqliteStore {
     }
 
     pub fn append_batch(&mut self, events: &[Event]) -> Result<i64, StoreError> {
-        self.append_batch_internal(events, None, false)
+        self.append_batch_internal(events, None, false, false, false)
     }
 
     pub fn append_batch_owned(
@@ -40,7 +41,25 @@ impl SqliteStore {
         events: &[Event],
         owner: Option<&str>,
     ) -> Result<i64, StoreError> {
-        self.append_batch_internal(events, owner, true)
+        self.append_batch_internal(events, owner, true, false, false)
+    }
+
+    /// Validate a newly added task against the latest graph while holding the
+    /// same SQLite write lock that commits its event.
+    pub fn append_task(&mut self, event: &Event) -> Result<i64, StoreError> {
+        if !matches!(event.kind, EventKind::TaskCreated(_)) {
+            return Err(StoreError::ExpectedTaskCreated);
+        }
+        self.append_batch_internal(std::slice::from_ref(event), None, false, true, false)
+    }
+
+    /// Commit verification and the terminal transition together, so a newly
+    /// inserted task cannot appear between the completion decision and write.
+    pub fn append_verification_owned(&mut self, event: &Event, owner: Option<&str>) -> Result<i64, StoreError> {
+        if !matches!(event.kind, EventKind::VerificationPassed { .. } | EventKind::VerificationFailed { .. } | EventKind::VerificationClassifiedFailure { .. }) {
+            return Err(StoreError::ExpectedVerification);
+        }
+        self.append_batch_internal(std::slice::from_ref(event), owner, true, false, true)
     }
 
     fn append_batch_internal(
@@ -48,6 +67,8 @@ impl SqliteStore {
         events: &[Event],
         owner: Option<&str>,
         enforce_owner: bool,
+        validate_task_graph: bool,
+        auto_complete: bool,
     ) -> Result<i64, StoreError> {
         if events.is_empty() {
             return Ok(0);
@@ -69,12 +90,34 @@ impl SqliteStore {
             Err(StoreError::RunNotFound(_)) => RunProjection::default(),
             Err(error) => return Err(error),
         };
+        if validate_task_graph {
+            if projection.run_id.is_none() {
+                return Err(StoreError::RunNotFound(run_id.clone()));
+            }
+            let mut tasks: Vec<_> = projection.tasks.values().cloned().collect();
+            if let EventKind::TaskCreated(task) = &events[0].kind {
+                task.validate_for_insertion()?;
+                tasks.push(task.clone());
+            }
+            TaskGraph::new(tasks)?;
+        }
+        let mut to_append = events.to_vec();
         for event in events {
             projection.apply(event)?;
         }
+        if auto_complete
+            && projection.run_state == Some(RunState::Active)
+            && !projection.has_open_attention()
+            && !projection.tasks.is_empty()
+            && projection.tasks.values().all(|task| task.state == TaskState::Done)
+        {
+            let completed = Event::new(run_id, EventKind::RunCompleted);
+            projection.apply(&completed)?;
+            to_append.push(completed);
+        }
 
         let mut sequence = 0;
-        for event in events {
+        for event in &to_append {
             apply_indexes(&transaction, event)?;
             let payload = serde_json::to_string(event)?;
             transaction.execute(
@@ -720,6 +763,14 @@ pub struct EventRecord {
 
 #[derive(Debug, Error)]
 pub enum StoreError {
+    #[error("append_verification_owned requires a verification event")]
+    ExpectedVerification,
+    #[error("append_task requires a TaskCreated event")]
+    ExpectedTaskCreated,
+    #[error(transparent)]
+    Graph(#[from] GraphError),
+    #[error(transparent)]
+    Task(#[from] TaskBuildError),
     #[error("execution lease requires a non-empty owner and a TTL between 1 and 60 seconds")]
     InvalidLease,
     #[error("an active, matching execution owner is required")]
