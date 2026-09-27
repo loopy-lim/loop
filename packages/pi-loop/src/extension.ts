@@ -23,6 +23,7 @@ import type {
 
 import { validateDecomposition } from "./lead/decompose";
 import { decompositionPrompt, taskSpecInputDescription } from "./lead/prompts";
+import { LeadTiming, formatFinalTiming, formatHandoffTiming } from "./lead/timing";
 
 /**
  * Lead-facing settings derived once per process from Loop configuration:
@@ -191,6 +192,7 @@ export function registerLoopExtension(
   const automaticFollowUpRuns = new Set<string>();
   let awaitingFinalReviewTurn = false;
   let inFinalReviewTurn = false;
+  let leadTiming = new LeadTiming();
 
   const stopObserver = () => {
     observerVersion++;
@@ -218,11 +220,13 @@ export function registerLoopExtension(
     if (currentRunId !== snapshot.runId) return;
     const done = snapshot.tasks.filter(task => task.state === "done").length;
     const reviewNeeded = verifierReportedFailure(snapshot);
+    const timingLine = formatFinalTiming(leadTiming.finishDisplay(snapshot.runId));
     const body = compactLines([
       `Run ${snapshot.runId}`,
       `State: ${snapshot.state}`,
       reviewNeeded ? `Task checks passed: ${done}/${snapshot.tasks.length}` : `Verified tasks: ${done}/${snapshot.tasks.length}`,
       ...(reviewNeeded ? ["Review needed: verifier reported FAIL; goal incomplete."] : []),
+      ...(timingLine ? [timingLine] : []),
       ...findings,
       ...(snapshot.tasks.length > findings.length ? [`… ${snapshot.tasks.length - findings.length} more tasks`] : []),
     ], { lineLimit: limits.statusLineLimit, lineTextLimit: limits.lineTextLimit, overflow: omitted => `… ${omitted} more` }).join("\n");
@@ -310,6 +314,7 @@ export function registerLoopExtension(
     automaticFollowUpRuns.clear();
     awaitingFinalReviewTurn = false;
     inFinalReviewTurn = false;
+    leadTiming = new LeadTiming();
     currentRunId = undefined;
     const cwd = canonical(context.cwd);
     let lastBinding: { runId?: string; workingDirectory?: string } | undefined;
@@ -390,25 +395,42 @@ export function registerLoopExtension(
         singleLine(`Run ${runId}`, limits.lineTextLimit),
         singleLine(`Starting ${tasks.length} tasks`, limits.lineTextLimit),
       ].join("\n"), { runId }));
-      const summary = normalizeRunSummary(await backend.run({
-        intent: params.intent,
-        tasks,
-        runId,
-        cwd: context.cwd,
-        signal,
-        onProgress: (snapshot) => {
-          onUpdate?.(result(renderSnapshot("status", snapshot, limits), {
-            runId,
-            state: snapshot.state,
-          }));
-        },
-      }), tasks.length);
+      leadTiming.beginSubmission(runId);
+      let summary: RunSummary;
+      try {
+        summary = normalizeRunSummary(await backend.run({
+          intent: params.intent,
+          tasks,
+          runId,
+          cwd: context.cwd,
+          signal,
+          onProgress: (snapshot) => {
+            onUpdate?.(result(renderSnapshot("status", snapshot, limits), {
+              runId,
+              state: snapshot.state,
+            }));
+          },
+        }), tasks.length);
+      } catch (error) {
+        leadTiming.forget(runId);
+        throw error;
+      }
+      const handoffTiming = formatHandoffTiming(leadTiming.confirmHandoff(runId));
       if (inFinalReviewTurn) {
         automaticFollowUpRuns.add(runId);
         pi.appendEntry?.("loop-run-auto-follow-up", { runId });
       }
       bind(runId, context);
-      const text = renderLeadRunSummary(runId, summary, limits);
+      const summaryLines = renderLeadRunSummary(runId, summary, limits).split("\n");
+      const lineLimit = summary.status === "running" || summary.status === "completed" ? limits.statusLineLimit : limits.attentionLineLimit;
+      if (handoffTiming) {
+        if (summaryLines.length >= lineLimit) {
+          const taskLine = summaryLines.findIndex(line => line.startsWith("Tasks:"));
+          if (taskLine >= 0) summaryLines.splice(taskLine, 1);
+        }
+        summaryLines.splice(2, 0, handoffTiming);
+      }
+      const text = compactLines(summaryLines, { lineLimit, lineTextLimit: limits.lineTextLimit, overflow: omitted => `… ${omitted} more` }).join("\n");
       context.ui.notify(text, summary.status === "completed" ? "success" : "info");
       return result(text, { runId, status: summary.status });
     },
@@ -598,6 +620,7 @@ export function registerLoopExtension(
   pi.on("session_tree", restore);
   pi.on("session_shutdown", () => { restoreVersion++; stopObserver(); awaitingFinalReviewTurn = false; inFinalReviewTurn = false; });
   pi.on("before_agent_start", (event) => {
+    leadTiming.beginTurn();
     inFinalReviewTurn = awaitingFinalReviewTurn;
     awaitingFinalReviewTurn = false;
     if (!inFinalReviewTurn) lastUserPrompt = event.prompt;

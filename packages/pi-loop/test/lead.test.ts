@@ -495,6 +495,42 @@ test("Pi Lead reviews a completed goal once and does not recursively review its 
   await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
 });
 
+test("Pi Lead shows measured handoff and final time only in the originating session", async () => {
+  const host = fakePi();
+  const entries: Array<{ type: string; customType: string; data: unknown }> = [];
+  const messages: Array<{ customType: string; content: string }> = [];
+  host.api.appendEntry = (customType, data) => { entries.push({ type: "custom", customType, data }); };
+  host.api.sendMessage = message => { messages.push(message); };
+  const backend = fakeBackend({
+    async run(input) { return { status: "running", tasks: input.tasks.length, escalations: [], providersByTask: {}, startedAt: {}, finishedAt: {} }; },
+    async snapshot(runId) { return { ...emptySnapshot(runId), state: "completed", tasks: [{ ...snapshot(runId).tasks[0]!, state: "done" }], lastSequence: 3 }; },
+  });
+  registerLoopExtension(host.api, backend, undefined, settings);
+  const piContext = { ...context(), ui: { notify() {}, setStatus() {} }, sessionManager: { getBranch: () => entries } };
+  await host.hooks.get("before_agent_start")!({ prompt: "Finish this change", systemPrompt: "base" }, piContext);
+  const handoff = await host.tools.get("loop_run")!.execute("timed", {
+    intent: "Finish this change",
+    runId: "timed-run",
+    tasksJson: JSON.stringify([task("impl", "implementation", [], ["src/**"])]),
+  }, new AbortController().signal, undefined, piContext);
+  expect(handoff.content[0]?.text).toMatch(/요청→인계 \d+\.\d초/);
+  await Bun.sleep(20);
+  const final = messages.find(message => message.customType === "loop-final")?.content;
+  expect(final).toMatch(/요청→결과 \d+\.\d초/);
+  expect(final?.split("\n").length).toBeLessThanOrEqual(8);
+
+  const restored = fakePi();
+  const restoredMessages: Array<{ customType: string; content: string }> = [];
+  restored.api.sendMessage = message => { restoredMessages.push(message); };
+  registerLoopExtension(restored.api, backend, undefined, settings);
+  const restoredContext = { ...piContext, sessionManager: { getBranch: () => entries.filter(entry => entry.customType === "loop-run-binding") } };
+  await restored.events.get("session_start")?.at(-1)?.({}, restoredContext);
+  await Bun.sleep(20);
+  expect(restoredMessages.find(message => message.customType === "loop-final")?.content).not.toContain("요청→결과");
+  await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
+  await restored.events.get("session_shutdown")?.at(-1)?.({}, restoredContext);
+});
+
 test("explicitly cancelled runs report their result without starting an automatic review", async () => {
   const host = fakePi();
   const entries = [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-cancelled", workingDirectory: "/project" } }];
