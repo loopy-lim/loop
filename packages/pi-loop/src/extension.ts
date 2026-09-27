@@ -525,9 +525,9 @@ export function registerLoopExtension(
     async execute(_id, params, _signal, _update, context) {
       const snapshot = await current(context, params.runId);
       if (!params.attentionId || !params.resolution) throw new Error("attentionId and explicit resolution are required");
-      const next = await backend.resolve(snapshot.runId, params.attentionId, params.resolution, context.cwd);
+      const { snapshot: next, restarted } = await resolveAttentionAndRestart(snapshot.runId, params.attentionId, params.resolution, context);
       acceptSnapshot(next, context);
-      return result(renderLeadSnapshot("status", next, limits), { runId: snapshot.runId, state: next.state });
+      return result(withOwnerRestart(renderLeadSnapshot("status", next, limits), restarted), { runId: snapshot.runId, state: next.state });
     },
   });
   pi.registerTool({
@@ -579,12 +579,15 @@ export function registerLoopExtension(
           context.ui.notify(`Usage: /loop ${command} <run> ${target}`, "warning");
           return;
         }
+        const resolved = command === "resolve"
+          ? await resolveAttentionAndRestart(runId, targetId, message, context)
+          : undefined;
         const snapshot = command === "steer"
           ? await backend.steer(runId, targetId, message, context.cwd)
-          : await backend.resolve(runId, targetId, message, context.cwd);
+          : resolved!.snapshot;
         acceptSnapshot(snapshot, context);
         context.ui.notify(
-          renderSnapshot("status", snapshot, limits),
+          withOwnerRestart(renderSnapshot("status", snapshot, limits), resolved?.restarted === true),
           snapshot.state === "attention" ? "warning" : "info",
         );
         return;
@@ -611,6 +614,22 @@ export function registerLoopExtension(
       context.ui.notify(rendered, snapshot.state === "attention" ? "warning" : "info");
     },
   });
+
+  const resolveAttentionAndRestart = async (runId: string, attentionId: string, resolution: string, context: PiContext) => {
+    const resolved = await backend.resolve(runId, attentionId, resolution, context.cwd);
+    if (resolved.state !== "active" || resolved.activeWorkers.length > 0) return { snapshot: resolved, restarted: false };
+    try {
+      return { snapshot: await backend.resume(runId, context.cwd), restarted: true };
+    } catch {
+      throw new Error(`Attention was resolved for ${runId}, but the owner could not restart. Ask to resume this run.`);
+    }
+  };
+  const withOwnerRestart = (rendered: string, restarted: boolean): string => {
+    if (!restarted) return rendered;
+    const lines = rendered.split("\n");
+    lines[0] = singleLine(`Owner restart requested · ${lines[0]}`, limits.lineTextLimit);
+    return lines.join("\n");
+  };
 
   pi.on("session_start", restore);
   pi.on("session_tree", restore);

@@ -303,6 +303,49 @@ test("natural-language tools use the bound run and preserve the user's steering 
   expect(calls).toEqual(["steer:run-x:impl:지금 작업에서 X는 빼줘", "add:run-x:verify", "pause:run-x"]);
 });
 
+test("resolving exhausted failure attention restarts the detached owner for ready tasks", async () => {
+  const host = fakePi();
+  const calls: string[] = [];
+  const backend = fakeBackend({
+    async snapshot(runId) { return { ...snapshot(runId), state: "attention", openAttentionIds: ["failure-1"] }; },
+    async resolve(runId, attentionId, resolution) {
+      calls.push(`resolve:${runId}:${attentionId}:${resolution}`);
+      return { ...snapshot(runId), tasks: [{ ...snapshot(runId).tasks[0]!, state: "ready" }] };
+    },
+    async resume(runId) {
+      calls.push(`resume:${runId}`);
+      return { ...snapshot(runId), tasks: [{ ...snapshot(runId).tasks[0]!, state: "ready" }] };
+    },
+  });
+  registerLoopExtension(host.api, backend, undefined, settings);
+  const piContext = context();
+  const result = await host.tools.get("loop_resolve")!.execute("resolve", {
+    runId: "run-x", attentionId: "failure-1", resolution: "retry",
+  }, new AbortController().signal, undefined, piContext);
+
+  expect(calls).toEqual(["resolve:run-x:failure-1:retry", "resume:run-x"]);
+  expect(result.content[0]?.text).toContain("Owner restart requested");
+  expect(result.content[0]?.text.split("\n").length).toBeLessThanOrEqual(8);
+
+  await host.commands.get("loop")!.handler("resolve run-x failure-1 retry", piContext);
+  expect(calls).toEqual([
+    "resolve:run-x:failure-1:retry", "resume:run-x",
+    "resolve:run-x:failure-1:retry", "resume:run-x",
+  ]);
+});
+
+test("resolved attention reports an owner restart failure to the Lead", async () => {
+  const host = fakePi();
+  registerLoopExtension(host.api, fakeBackend({
+    async resolve(runId) { return { ...snapshot(runId), tasks: [{ ...snapshot(runId).tasks[0]!, state: "ready" }] }; },
+    async resume() { throw new Error("owner launch failed"); },
+  }), undefined, settings);
+
+  await expect(host.tools.get("loop_resolve")!.execute("resolve", {
+    runId: "run-x", attentionId: "failure-1", resolution: "retry",
+  }, new AbortController().signal, undefined, context())).rejects.toThrow("owner could not restart");
+});
+
 test("session start restores one run in this directory and avoids ambiguous auto-attach", async () => {
   const host = fakePi();
   const statuses: string[] = [];
