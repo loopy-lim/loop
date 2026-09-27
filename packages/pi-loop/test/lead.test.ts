@@ -480,7 +480,7 @@ test("Pi Lead reviews a completed goal once and does not recursively review its 
   expect(review).toMatchObject({ display: false, triggerTurn: true });
   expect(review?.content).toContain("original goal");
 
-  await host.hooks.get("before_agent_start")!({ prompt: review!.content, systemPrompt: "base" }, piContext);
+  await host.events.get("message_start")?.at(-1)?.({ message: { role: "custom", customType: "loop-final-review" } }, piContext);
   await expect(host.tools.get("loop_steer")!.execute("review-steer", { taskId: "all" }, new AbortController().signal, undefined, piContext))
     .rejects.toThrow("latest user message");
   await host.tools.get("loop_run")!.execute("follow-up", {
@@ -492,6 +492,17 @@ test("Pi Lead reviews a completed goal once and does not recursively review its 
 
   expect(messages.filter(message => message.customType === "loop-final")).toHaveLength(2);
   expect(messages.filter(message => message.customType === "loop-final-review")).toHaveLength(1);
+  await host.events.get("agent_end")?.at(-1)?.({}, piContext);
+  await host.hooks.get("before_agent_start")!({ prompt: "Another user correction", systemPrompt: "base" }, piContext);
+  await host.events.get("message_start")?.at(-1)?.({ message: { role: "user" } }, piContext);
+  await host.tools.get("loop_run")!.execute("user-correction", {
+    intent: "Apply the later user correction",
+    runId: "run-user-correction",
+    tasksJson: JSON.stringify([task("correction", "implementation", [], ["src/**"])]),
+  }, new AbortController().signal, undefined, piContext);
+  await Bun.sleep(20);
+  expect(messages.filter(message => message.customType === "loop-final")).toHaveLength(3);
+  expect(messages.filter(message => message.customType === "loop-final-review")).toHaveLength(2);
   await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
 });
 

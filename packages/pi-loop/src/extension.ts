@@ -100,7 +100,7 @@ export interface PiExtensionApi {
   appendEntry?(customType: string, data: unknown): void;
   sendMessage?(message: { customType: string; content: string; display: boolean }, options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" }): void | Promise<void>;
   on(
-    event: PiLifecycleEvent | "session_tree",
+    event: PiLifecycleEvent | "session_tree" | "message_start",
     handler: (event: unknown, context: PiContext) => Promise<void> | void,
   ): void;
   on(
@@ -190,7 +190,6 @@ export function registerLoopExtension(
   const announcedAttention = new Set<string>();
   const announcedFinal = new Set<string>();
   const automaticFollowUpRuns = new Set<string>();
-  let awaitingFinalReviewTurn = false;
   let inFinalReviewTurn = false;
   let leadTiming = new LeadTiming();
 
@@ -232,7 +231,6 @@ export function registerLoopExtension(
     ], { lineLimit: limits.statusLineLimit, lineTextLimit: limits.lineTextLimit, overflow: omitted => `… ${omitted} more` }).join("\n");
     await pi.sendMessage?.({ customType: "loop-final", content: body, display: true }, { triggerTurn: false });
     if (snapshot.state !== "cancelled" && !automaticFollowUpRuns.has(snapshot.runId) && pi.sendMessage) {
-      awaitingFinalReviewTurn = true;
       try {
         await pi.sendMessage({
           customType: "loop-final-review",
@@ -240,7 +238,6 @@ export function registerLoopExtension(
           display: false,
         }, { triggerTurn: true, deliverAs: "followUp" });
       } catch {
-        awaitingFinalReviewTurn = false;
         context.ui.notify("Loop final review could not start; ask here to continue the goal.", "warning");
       }
     }
@@ -312,7 +309,6 @@ export function registerLoopExtension(
     announcedAttention.clear();
     announcedFinal.clear();
     automaticFollowUpRuns.clear();
-    awaitingFinalReviewTurn = false;
     inFinalReviewTurn = false;
     leadTiming = new LeadTiming();
     currentRunId = undefined;
@@ -618,12 +614,19 @@ export function registerLoopExtension(
 
   pi.on("session_start", restore);
   pi.on("session_tree", restore);
-  pi.on("session_shutdown", () => { restoreVersion++; stopObserver(); awaitingFinalReviewTurn = false; inFinalReviewTurn = false; });
+  pi.on("session_shutdown", () => { restoreVersion++; stopObserver(); inFinalReviewTurn = false; });
+  pi.on("message_start", (event) => {
+    const message = (event as { message?: { role?: string; customType?: string } }).message;
+    if (message?.role === "custom" && message.customType === "loop-final-review") inFinalReviewTurn = true;
+    else if (message?.role === "user") inFinalReviewTurn = false;
+  });
+  pi.on("agent_end", () => { inFinalReviewTurn = false; });
   pi.on("before_agent_start", (event) => {
     leadTiming.beginTurn();
-    inFinalReviewTurn = awaitingFinalReviewTurn;
-    awaitingFinalReviewTurn = false;
-    if (!inFinalReviewTurn) lastUserPrompt = event.prompt;
+    if (!event.prompt.startsWith("Loop final review for ")) {
+      inFinalReviewTurn = false;
+      lastUserPrompt = event.prompt;
+    }
     return { systemPrompt: `${event.systemPrompt}\n\n${leadInstructions(event.prompt, vocabulary, currentRunId)}` };
   });
 }
