@@ -88,7 +88,6 @@ export function buildProviderRegistry(options: ProviderCompositionOptions): Prov
   const providers: AgentProvider[] = [];
   const environment = options.environment ?? process.env;
   const herdr = options.herdr ?? new HerdrWorkerRuntime();
-  const retainCompletedTabs = options.config.output.workerVisibility === "panes" && Boolean(environment.HERDR_PANE_ID);
 
   for (const [providerId, providerConfig] of Object.entries(options.config.providers)) {
     if (!providerConfig.enabled) continue;
@@ -97,7 +96,7 @@ export function buildProviderRegistry(options: ProviderCompositionOptions): Prov
       const id = `${providerId}:${model.id}`;
       if (providerId === "codex") {
         providers.push(providerConfig.mode === "interactive"
-          ? visibleAgent(id, "codex", model, providerConfig, options.projectRoot, herdr, retainCompletedTabs)
+          ? visibleAgent(id, "codex", model, providerConfig, options.projectRoot, herdr)
           : new CodexProvider({
               id,
               cwd: options.projectRoot,
@@ -107,7 +106,7 @@ export function buildProviderRegistry(options: ProviderCompositionOptions): Prov
             }));
       } else if (providerId === "antigravity") {
         providers.push(providerConfig.mode === "interactive"
-          ? visibleAgent(id, "agy", model, providerConfig, options.projectRoot, herdr, retainCompletedTabs)
+          ? visibleAgent(id, "agy", model, providerConfig, options.projectRoot, herdr)
           : providerConfig.mode === "persistent"
             ? new AgyPersistentProvider({
                 id,
@@ -125,7 +124,7 @@ export function buildProviderRegistry(options: ProviderCompositionOptions): Prov
               }));
       } else if (providerId === "pi") {
         providers.push(providerConfig.mode === "interactive"
-          ? visibleAgent(id, "pi", model, providerConfig, options.projectRoot, herdr, retainCompletedTabs)
+          ? visibleAgent(id, "pi", model, providerConfig, options.projectRoot, herdr)
           : new PiProvider({
               id,
               cwd: options.projectRoot,
@@ -219,7 +218,6 @@ function visibleAgent(
   config: ProviderConfig,
   projectRoot: string,
   herdr: HerdrWorkerRuntime,
-  retainCompletedTabs: boolean,
 ): HerdrAgentProvider {
   const args = kind === "codex"
     ? ["--sandbox", "workspace-write", "--model", model.id]
@@ -234,7 +232,6 @@ function visibleAgent(
     computeClasses: [model.computeClass],
     args,
     available: Boolean(config.command),
-    retainCompletedTabs,
   });
 }
 

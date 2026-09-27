@@ -414,13 +414,6 @@ export class HerdrWorkerRuntime {
     this.#turns.delete(handle.workerId);
   }
 
-  /** Stop tracking a completed worker while leaving its conversation tab for review. */
-  detach(handle: HerdrWorkerHandle): void {
-    validateHandle(handle);
-    this.#forgetTab(handle.tabId);
-    this.#turns.delete(handle.workerId);
-  }
-
   async purgeLeakedWorkspaces(dryRun: boolean): Promise<string[]> {
     const listPayload = await this.#run(["workspace", "list"]).catch(() => null);
     if (!listPayload) return [];
@@ -712,7 +705,7 @@ export interface WorkerLabelInput {
   runId?: string;
 }
 
-/** Short display discriminator for retained tabs from separate runs. */
+/** Short display discriminator for concurrent worker tabs from separate runs. */
 export function workerRunMarker(runId: string): string {
   const readable = runId.replace(/^loop-/, "").replace(/[^a-z0-9]/gi, "").slice(0, 6).toLowerCase();
   return readable || createHash("sha256").update(runId).digest("hex").slice(0, 6);

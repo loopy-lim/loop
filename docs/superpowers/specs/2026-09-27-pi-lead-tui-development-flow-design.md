@@ -75,7 +75,7 @@ Lead는 후속 입력마다 현재 스냅샷을 기준으로 다음 중 하나�
 
 ### 4. worker 탭과 역할 지시
 
-Herdr는 Lead가 있는 workspace에 worker당 `--no-focus` 탭 하나를 만들고, task·kind·attempt 이름을 보여 준다. Pi 위젯은 활성 worker의 task ID를 표시해 해당 탭을 찾을 수 있게 한다. `worker_visibility=panes`이고 Herdr Lead pane에서 실행한 경우 탭 이름과 Pi 위젯에 짧은 실행 식별자를 표시하며, 성공한 대화형 worker 탭은 완료 후에도 살펴볼 수 있게 남긴다. 사용자가 Herdr에서 직접 닫는다. 실패·취소한 worker 탭은 즉시 정리한다. Lead의 질문·승인·steer는 Lead 대화에서 처리한다. Lead는 실행 인계 후 폴링용 `sleep`을 호출하지 않고 turn을 끝내며, 관찰자가 상태와 완료를 표시한다.
+Herdr는 Lead가 있는 workspace에 worker당 `--no-focus` 탭 하나를 만들고, task·kind·attempt·짧은 실행 식별자를 보여 준다. Pi 위젯은 활성 worker의 task ID와 실행 식별자를 표시해 해당 탭을 찾을 수 있게 한다. worker가 성공·실패·취소로 끝나면 해당 탭을 닫으며 Lead 탭과 workspace는 유지한다. Lead의 질문·승인·steer는 Lead 대화에서 처리한다. Lead는 실행 인계 후 폴링용 `sleep`을 호출하지 않고 turn을 끝내며, 관찰자가 상태와 완료를 표시한다.
 
 설치 스크립트는 누락된 기본 `config/personas/*.md`와 `defaults.toml`만 사용자 구성에 추가하고 기존 파일을 덮어쓰지 않는다. Pi Lead의 persona 목록과 worker의 실제 지시문이 같은 구성 경로에서 파생되는지 설치 검증으로 확인한다. 구성 경로가 `LOOP_CONFIG_DIR`로 바뀐 경우 해당 경로를 기준으로 동작한다.
 
@@ -102,7 +102,7 @@ Herdr는 Lead가 있는 workspace에 worker당 `--no-focus` 탭 하나를 만들
 1. **기준선:** 네 fixture와 영속 이벤트로 기존 흐름의 작업 수·접수/worker/검증 시간을 기록한다. 측정할 수 없는 항목은 빈칸으로 보고한다.
 2. **인계·관찰:** owner lease 확인 후 `loop_run`이 반환되고, Pi 한 대화에서 바로 상태 질문을 받을 수 있다. Pi 종료가 owner를 죽이지 않으며 재시작 후 현재 실행이 복구된다.
 3. **자연어 제어:** 실행 중 원문 수정 지시, 새 작업 추가, attention 답변, pause/resume/cancel이 slash 명령 없이 동작한다. 서로 다른 상태인 접수·전달·검증을 정확히 표시한다.
-4. **탭·persona:** worker 탭은 초점 이동 없이 생성된다. `panes` 모드에서는 성공한 대화형 worker 탭을 사용자가 검토 후 닫고, 실패·취소 탭은 정리한다. 누락된 기본 persona가 설치되며 사용자 변경은 보존된다.
+4. **탭·persona:** worker 탭은 초점 이동 없이 생성되고 성공·실패·취소 시 자동으로 닫힌다. Lead 탭은 유지된다. 누락된 기본 persona가 설치되며 사용자 변경은 보존된다.
 5. **완료 검증:** Rust 경합/상태 테스트, Pi extension fake backend 테스트, CLI owner 실패 테스트, `bun run codegen` 및 생성물 검사, `bun run check`를 통과한다. Node 대상 extension 빌드·설치본 일치와 실제 Herdr/Pi TUI 동작은 별도 확인한다.
 
 Rust bridge 형식이 바뀌는 경우 Rust 타입을 먼저 수정하고 `bun run codegen` 결과를 함께 커밋한다. TypeScript에 Rust 도메인 타입의 손수 작성한 복사본을 만들지 않는다. 구현 커밋은 이 문서 검토와 별도 계획 이후 수행한다.

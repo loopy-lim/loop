@@ -35,7 +35,6 @@ export interface LeadSettings {
   limits: OutputLimits;
   vocabulary: PersonaVocabulary;
   herdrVisible?: boolean;
-  retainedWorkerTabs?: boolean;
 }
 
 function loadLeadSettings(): LeadSettings {
@@ -44,8 +43,6 @@ function loadLeadSettings(): LeadSettings {
     limits: config.output,
     vocabulary: derivePersonaVocabulary(config.personas, config.personaKindDefaults),
     herdrVisible: process.env.HERDR_ENV === "1",
-    retainedWorkerTabs: process.env.HERDR_ENV === "1" && Boolean(process.env.HERDR_PANE_ID)
-      && config.output.workerVisibility === "panes",
   };
 }
 import {
@@ -140,7 +137,7 @@ export interface LoopLeadBackend {
   addTask(runId: string, task: TaskSpecInput, cwd: string): Promise<SnapshotOutput>;
 }
 
-function renderRunWidget(snapshot: SnapshotOutput, limits: OutputLimits, herdrVisible: boolean, retainedWorkerTabs: boolean): string[] {
+function renderRunWidget(snapshot: SnapshotOutput, limits: OutputLimits, herdrVisible: boolean): string[] {
   const done = snapshot.tasks.filter(task => task.state === "done").length;
   const headline = `Loop · ${snapshot.state} · ${done}/${snapshot.tasks.length} verified`;
   let detail: string;
@@ -160,7 +157,7 @@ function renderRunWidget(snapshot: SnapshotOutput, limits: OutputLimits, herdrVi
     const visible = working.length > 0 ? working : ready;
     const label = working.length > 0 ? "Working" : "Ready";
     detail = herdrVisible && workerTasks.length > 0
-      ? `Herdr tabs: ${workerTasks.slice(0, 2).join(", ")}${workerTasks.length > 2 ? ` +${workerTasks.length - 2}` : ""}${retainedWorkerTabs ? ` [${workerRunMarker(snapshot.runId)}]` : ""} · steer here`
+      ? `Herdr tabs: ${workerTasks.slice(0, 2).join(", ")}${workerTasks.length > 2 ? ` +${workerTasks.length - 2}` : ""} [${workerRunMarker(snapshot.runId)}] · steer here`
       : visible.length > 0
       ? `${label}: ${visible.slice(0, 2).map(task => task.title).join(", ")}${visible.length > 2 ? ` +${visible.length - 2}` : ""} · ask here to adjust`
       : "Waiting for the next task · ask here to adjust";
@@ -237,7 +234,7 @@ export function registerLoopExtension(
     if (sequence <= observedSequence) return;
     observedSequence = sequence;
     if (!["completed", "failed", "cancelled"].includes(snapshot.state)) {
-      context.ui.setWidget?.("loop-run", renderRunWidget(snapshot, limits, settings.herdrVisible === true, settings.retainedWorkerTabs === true));
+      context.ui.setWidget?.("loop-run", renderRunWidget(snapshot, limits, settings.herdrVisible === true));
     }
     const newAttention = snapshot.openAttentionIds.filter(id => !observedAttention.has(id) && !announcedAttention.has(`${snapshot.runId}:${id}`));
     for (const id of newAttention) {

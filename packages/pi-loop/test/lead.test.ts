@@ -489,7 +489,6 @@ test("Pi widget names the active worker's selectable Herdr tab", async () => {
   registerLoopExtension(host.api, fakeBackend({ async snapshot() { return active; } }), undefined, {
     ...settings,
     herdrVisible: true,
-    retainedWorkerTabs: true,
   });
   const piContext = {
     ...context(),

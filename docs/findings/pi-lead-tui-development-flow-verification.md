@@ -38,6 +38,14 @@
 - 다섯 번째 임시 실행에서는 추가 요구가 최초 `loop_run` 전에 도착해 처음부터 작업 계약과 검사에 포함됐다. `#` 규칙의 코드와 테스트가 존재하며 독립 `bun test` 6개가 통과했다. 이는 실행 중 worker의 steer 처리 증거는 아니다.
 - 여섯 번째 임시 실행의 최초 작업은 20초에 완료됐고, 실행 중 입력한 새 대소문자 기준은 Lead가 terminal 상태를 확인한 후 별도 실행으로 이어졌다. 같은 task ID의 검토 탭이 둘 이상 남자 식별이 어려워져, 새 탭 이름과 위젯에 run 식별자를 추가했다. 후속 worker는 Z.AI `429 Rate limit` 재시도 중 Herdr가 잠시 idle로 판정한 화면을 성공 결과로 잘못 읽었고, 코드 변경 없이 집중 검사 실패로 run이 종료됐다. 재시도 화면에서는 완료 판정을 보류하고 재시도 소진 오류를 quota 실패로 분류하는 회귀 검사를 추가했다. 이 마지막 수정의 인증된 재실행은 공급자 한도 때문에 수행하지 않았다.
 
+## 네이티브 Pi 재실행과 worker 탭 수명
+
+- 사용자 요청에 따라 성공한 worker 탭을 남기는 옵션을 제거했다. `HerdrAgentProvider.release()`는 결과와 관계없이 해당 worker 탭을 닫는다. Lead 탭은 닫지 않는다. 실행 중의 탭 이름과 Pi 위젯에는 같은 짧은 run 식별자가 남는다. fake Herdr runner로 성공·quota 실패 시 닫기와 Lead 탭 보존을 확인했다.
+- 설치된 Pi 0.87.1의 `pi auth check --provider zai --model glm-5.3-flashx --json --no-refresh`는 `ready`였고, Pi 네이티브 인증의 정확 응답 `ZAI_READY`는 1.93초, exit 0이었다. 이 호출은 429를 재현하지 않았다. 사용자 `providers.toml`의 별도 `[providers.zai]` HTTP API 경로를 비활성화하고, `models.toml`의 모호한 bare worker 모델을 `zai/glm-5.3-flashx:medium`으로 지정했다. 이후 설치본 `loop doctor --auth --json`은 exit 0이었다. 키 값은 읽거나 기록하지 않았다.
+- 임시 프로젝트 `/private/tmp/loop-speed-njwv433e/project`에서 실패하는 `bun test`를 먼저 확인하고, 설치본 Loop CLI와 새로 빌드한 Pi 확장으로 한 worker 실행을 시작했다. Lead와 worker 화면은 각각 `(zai) glm-5.3-flashx`를 표시했다. Herdr에 `fix-normalize-lab·impl·a0·63b55b` worker 탭이 나타났다가 작업 종료 후 자동으로 사라졌고, Lead 탭 `Loop-speed-native-zai`는 유지됐다. run `loop-63b55b2d-7d96-4a9c-b84f-9f5fdced7c3b`는 `completed`, 검증 1/1, 독립 재실행 `bun test` 1 pass였다.
+- 이 한 작업의 시각은 요청 제출 11:15:00.7 UTC, 영속 `run_created`/`worker_started` 11:15:08, `worker_finished`/`check_receipts_recorded`/`run_completed` 11:15:21이다. 초 단위 영속 이벤트 기준으로 요청→worker 약 7초, worker→검증 완료 약 13초, 전체 약 20초다. completion check 자체는 9ms였다. 이전 버전의 동일 작업·모델 기준선은 없으므로 속도 향상률은 계산하지 않는다.
+- 이번 작업의 Herdr·provider·Pi Lead·orchestrator 집중 Bun 테스트 368개가 통과했다. 처음 `bun run check`는 동시에 진행 중인 별도 gateway 작업의 타입 오류에서 멈췄지만, 해당 작업이 정리된 뒤 재실행한 전체 `bun run check`는 Rust workspace, 코드 생성, TypeScript, architecture 8개, Bun 661개 모두 통과했다. 이 전체 검사는 병행 미커밋 변경을 포함한 현재 작업 트리에서 실행했으며, 이 커밋만의 별도 checkout 검사는 수행하지 않았다. `bun run build:cli`, 설치본 `loop verify-install --json`(7 tasks, 최대 동시 3, escalation 1)도 통과했고 설치본 Pi 확장과 새 빌드 산출물의 SHA-256이 일치한다.
+
 ## 남은 증거의 한계
 
 인증된 실측은 한 환경의 소수 작업이다. 이전 버전과 동일 조건의 완료 시간 비교가 없어 개발 속도 향상률을 주장하지 않는다. `guidance_delivered`는 Herdr 입력 접수 증거이며, worker의 요구 반영 증거가 아니다. 새 허용 기준에 대한 독립 검사 없이 기존 run의 `completed` 상태만으로 목표 완료를 주장할 수 없다. 로컬 sandbox에서 기본 사용자 DB를 읽을 수 없어 첫 TUI smoke가 DB 접근 오류를 냈고, 확장이 시작을 중단하지 않도록 복구한 뒤 쓰기 가능한 임시 구성 경로에서 다시 확인했다.

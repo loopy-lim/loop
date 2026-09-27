@@ -154,7 +154,7 @@ test("steer rejects workers whose conversation already ended", async () => {
   await expect(provider.steer!(handle.id, "too late")).rejects.toThrow(/no longer running/);
 });
 
-test("completed worker tab remains selectable in Herdr review mode", async () => {
+test("completed worker tab closes when its resources are released", async () => {
   const runner = liveRunner({ kind: "pi", args: [] });
   const provider = new HerdrAgentProvider({
     id: "pi:review",
@@ -163,12 +163,11 @@ test("completed worker tab remains selectable in Herdr review mode", async () =>
     projectRoot: "/project",
     computeClasses: ["fast"],
     pollIntervalMs: 0,
-    retainCompletedTabs: true,
   });
   const handle = await provider.start(input);
   expect(await provider.result(handle.id)).toMatchObject({ success: true });
   await provider.release(handle.id);
-  expect(runner.calls).not.toContainEqual(["tab", "close", "w1:t2"]);
+  expect(runner.calls).toContainEqual(["tab", "close", "w1:t2"]);
 });
 
 test("interactive Pi quota exhaustion is a provider failure, not a completed worker", async () => {
@@ -193,7 +192,6 @@ test("interactive Pi quota exhaustion is a provider failure, not a completed wor
     projectRoot: "/project",
     computeClasses: ["fast"],
     pollIntervalMs: 0,
-    retainCompletedTabs: true,
   });
   const handle = await provider.start(input);
   expect(await provider.result(handle.id)).toMatchObject({ success: false, failure: { kind: "quota", retryable: true } });

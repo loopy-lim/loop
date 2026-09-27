@@ -1,5 +1,5 @@
 import { expect, test, afterEach } from "bun:test";
-import { HerdrWorkerRuntime, type HerdrRunner, type HerdrResult } from "@loop/herdr";
+import { HerdrWorkerRuntime, workerRunMarker, type HerdrRunner, type HerdrResult } from "@loop/herdr";
 import { HerdrAgentProvider } from "../src/herdr-agent";
 
 function scriptedRunner(): HerdrRunner & { calls: string[][] } {
@@ -79,10 +79,11 @@ test("pi worker routes to caller workspace instead of creating a headless one", 
   });
 
   expect(worker.id).toBe("loop-run-test-task-test");
+  const label = `task-test·task·a0·${workerRunMarker("run-test")}`;
 
   expect(runner.calls.slice(0, 4)).toEqual([
-    ["tab", "create", "--workspace", "caller-ws", "--cwd", "/project", "--label", "task-test·task·a0", "--no-focus"],
-    ["pane", "rename", "caller-ws:p-new", "task-test·task·a0"],
+    ["tab", "create", "--workspace", "caller-ws", "--cwd", "/project", "--label", label, "--no-focus"],
+    ["pane", "rename", "caller-ws:p-new", label],
     ["agent", "start", "loop-run-test-task-test", "--kind", "pi", "--pane", "caller-ws:p-new"],
     ["agent", "prompt", "loop-run-test-task-test", "Loop worker task\n\ntitle=Test Task\nkind=task\nattempt=0"]
   ]);

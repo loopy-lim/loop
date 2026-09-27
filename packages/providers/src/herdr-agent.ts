@@ -38,7 +38,6 @@ interface HerdrAgentProviderOptions {
    * instead of the run waiting forever. `0` disables the deadline.
    */
   runDeadlineMs?: number;
-  retainCompletedTabs?: boolean;
 }
 
 interface Session {
@@ -61,7 +60,6 @@ export class HerdrAgentProvider implements AgentProvider {
   readonly #pollIntervalMs: number;
   readonly #startGraceMs: number;
   readonly #runDeadlineMs: number;
-  readonly #retainCompletedTabs: boolean;
   readonly #sessions = new Map<string, Session>();
 
   constructor(options: HerdrAgentProviderOptions) {
@@ -75,7 +73,6 @@ export class HerdrAgentProvider implements AgentProvider {
     this.#pollIntervalMs = options.pollIntervalMs ?? 250;
     this.#startGraceMs = options.startGraceMs ?? 5_000;
     this.#runDeadlineMs = options.runDeadlineMs ?? DEFAULT_RUN_DEADLINE_MS;
-    this.#retainCompletedTabs = options.retainCompletedTabs ?? false;
   }
 
   async capabilities(): Promise<ProviderCapabilities> {
@@ -103,7 +100,7 @@ export class HerdrAgentProvider implements AgentProvider {
       runId: input.runId,
       taskId: input.taskId,
       workerName: `${input.runId}-${input.taskId}`,
-      label: { kind: input.kind, attempt: input.attempt, includeRunMarker: this.#retainCompletedTabs },
+      label: { kind: input.kind, attempt: input.attempt, includeRunMarker: true },
       worktree: input.workingDirectory ?? this.#projectRoot,
       execution: { type: "agent", kind: this.#kind, args },
       prompt: buildWorkerPrompt(input),
@@ -191,12 +188,8 @@ export class HerdrAgentProvider implements AgentProvider {
 
   async release(workerId: string): Promise<void> {
     const session = this.#require(workerId);
-    const result = await session.result;
-    if (this.#retainCompletedTabs && result.success && !session.cancelRequested) {
-      this.#runtime.detach(session.handle);
-    } else {
-      await this.#runtime.cleanup(session.handle);
-    }
+    await session.result;
+    await this.#runtime.cleanup(session.handle);
     this.#sessions.delete(workerId);
   }
 
