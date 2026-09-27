@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { mirrorPaneLabel, workerLabel } from "../src/client";
+import { mirrorPaneLabel, workerLabel, workerRunMarker } from "../src/client";
 
 describe("workerLabel", () => {
   test("formats taskId·kind·attempt with the documented aliases", () => {
@@ -35,6 +35,15 @@ describe("workerLabel", () => {
 
   test("an empty taskId degrades to a placeholder instead of an empty head", () => {
     expect(workerLabel({ taskId: "  ", kind: "research", attempt: 0 })).toBe("task·research·a0");
+  });
+
+  test("review tabs include a stable run marker within Herdr's label limit", () => {
+    const first = workerLabel({ taskId: "implement-normalize-tags", kind: "implementation", attempt: 0, runId: "loop-9dae9271-53a0" });
+    const second = workerLabel({ taskId: "implement-normalize-tags", kind: "implementation", attempt: 0, runId: "loop-0207f6a8-ad7b" });
+    expect(first).not.toBe(second);
+    expect(first).toEndWith(`·${workerRunMarker("loop-9dae9271-53a0")}`);
+    expect(first.length).toBeLessThanOrEqual(32);
+    expect(first).toStartWith("implement-");
   });
 });
 

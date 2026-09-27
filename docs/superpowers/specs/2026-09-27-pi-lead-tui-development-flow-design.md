@@ -67,7 +67,7 @@ Pi 세션 관찰자는 기존 `loop watch --json` 또는 같은 읽기 전용 sn
 
 Lead는 후속 입력마다 현재 스냅샷을 기준으로 다음 중 하나를 고른다: 상태 질문, 진행 중 작업 수정, 새 작업 추가, attention 답변, pause/resume/cancel, 별개 목표의 새 실행. 대상이 하나로 특정되지 않거나 작업 범위가 충돌하면 간결하게 묻는다. 같은 작업 디렉터리에서 별개 목표를 요청했는데 이전 실행이 아직 활성이라면, 기존 목표에 포함할지 완료 후 새 실행으로 이어갈지 먼저 묻는다. 서로 다른 실행이 같은 파일을 동시에 쓰도록 조용히 시작하지 않는다. run ID·task ID는 도구 내부 인자이며 사용자에게 요구하지 않는다. 상태 조회를 포함한 각 동작은 모델이 호출할 수 있는 Pi 도구로 제공한다.
 
-기존 작업 수정에는 사용자가 보낸 **원문 지시**를 `steerRun`에 기록한다. Lead는 대상 작업을 고르되 원문의 의미를 바꿔 재작성하지 않는다. 이미 완료된 작업의 결과를 수정해야 하면 새 의존 작업과 검증 작업을 만든다. 모든 worker에 무조건 broadcast하지 않는다.
+기존 작업 수정에는 사용자가 보낸 **원문 지시**를 `steerRun`에 기록한다. Lead는 대상 작업을 고르되 원문의 의미를 바꿔 재작성하지 않는다. 새 허용 기준이 생기면 활성 worker에 steer할 수 있어도 그것만으로 완료를 주장하지 않는다. 해당 기준을 직접 확인하는 실행 검사와 쓰기 범위를 가진 의존 작업을 추가한다. 실행이 이미 종료됐다면 후속 실행을 만든다. 모든 worker에 무조건 broadcast하지 않는다.
 
 새 작업은 생성된 `TaskSpecInput` 계약을 사용한다. Rust bridge/store의 한 원자적 쓰기 경계 안에서 최신 projection, 전체 그래프, 의존성, 명시적 read/write scope와 비어 있지 않은 완료 계약을 검증하고 `TaskCreated`를 기록한다. 추가를 허용하는 실행 상태는 `active`, `paused`, `attention`이다. `pausing`, `cancelling`, terminal 상태에서는 이유를 반환하고 실행 상태를 새로 확인한다. 완료와 추가가 경합하면 저장 결과를 다시 읽어, 원래 사용자 요청을 잃지 않은 채 새 실행으로 넘긴다. 이미 시작한 작업의 소유 범위는 사후 변경하지 않는다. 중첩 범위는 기존 스케줄러 충돌 규칙과 명시적 의존성으로 안전하게 직렬화한다.
 
@@ -75,7 +75,7 @@ Lead는 후속 입력마다 현재 스냅샷을 기준으로 다음 중 하나�
 
 ### 4. worker 탭과 역할 지시
 
-Herdr는 현행대로 Lead가 있는 workspace에 worker당 `--no-focus` 탭 하나를 만들고, task·kind·attempt 이름을 보여 준다. 작업 종료 후 그 worker 탭만 정리한다. Lead의 질문·승인·steer는 모두 Lead 대화에서 처리하므로 worker 탭으로 이동할 필요가 없다. 사용자가 worker 탭을 열면 실제 대화 TUI를 볼 수 있다.
+Herdr는 Lead가 있는 workspace에 worker당 `--no-focus` 탭 하나를 만들고, task·kind·attempt 이름을 보여 준다. Pi 위젯은 활성 worker의 task ID를 표시해 해당 탭을 찾을 수 있게 한다. `worker_visibility=panes`이고 Herdr Lead pane에서 실행한 경우 탭 이름과 Pi 위젯에 짧은 실행 식별자를 표시하며, 성공한 대화형 worker 탭은 완료 후에도 살펴볼 수 있게 남긴다. 사용자가 Herdr에서 직접 닫는다. 실패·취소한 worker 탭은 즉시 정리한다. Lead의 질문·승인·steer는 Lead 대화에서 처리한다. Lead는 실행 인계 후 폴링용 `sleep`을 호출하지 않고 turn을 끝내며, 관찰자가 상태와 완료를 표시한다.
 
 설치 스크립트는 누락된 기본 `config/personas/*.md`와 `defaults.toml`만 사용자 구성에 추가하고 기존 파일을 덮어쓰지 않는다. Pi Lead의 persona 목록과 worker의 실제 지시문이 같은 구성 경로에서 파생되는지 설치 검증으로 확인한다. 구성 경로가 `LOOP_CONFIG_DIR`로 바뀐 경우 해당 경로를 기준으로 동작한다.
 
@@ -102,7 +102,7 @@ Herdr는 현행대로 Lead가 있는 workspace에 worker당 `--no-focus` 탭 하
 1. **기준선:** 네 fixture와 영속 이벤트로 기존 흐름의 작업 수·접수/worker/검증 시간을 기록한다. 측정할 수 없는 항목은 빈칸으로 보고한다.
 2. **인계·관찰:** owner lease 확인 후 `loop_run`이 반환되고, Pi 한 대화에서 바로 상태 질문을 받을 수 있다. Pi 종료가 owner를 죽이지 않으며 재시작 후 현재 실행이 복구된다.
 3. **자연어 제어:** 실행 중 원문 수정 지시, 새 작업 추가, attention 답변, pause/resume/cancel이 slash 명령 없이 동작한다. 서로 다른 상태인 접수·전달·검증을 정확히 표시한다.
-4. **탭·persona:** worker 탭은 초점 이동 없이 생성되고 자기 수명에만 닫힌다. 누락된 기본 persona가 설치되며 사용자 변경은 보존된다.
+4. **탭·persona:** worker 탭은 초점 이동 없이 생성된다. `panes` 모드에서는 성공한 대화형 worker 탭을 사용자가 검토 후 닫고, 실패·취소 탭은 정리한다. 누락된 기본 persona가 설치되며 사용자 변경은 보존된다.
 5. **완료 검증:** Rust 경합/상태 테스트, Pi extension fake backend 테스트, CLI owner 실패 테스트, `bun run codegen` 및 생성물 검사, `bun run check`를 통과한다. Node 대상 extension 빌드·설치본 일치와 실제 Herdr/Pi TUI 동작은 별도 확인한다.
 
 Rust bridge 형식이 바뀌는 경우 Rust 타입을 먼저 수정하고 `bun run codegen` 결과를 함께 커밋한다. TypeScript에 Rust 도메인 타입의 손수 작성한 복사본을 만들지 않는다. 구현 커밋은 이 문서 검토와 별도 계획 이후 수행한다.

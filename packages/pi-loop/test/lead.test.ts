@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import type { SnapshotOutput, TaskContextOutput, TaskSpecInput } from "@loop/protocol";
 import { derivePersonaVocabulary } from "@loop/orchestrator/persona";
+import { workerRunMarker } from "@loop/herdr";
 
 import {
   registerLoopExtension,
@@ -48,7 +49,12 @@ test("natural-language Pi turns receive the Loop Lead contract", async () => {
   expect(result.systemPrompt).toContain("exact read and write ownership");
   expect(result.systemPrompt).toContain("Loop owns verification");
   expect(result.systemPrompt).toContain("acceptance criteria");
-  expect(result.systemPrompt).toContain("implementation and verification tasks");
+  expect(result.systemPrompt).toContain("separate verification task only for material risk");
+  expect(result.systemPrompt).toContain("executable checks that cover each acceptance criterion");
+  expect(result.systemPrompt).toContain("If a verifier reports FAIL");
+  expect(result.systemPrompt).toContain("Do not poll or sleep after loop_run returns");
+  expect(result.systemPrompt).toContain("For changed acceptance criteria, add a dependent task");
+  expect(result.systemPrompt).toContain("Never claim that guidance was implemented from delivery alone");
   expect(result.systemPrompt).toContain("previous run ended in attention, paused, cancelled, or otherwise incomplete");
   expect(result.systemPrompt).toContain("Do not invent unavailable run or task details");
   expect(result.systemPrompt).toContain("Implement feature X");
@@ -58,6 +64,7 @@ test("natural-language Pi turns receive the Loop Lead contract", async () => {
   expect(tasksDescription).toContain("TaskSpecInput[]");
   expect(tasksDescription).toContain('"completionChecks"');
   expect(tasksDescription).toContain('"preferredCompute"');
+  expect(host.tools.get("loop_steer")?.description).toContain("Use loop_add_task for changed acceptance criteria");
 });
 
 test("loop_run validates the DAG and delegates execution to Loop", async () => {
@@ -381,6 +388,32 @@ test("ambiguous runs can be listed and a status read does not switch the control
   expect(paused).toEqual(["a"]);
 });
 
+test("Pi Lead refuses to steer a completed task while a descendant verifier is running", async () => {
+  const host = fakePi();
+  const steered: string[] = [];
+  const backend = fakeBackend({
+    async snapshot(runId) {
+      return {
+        ...snapshot(runId),
+        tasks: [
+          { ...snapshot(runId).tasks[0]!, id: "implementation", state: "done" },
+          { ...snapshot(runId).tasks[0]!, id: "verification", kind: "verification", state: "running", dependencies: ["implementation"], writeScope: [] },
+        ],
+      };
+    },
+    async steer(_runId, taskId) { steered.push(taskId); return snapshot("run-x"); },
+  });
+  registerLoopExtension(host.api, backend, undefined, settings);
+  const piContext = context();
+  await host.tools.get("loop_select_run")!.execute("select", { runId: "run-x" }, new AbortController().signal, undefined, piContext);
+  const instructions = await host.hooks.get("before_agent_start")!({ prompt: "Also support underscores", systemPrompt: "base" }, piContext);
+  expect(instructions.systemPrompt).toContain("If the bound run is terminal and the user has an unfinished requirement, start a follow-up run");
+
+  await expect(host.tools.get("loop_steer")!.execute("steer", { taskId: "implementation" }, new AbortController().signal, undefined, piContext))
+    .rejects.toThrow(/completed.*dependent task/i);
+  expect(steered).toEqual([]);
+});
+
 test("Pi attention status gives a conversational resolution path", async () => {
   const host = fakePi();
   registerLoopExtension(host.api, fakeBackend({ async snapshot(runId) { return { ...snapshot(runId), state: "attention", openAttentionIds: ["approval-1"], attention: [{ id: "approval-1", kind: "approval", summary: "Approve migration" }] }; } }), undefined, settings);
@@ -445,6 +478,32 @@ test("Pi widget follows active work and attention, then clears after completion"
   await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
 });
 
+test("Pi widget names the active worker's selectable Herdr tab", async () => {
+  const host = fakePi();
+  const widgets: Array<string[] | undefined> = [];
+  const active = {
+    ...snapshot("run-x"),
+    lastSequence: 1,
+    activeWorkers: [{ id: "worker-1", taskId: "impl" }],
+  };
+  registerLoopExtension(host.api, fakeBackend({ async snapshot() { return active; } }), undefined, {
+    ...settings,
+    herdrVisible: true,
+    retainedWorkerTabs: true,
+  });
+  const piContext = {
+    ...context(),
+    ui: { notify() {}, setStatus() {}, setWidget(_key: string, lines: string[] | undefined) { widgets.push(lines); } },
+    sessionManager: { getBranch: () => [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-x", workingDirectory: "/project" } }] },
+  };
+  await host.events.get("session_start")?.at(-1)?.({}, piContext);
+  await Bun.sleep(20);
+  expect(widgets.at(-1)?.[1]).toContain("impl");
+  expect(widgets.at(-1)?.[1]).toContain("Herdr tab");
+  expect(widgets.at(-1)?.[1]).toContain(workerRunMarker("run-x"));
+  await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
+});
+
 test("inspecting or controlling another run leaves the bound Pi widget on its run", async () => {
   const host = fakePi();
   const widgets: Array<string[] | undefined> = [];
@@ -491,6 +550,32 @@ test("final message prioritizes a late failed task over earlier successful tasks
   expect(messages[0]).toContain("task-5: failed");
   expect(messages[0]).toContain("focused check failed");
   expect(messages[0]?.split("\n").length).toBeLessThanOrEqual(8);
+  await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
+});
+
+test("Pi Lead surfaces a verifier FAIL even when executable checks marked the run completed", async () => {
+  const host = fakePi();
+  const messages: string[] = [];
+  host.api.sendMessage = message => messages.push(message.content);
+  const failedReview = {
+    ...snapshot("run-x"),
+    state: "completed" as const,
+    lastSequence: 9,
+    tasks: [
+      { ...snapshot("run-x").tasks[0]!, id: "implementation", state: "done" as const, resultSummary: "Implemented" },
+      { ...snapshot("run-x").tasks[0]!, id: "verification", kind: "verification" as const, state: "done" as const, resultSummary: "- Verdict: FAIL — missing edge-case test" },
+    ],
+  };
+  registerLoopExtension(host.api, fakeBackend({ async snapshot() { return failedReview; } }), undefined, settings);
+  const piContext = { ...context(), ui: { notify() {}, setStatus() {} }, sessionManager: { getBranch: () => [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-x", workingDirectory: "/project" } }] } };
+
+  await host.events.get("session_start")?.at(-1)?.({}, piContext);
+  await Bun.sleep(20);
+  expect(messages[0]).toContain("Review needed: verifier reported FAIL");
+  expect(messages[0]?.split("\n").length).toBeLessThanOrEqual(8);
+  const status = await host.tools.get("loop_status")!.execute("status", {}, new AbortController().signal, undefined, piContext);
+  expect(status.content[0]?.text).toContain("Review needed: verifier reported FAIL");
+  expect(status.content[0]?.text.split("\n").length).toBeLessThanOrEqual(8);
   await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
 });
 

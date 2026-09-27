@@ -167,6 +167,36 @@ test("pi provider launches headless pi with the configured model pattern", async
   expect(launch.args).not.toContain("--sandbox");
 });
 
+test("Pi workers without a write scope receive only read-only tools", async () => {
+  const runner = new FakeRunner();
+  const headless = new PiProvider({ runner, cwd: "/project", command: "pi", model: "zai/glm-5.3-flash", computeClasses: ["fast"] });
+  const readOnlyInput = { ...input, context: { ...input.context!, task: { ...input.context!.task, writeScope: [] } } };
+  await headless.start(readOnlyInput);
+  const headlessArgs = runner.calls.at(-1)!.args;
+  expect(headlessArgs.slice(headlessArgs.indexOf("--tools"), headlessArgs.indexOf("--tools") + 2))
+    .toEqual(["--tools", "read,grep,find,ls"]);
+
+  const calls: string[][] = [];
+  const herdrRunner: HerdrRunner = {
+    async run(_command, args) {
+      calls.push(args);
+      if (args[0] === "workspace") return ok({ result: { workspace: { workspace_id: "w" }, root_pane: { pane_id: "w:p1" } } });
+      if (args[0] === "tab" && args[1] === "create") return ok({ result: { tab: { tab_id: "w:t2" }, root_pane: { pane_id: "w:p2" } } });
+      if (args[0] === "agent" && args[1] === "get") return ok({ result: { agent: { agent_status: "done" } } });
+      if (args[0] === "agent" && args[1] === "read") return { exitCode: 0, stdout: "read-only review done", stderr: "" };
+      return ok({ result: {} });
+    },
+  };
+  const visible = new HerdrAgentProvider({ id: "pi-visible", runtime: new HerdrWorkerRuntime({ runner: herdrRunner }), kind: "pi", projectRoot: "/project", computeClasses: ["fast"], args: ["--model", "zai/glm-5.3-flash"], pollIntervalMs: 0 });
+  const handle = await visible.start(readOnlyInput);
+  try {
+    expect((await visible.result(handle.id)).success).toBe(true);
+    const startArgs = calls.find(args => args[0] === "agent" && args[1] === "start")!;
+    expect(startArgs.slice(startArgs.indexOf("--tools"), startArgs.indexOf("--tools") + 2))
+      .toEqual(["--tools", "read,grep,find,ls"]);
+  } finally { await visible.release(handle.id); }
+});
+
 test("Z.AI CLI provider uses the shared generated worker context", async () => {
   const runner = new FakeRunner();
   const provider = new ZaiCliProvider({ runner, cwd: "/project", computeClasses: ["fast"] });

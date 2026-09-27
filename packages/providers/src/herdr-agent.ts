@@ -17,6 +17,7 @@ import type {
   WorkerState,
 } from "./types";
 import { buildWorkerPrompt } from "./prompt";
+import { classifyFailure } from "./process-provider";
 import { redactProviderText } from "./redact";
 
 interface HerdrAgentProviderOptions {
@@ -37,6 +38,7 @@ interface HerdrAgentProviderOptions {
    * instead of the run waiting forever. `0` disables the deadline.
    */
   runDeadlineMs?: number;
+  retainCompletedTabs?: boolean;
 }
 
 interface Session {
@@ -59,6 +61,7 @@ export class HerdrAgentProvider implements AgentProvider {
   readonly #pollIntervalMs: number;
   readonly #startGraceMs: number;
   readonly #runDeadlineMs: number;
+  readonly #retainCompletedTabs: boolean;
   readonly #sessions = new Map<string, Session>();
 
   constructor(options: HerdrAgentProviderOptions) {
@@ -72,6 +75,7 @@ export class HerdrAgentProvider implements AgentProvider {
     this.#pollIntervalMs = options.pollIntervalMs ?? 250;
     this.#startGraceMs = options.startGraceMs ?? 5_000;
     this.#runDeadlineMs = options.runDeadlineMs ?? DEFAULT_RUN_DEADLINE_MS;
+    this.#retainCompletedTabs = options.retainCompletedTabs ?? false;
   }
 
   async capabilities(): Promise<ProviderCapabilities> {
@@ -90,15 +94,18 @@ export class HerdrAgentProvider implements AgentProvider {
     // worker tabs land in the Lead's workspace when HERDR_PANE_ID is set,
     // with the loop-<runId> workspace as the documented fallback.
     const caller = herdrCallerFromEnvironment(process.env);
+    const args = this.#kind === "pi" && input.context?.task.writeScope.length === 0
+      ? [...this.#args, "--tools", "read,grep,find,ls"]
+      : this.#args;
 
     const handle = await this.#runtime.start({
       projectRoot: this.#projectRoot,
       runId: input.runId,
       taskId: input.taskId,
       workerName: `${input.runId}-${input.taskId}`,
-      label: { kind: input.kind, attempt: input.attempt },
+      label: { kind: input.kind, attempt: input.attempt, includeRunMarker: this.#retainCompletedTabs },
       worktree: input.workingDirectory ?? this.#projectRoot,
-      execution: { type: "agent", kind: this.#kind, args: this.#args },
+      execution: { type: "agent", kind: this.#kind, args },
       prompt: buildWorkerPrompt(input),
       waitForPrompt: true,
       caller,
@@ -184,8 +191,12 @@ export class HerdrAgentProvider implements AgentProvider {
 
   async release(workerId: string): Promise<void> {
     const session = this.#require(workerId);
-    await session.result;
-    await this.#runtime.cleanup(session.handle);
+    const result = await session.result;
+    if (this.#retainCompletedTabs && result.success && !session.cancelRequested) {
+      this.#runtime.detach(session.handle);
+    } else {
+      await this.#runtime.cleanup(session.handle);
+    }
     this.#sessions.delete(workerId);
   }
 
@@ -201,23 +212,22 @@ export class HerdrAgentProvider implements AgentProvider {
     let observedWorking = false;
     for (;;) {
       const observed = await this.#runtime.status(session.handle);
+      if (Date.now() >= runDeadline) {
+        // An idle-looking Pi retry is still consuming the worker's deadline.
+        // Return a retryable timeout so the orchestrator can select a fallback.
+        session.cancelRequested = true;
+        await this.#runtime.cancel(session.handle).catch(() => {});
+        session.status = "lost";
+        this.#emit(session, { type: "lifecycle", status: "lost" });
+        return {
+          success: false,
+          summary: `herdr worker exceeded its ${this.#runDeadlineMs}ms run deadline without reporting a terminal state`,
+          sessionId: session.handle.agentName,
+          failure: { kind: "timeout", retryable: true },
+        };
+      }
       if (observed === "running") {
         observedWorking = true;
-        if (Date.now() >= runDeadline) {
-          // Stop the stalled lane (never resolveCancellation: the returned
-          // result must be a retryable timeout, not "cancelled") so the
-          // orchestrator walks its fallback chain instead of hanging.
-          session.cancelRequested = true;
-          await this.#runtime.cancel(session.handle).catch(() => {});
-          session.status = "lost";
-          this.#emit(session, { type: "lifecycle", status: "lost" });
-          return {
-            success: false,
-            summary: `herdr worker exceeded its ${this.#runDeadlineMs}ms run deadline without reporting a terminal state`,
-            sessionId: session.handle.agentName,
-            failure: { kind: "timeout", retryable: true },
-          };
-        }
         await delay(this.#pollIntervalMs);
         continue;
       }
@@ -248,8 +258,23 @@ export class HerdrAgentProvider implements AgentProvider {
       // Pi reports idle on agent_end. Only accept that transition after this
       // newly created worker was actually observed working on the prompt.
       if (observed === "completed" || (observed === "idle" && observedWorking)) {
-        session.status = "completed";
         const summary = redact((await this.#runtime.read(session.handle)).trim());
+        const lastLine = lastAgentContentLine(summary);
+        if (/\bRetrying \(\d+\/\d+\)/i.test(lastLine)) {
+          await delay(Math.max(this.#pollIntervalMs, 250));
+          continue;
+        }
+        if (/^Error:\s*Retry failed after \d+ attempts:/i.test(lastLine)) {
+          session.status = "lost";
+          this.#emit(session, { type: "lifecycle", status: "lost" });
+          return {
+            success: false,
+            summary,
+            sessionId: session.handle.agentName,
+            failure: { kind: classifyFailure(lastLine), retryable: true },
+          };
+        }
+        session.status = "completed";
         this.#emit(session, { type: "lifecycle", status: "completed" });
         if (!summary) {
           return {
@@ -303,4 +328,15 @@ function delay(milliseconds: number): Promise<void> {
 
 function redact(value: string): string {
   return redactProviderText(value);
+}
+
+function lastAgentContentLine(transcript: string): string {
+  return transcript.split(/\r?\n/).map(line => line.trim()).reverse().find(line =>
+    line.length > 0
+    && !/^[─━-]{4,}/.test(line)
+    && !/^\//.test(line)
+    && !/^🎭/.test(line)
+    && !/^[↑↓]/.test(line)
+    && !/^\d+(?:\.\d+)?%\//.test(line)
+  ) ?? "";
 }

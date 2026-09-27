@@ -4,6 +4,7 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { Type } from "typebox";
+import { workerRunMarker } from "@loop/herdr";
 import type { RunSummary } from "@loop/orchestrator";
 // Subpath import: the persona module is a leaf (no bridge dependency), so the
 // Node-targeted pi extension bundle stays free of Bun-only imports (bun:ffi).
@@ -33,6 +34,8 @@ import { decompositionPrompt, taskSpecInputDescription } from "./lead/prompts";
 export interface LeadSettings {
   limits: OutputLimits;
   vocabulary: PersonaVocabulary;
+  herdrVisible?: boolean;
+  retainedWorkerTabs?: boolean;
 }
 
 function loadLeadSettings(): LeadSettings {
@@ -40,6 +43,9 @@ function loadLeadSettings(): LeadSettings {
   return {
     limits: config.output,
     vocabulary: derivePersonaVocabulary(config.personas, config.personaKindDefaults),
+    herdrVisible: process.env.HERDR_ENV === "1",
+    retainedWorkerTabs: process.env.HERDR_ENV === "1" && Boolean(process.env.HERDR_PANE_ID)
+      && config.output.workerVisibility === "panes",
   };
 }
 import {
@@ -134,7 +140,7 @@ export interface LoopLeadBackend {
   addTask(runId: string, task: TaskSpecInput, cwd: string): Promise<SnapshotOutput>;
 }
 
-function renderRunWidget(snapshot: SnapshotOutput, limits: OutputLimits): string[] {
+function renderRunWidget(snapshot: SnapshotOutput, limits: OutputLimits, herdrVisible: boolean, retainedWorkerTabs: boolean): string[] {
   const done = snapshot.tasks.filter(task => task.state === "done").length;
   const headline = `Loop · ${snapshot.state} · ${done}/${snapshot.tasks.length} verified`;
   let detail: string;
@@ -148,15 +154,23 @@ function renderRunWidget(snapshot: SnapshotOutput, limits: OutputLimits): string
   } else if (snapshot.state === "cancelling") {
     detail = "Stopping workers";
   } else {
+    const workerTasks = [...new Set(snapshot.activeWorkers.map(worker => worker.taskId))];
     const working = snapshot.tasks.filter(task => task.state === "running" || task.state === "verifying");
     const ready = snapshot.tasks.filter(task => task.state === "ready");
     const visible = working.length > 0 ? working : ready;
     const label = working.length > 0 ? "Working" : "Ready";
-    detail = visible.length > 0
+    detail = herdrVisible && workerTasks.length > 0
+      ? `Herdr tabs: ${workerTasks.slice(0, 2).join(", ")}${workerTasks.length > 2 ? ` +${workerTasks.length - 2}` : ""}${retainedWorkerTabs ? ` [${workerRunMarker(snapshot.runId)}]` : ""} · steer here`
+      : visible.length > 0
       ? `${label}: ${visible.slice(0, 2).map(task => task.title).join(", ")}${visible.length > 2 ? ` +${visible.length - 2}` : ""} · ask here to adjust`
       : "Waiting for the next task · ask here to adjust";
   }
   return [headline, detail].map(line => singleLine(line, limits.lineTextLimit));
+}
+
+function verifierReportedFailure(snapshot: SnapshotOutput): boolean {
+  return snapshot.tasks.some(task => task.kind === "verification"
+    && /(?:^|\n)\s*(?:[-*]\s*)?(?:LOOP_)?VERDICT:\s*FAIL\b/i.test(task.resultSummary ?? ""));
 }
 
 export function registerLoopExtension(
@@ -203,10 +217,12 @@ export function registerLoopExtension(
     }));
     if (currentRunId !== snapshot.runId) return;
     const done = snapshot.tasks.filter(task => task.state === "done").length;
+    const reviewNeeded = verifierReportedFailure(snapshot);
     const body = compactLines([
       `Run ${snapshot.runId}`,
       `State: ${snapshot.state}`,
-      `Verified tasks: ${done}/${snapshot.tasks.length}`,
+      reviewNeeded ? `Task checks passed: ${done}/${snapshot.tasks.length}` : `Verified tasks: ${done}/${snapshot.tasks.length}`,
+      ...(reviewNeeded ? ["Review needed: verifier reported FAIL; goal incomplete."] : []),
       ...findings,
       ...(snapshot.tasks.length > findings.length ? [`… ${snapshot.tasks.length - findings.length} more tasks`] : []),
     ], { lineLimit: limits.statusLineLimit, lineTextLimit: limits.lineTextLimit, overflow: omitted => `… ${omitted} more` }).join("\n");
@@ -221,7 +237,7 @@ export function registerLoopExtension(
     if (sequence <= observedSequence) return;
     observedSequence = sequence;
     if (!["completed", "failed", "cancelled"].includes(snapshot.state)) {
-      context.ui.setWidget?.("loop-run", renderRunWidget(snapshot, limits));
+      context.ui.setWidget?.("loop-run", renderRunWidget(snapshot, limits, settings.herdrVisible === true, settings.retainedWorkerTabs === true));
     }
     const newAttention = snapshot.openAttentionIds.filter(id => !observedAttention.has(id) && !announcedAttention.has(`${snapshot.runId}:${id}`));
     for (const id of newAttention) {
@@ -421,11 +437,18 @@ export function registerLoopExtension(
   });
   pi.registerTool({
     name: "loop_steer", label: "Loop Steer",
-    description: "Record the latest user's exact correction for one running task. Select taskId from loop_status; use 'all' only when the user explicitly addresses every task. The original user text is forwarded unchanged.",
+    description: "Record the latest user's exact guidance for one running task within its existing completion contract. Use loop_add_task for changed acceptance criteria. Select taskId from loop_status; use 'all' only when the user explicitly addresses every task. The original user text is forwarded unchanged.",
     parameters: Type.Object({ taskId: Type.String(), runId: Type.Optional(Type.String()) }),
     async execute(_id, params, _signal, _update, context) {
       const snapshot = await current(context, params.runId);
       if (!params.taskId?.trim() || !lastUserPrompt.trim()) throw new Error("Steering needs a task target and the latest user message");
+      if (params.taskId !== "all") {
+        const task = snapshot.tasks.find(candidate => candidate.id === params.taskId);
+        if (!task) throw new Error(`Task ${params.taskId} is not in run ${snapshot.runId}`);
+        if (["done", "failed", "cancelled"].includes(task.state)) {
+          throw new Error(`Task ${params.taskId} is completed (${task.state}); add a dependent task with explicit write scope and completion checks for this change.`);
+        }
+      }
       const next = await backend.steer(snapshot.runId, params.taskId, lastUserPrompt, context.cwd);
       acceptSnapshot(next, context);
       return result(`Guidance recorded for ${params.taskId}. Worker delivery and completion remain pending.`, { runId: snapshot.runId, state: next.state });
@@ -778,16 +801,20 @@ function leadInstructions(intent: string, vocabulary: PersonaVocabulary, current
   return [
     "You are the interactive Lead for Loop.",
     currentRunId
-      ? `Current bound run: ${currentRunId}. For progress questions use loop_status; for a correction use loop_steer with the relevant task, for an added requirement use loop_add_task, for attention use loop_resolve, and for explicit pause/resume/cancel use loop_control. Read the durable snapshot before acting. Do not submit another run for a follow-up within this goal. If the user asks for a separate goal while this run is active, ask whether to include it or queue it after completion.`
+      ? `Current bound run: ${currentRunId}. For progress questions use loop_status; for a correction to a live task use loop_steer, for an added requirement use loop_add_task, for attention use loop_resolve, and for explicit pause/resume/cancel use loop_control. Read the durable snapshot before acting. Do not submit another run while this goal's run is active. If the bound run is terminal and the user has an unfinished requirement, start a follow-up run carrying that requirement and its completion checks. If the user asks for a separate goal while this run is active, ask whether to include it or queue it after completion.`
       : "No run is bound. Use loop_status without arguments to list active runs and their intents, then loop_select_run after the user identifies the goal. Do not ask the user to supply an internal run ID.",
     "For a new engineering execution request, inspect only the minimum path and contract context needed to create a small dependency DAG, then call loop_run exactly once.",
     "Do not deeply debug, investigate root causes, or implement the change yourself; delegate that work promptly to Loop tasks.",
     "Every task must declare dependencies, exact read and write ownership, requirements, preferredCompute, minimumCompute, maximumCompute, maxAttempts, and at least one machine-verifiable completionChecks entry.",
     "Requirements must name the result and evidence the worker returns; downstream tasks receive dependency result summaries rather than implicit context.",
     "Do not claim completion yourself; Loop owns verification through the declared completion checks and worker evidence.",
+    "Do not poll or sleep after loop_run returns; the observer updates status and completion asynchronously. End the turn promptly so the user can steer in this Pi conversation. Check status again only when the user asks or an attention needs a decision.",
+    "If a verifier reports FAIL or an unmet acceptance criterion, state that the goal is incomplete even when the run state says completed; add a corrective task while active or start a follow-up run after terminal.",
     "If a previous run ended in attention, paused, cancelled, or otherwise incomplete, explicitly carry the original goal's unresolved acceptance criteria into the next delegated DAG and state the available resume or follow-up path.",
     "Use only prior conversation and visible Loop output to identify unfinished work. Do not invent unavailable run or task details.",
     "Keep the user's mid-run correction text unchanged when calling loop_steer. Report recorded guidance, worker delivery, and verified completion as separate facts. A successful worker response alone is not verification.",
+    "For changed acceptance criteria, add a dependent task with write ownership and an executable check covering the new criterion. You may also steer the active worker, but queued guidance can arrive after its current turn and does not replace the dependent task. If the run is terminal, start a follow-up run.",
+    "Never claim that guidance was implemented from delivery alone. Inspect the final source and focused test evidence for the changed criterion before reporting it as done.",
     ...(currentRunId ? [] : [decompositionPrompt(intent, vocabulary)]),
   ].join("\n");
 }
@@ -833,7 +860,15 @@ function renderLeadRunSummary(
 }
 
 function renderLeadSnapshot(action: string, snapshot: SnapshotOutput, limits: OutputLimits): string {
-  if (action !== "attention") return renderSnapshot(action, snapshot, limits);
+  if (action !== "attention") {
+    const rendered = renderSnapshot(action, snapshot, limits);
+    if (action !== "status" || !verifierReportedFailure(snapshot)) return rendered;
+    return compactLines(["Review needed: verifier reported FAIL; goal incomplete.", ...rendered.trimEnd().split("\n")], {
+      lineLimit: limits.statusLineLimit,
+      lineTextLimit: limits.lineTextLimit,
+      overflow: omitted => `… ${omitted} more status lines`,
+    }).join("\n");
+  }
   if (snapshot.openAttentionIds.length === 0) return "No open attention items.";
   const lines = [
     `Attention: ${snapshot.openAttentionIds.length} open`,

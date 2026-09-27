@@ -154,6 +154,54 @@ test("steer rejects workers whose conversation already ended", async () => {
   await expect(provider.steer!(handle.id, "too late")).rejects.toThrow(/no longer running/);
 });
 
+test("completed worker tab remains selectable in Herdr review mode", async () => {
+  const runner = liveRunner({ kind: "pi", args: [] });
+  const provider = new HerdrAgentProvider({
+    id: "pi:review",
+    runtime: new HerdrWorkerRuntime({ runner }),
+    kind: "pi",
+    projectRoot: "/project",
+    computeClasses: ["fast"],
+    pollIntervalMs: 0,
+    retainCompletedTabs: true,
+  });
+  const handle = await provider.start(input);
+  expect(await provider.result(handle.id)).toMatchObject({ success: true });
+  await provider.release(handle.id);
+  expect(runner.calls).not.toContainEqual(["tab", "close", "w1:t2"]);
+});
+
+test("interactive Pi quota exhaustion is a provider failure, not a completed worker", async () => {
+  const runner = liveRunner({ kind: "pi", args: [], agentStatuses: ["working", "idle", "working", "idle"] });
+  let reads = 0;
+  const provider = new HerdrAgentProvider({
+    id: "pi:quota",
+    runtime: new HerdrWorkerRuntime({
+      runner: {
+        async run(command, args) {
+          if (args[0] === "agent" && args[1] === "read") {
+            reads += 1;
+            return reads === 1
+              ? { exitCode: 0, stdout: 'Error: 429: rate limit reached\n── Retrying (1/3) in 2s...\n/project (main)\n0.6%/1.0M (auto)\n🎭 implementer', stderr: "" }
+              : { exitCode: 0, stdout: 'Error: 429: rate limit reached\nError: Retry failed after 3 attempts: 429: rate limit reached\n/project (main)\n0.6%/1.0M (auto)\n🎭 implementer', stderr: "" };
+          }
+          return runner.run(command, args);
+        },
+      },
+    }),
+    kind: "pi",
+    projectRoot: "/project",
+    computeClasses: ["fast"],
+    pollIntervalMs: 0,
+    retainCompletedTabs: true,
+  });
+  const handle = await provider.start(input);
+  expect(await provider.result(handle.id)).toMatchObject({ success: false, failure: { kind: "quota", retryable: true } });
+  expect(reads).toBe(2);
+  await provider.release(handle.id);
+  expect(runner.calls).toContainEqual(["tab", "close", "w1:t2"]);
+});
+
 test("steer propagates agent_blocked so the recorded-steer fallback keeps the message", async () => {
   const runner = liveRunner({ kind: "agy", args: [], agentStatuses: ["working"] });
   let prompts = 0;

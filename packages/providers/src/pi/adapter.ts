@@ -60,6 +60,7 @@ export class PiProvider extends ProcessProvider {
     const args: string[] = [];
     if (this.#provider) args.push("--provider", this.#provider);
     if (this.#model) args.push("--model", this.#model);
+    if (input.context?.task.writeScope.length === 0) args.push("--tools", "read,grep,find,ls");
     args.push("--no-session", "-p", buildWorkerPrompt(input));
     return { command: this.#command, args, cwd };
   }

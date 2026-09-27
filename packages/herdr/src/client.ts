@@ -151,7 +151,8 @@ export class HerdrWorkerRuntime {
     // Identity and display stay separate: the tab/pane label follows the
     // taskId vocabulary while workerId/agentName keep the stable worker name.
     const label = input.label
-      ? workerLabel({ taskId: input.taskId, kind: input.label.kind, attempt: input.label.attempt })
+      ? workerLabel({ taskId: input.taskId, kind: input.label.kind, attempt: input.label.attempt,
+          ...(input.label.includeRunMarker ? { runId: input.runId } : {}) })
       : workerId;
     // One tab per worker (live-tabs ADR placement rule, reinstated
     // 2026-09-25): the worker's interactive conversation TUI runs inside its
@@ -409,6 +410,13 @@ export class HerdrWorkerRuntime {
       }
       // Already-gone surfaces count as cleaned.
     }
+    this.#forgetTab(handle.tabId);
+    this.#turns.delete(handle.workerId);
+  }
+
+  /** Stop tracking a completed worker while leaving its conversation tab for review. */
+  detach(handle: HerdrWorkerHandle): void {
+    validateHandle(handle);
     this.#forgetTab(handle.tabId);
     this.#turns.delete(handle.workerId);
   }
@@ -701,6 +709,13 @@ export interface WorkerLabelInput {
   taskId: string;
   kind: string;
   attempt: number;
+  runId?: string;
+}
+
+/** Short display discriminator for retained tabs from separate runs. */
+export function workerRunMarker(runId: string): string {
+  const readable = runId.replace(/^loop-/, "").replace(/[^a-z0-9]/gi, "").slice(0, 6).toLowerCase();
+  return readable || createHash("sha256").update(runId).digest("hex").slice(0, 6);
 }
 
 /**
@@ -712,7 +727,7 @@ export interface WorkerLabelInput {
  */
 export function workerLabel(input: WorkerLabelInput): string {
   const taskId = input.taskId.trim() || "task";
-  const suffix = `·${kindAlias(input.kind)}·a${Math.max(0, input.attempt)}`;
+  const suffix = `·${kindAlias(input.kind)}·a${Math.max(0, input.attempt)}${input.runId ? `·${workerRunMarker(input.runId)}` : ""}`;
   const head = taskId.length + suffix.length <= LABEL_LIMIT
     ? taskId
     : taskId.slice(0, Math.max(1, LABEL_LIMIT - suffix.length));

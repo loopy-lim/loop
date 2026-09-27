@@ -15,6 +15,7 @@ export interface HerdrCaller {
 export interface HerdrWorkerLabel {
   kind: string;
   attempt: number;
+  includeRunMarker?: boolean;
 }
 
 export interface HerdrWorkerInput {
