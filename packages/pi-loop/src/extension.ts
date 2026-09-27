@@ -57,6 +57,7 @@ interface PiContext {
   ui: {
     notify(message: string, level?: "info" | "success" | "warning" | "error"): void;
     setStatus?(key: string, text: string | undefined): void;
+    setWidget?(key: string, lines: string[] | undefined): void;
   };
   sessionManager?: { getBranch(): Array<{ type: string; customType?: string; data?: unknown }> };
 }
@@ -133,6 +134,31 @@ export interface LoopLeadBackend {
   addTask(runId: string, task: TaskSpecInput, cwd: string): Promise<SnapshotOutput>;
 }
 
+function renderRunWidget(snapshot: SnapshotOutput, limits: OutputLimits): string[] {
+  const done = snapshot.tasks.filter(task => task.state === "done").length;
+  const headline = `Loop · ${snapshot.state} · ${done}/${snapshot.tasks.length} verified`;
+  let detail: string;
+  if (snapshot.openAttentionIds.length > 0) {
+    const open = snapshot.attention.find(item => snapshot.openAttentionIds.includes(item.id));
+    detail = `Decision: ${open?.summary ?? "Attention needed"} · answer here`;
+  } else if (snapshot.state === "paused") {
+    detail = "Paused · ask here to resume";
+  } else if (snapshot.state === "pausing") {
+    detail = "Finishing active work before pause";
+  } else if (snapshot.state === "cancelling") {
+    detail = "Stopping workers";
+  } else {
+    const working = snapshot.tasks.filter(task => task.state === "running" || task.state === "verifying");
+    const ready = snapshot.tasks.filter(task => task.state === "ready");
+    const visible = working.length > 0 ? working : ready;
+    const label = working.length > 0 ? "Working" : "Ready";
+    detail = visible.length > 0
+      ? `${label}: ${visible.slice(0, 2).map(task => task.title).join(", ")}${visible.length > 2 ? ` +${visible.length - 2}` : ""} · ask here to adjust`
+      : "Waiting for the next task · ask here to adjust";
+  }
+  return [headline, detail].map(line => singleLine(line, limits.lineTextLimit));
+}
+
 export function registerLoopExtension(
   pi: PiExtensionApi,
   backend: LoopLeadBackend = new DefaultLoopLeadBackend(),
@@ -148,6 +174,7 @@ export function registerLoopExtension(
   let observerBusy = false;
   let observerVersion = 0;
   let restoreVersion = 0;
+  let widgetContext: PiContext | undefined;
   const announcedAttention = new Set<string>();
   const announcedFinal = new Set<string>();
 
@@ -155,6 +182,8 @@ export function registerLoopExtension(
     observerVersion++;
     if (observer) clearInterval(observer);
     observer = undefined;
+    widgetContext?.ui.setWidget?.("loop-run", undefined);
+    widgetContext = undefined;
     observedSequence = -1;
     observedAttention = new Set();
   };
@@ -185,11 +214,15 @@ export function registerLoopExtension(
   };
   const acceptSnapshot = (snapshot: SnapshotOutput, context: PiContext) => {
     if (canonical(snapshot.workingDirectory) !== canonical(context.cwd)) throw new Error("Loop run belongs to another working directory");
+    if (snapshot.runId !== currentRunId) return;
     const sequence = Number(snapshot.lastSequence);
     const done = snapshot.tasks.filter(task => task.state === "done").length;
     context.ui.setStatus?.("loop", `Loop ${snapshot.state} · ${done}/${snapshot.tasks.length} · ${snapshot.activeWorkers.length} workers · ${snapshot.openAttentionIds.length} attention`);
     if (sequence <= observedSequence) return;
     observedSequence = sequence;
+    if (!["completed", "failed", "cancelled"].includes(snapshot.state)) {
+      context.ui.setWidget?.("loop-run", renderRunWidget(snapshot, limits));
+    }
     const newAttention = snapshot.openAttentionIds.filter(id => !observedAttention.has(id) && !announcedAttention.has(`${snapshot.runId}:${id}`));
     for (const id of newAttention) {
       announcedAttention.add(`${snapshot.runId}:${id}`);
@@ -213,6 +246,7 @@ export function registerLoopExtension(
   };
   const observe = (runId: string, context: PiContext) => {
     stopObserver();
+    widgetContext = context;
     const version = observerVersion;
     const poll = async () => {
       if (observerBusy || currentRunId !== runId) return;
@@ -221,7 +255,12 @@ export function registerLoopExtension(
         const snapshot = await backend.snapshot(runId, context.cwd);
         if (version === observerVersion && currentRunId === runId) acceptSnapshot(snapshot, context);
       }
-      catch { if (version === observerVersion) context.ui.setStatus?.("loop", `Loop ${runId} · observation unavailable`); }
+      catch {
+        if (version === observerVersion) {
+          context.ui.setStatus?.("loop", `Loop ${runId} · observation unavailable`);
+          context.ui.setWidget?.("loop-run", undefined);
+        }
+      }
       finally { observerBusy = false; }
     };
     void poll();
@@ -232,7 +271,7 @@ export function registerLoopExtension(
     restoreVersion++;
     currentRunId = runId;
     pi.appendEntry?.("loop-run-binding", { runId, workingDirectory: canonical(context.cwd) });
-    if (context.ui.setStatus || pi.sendMessage) observe(runId, context);
+    if (context.ui.setStatus || context.ui.setWidget || pi.sendMessage) observe(runId, context);
   };
   const restore = async (_event: unknown, context: PiContext) => {
     const version = ++restoreVersion;
@@ -460,7 +499,6 @@ export function registerLoopExtension(
           context.ui.notify("Usage: /loop task <run> <task>", "warning");
           return;
         }
-        currentRunId = runId;
         context.ui.notify(
           renderTaskContext(await backend.task(runId, taskId, context.cwd), limits),
           "info",
@@ -475,10 +513,10 @@ export function registerLoopExtension(
           context.ui.notify(`Usage: /loop ${command} <run> ${target}`, "warning");
           return;
         }
-        currentRunId = runId;
         const snapshot = command === "steer"
           ? await backend.steer(runId, targetId, message, context.cwd)
           : await backend.resolve(runId, targetId, message, context.cwd);
+        acceptSnapshot(snapshot, context);
         context.ui.notify(
           renderSnapshot("status", snapshot, limits),
           snapshot.state === "attention" ? "warning" : "info",
@@ -495,7 +533,6 @@ export function registerLoopExtension(
         context.ui.notify("No Loop run yet. Submit an engineering request first.", "warning");
         return;
       }
-      currentRunId = runId;
       const snapshot = command === "cancel"
         ? await backend.cancel(runId, context.cwd)
         : command === "pause"
@@ -503,6 +540,7 @@ export function registerLoopExtension(
           : command === "resume"
             ? await backend.resume(runId, context.cwd)
             : await backend.snapshot(runId, context.cwd);
+      if (["cancel", "pause", "resume"].includes(command)) acceptSnapshot(snapshot, context);
       const rendered = renderSnapshot(command, snapshot, limits);
       context.ui.notify(rendered, snapshot.state === "attention" ? "warning" : "info");
     },

@@ -413,6 +413,72 @@ test("observer records one final message with check evidence across session rest
   await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
 });
 
+test("Pi widget follows active work and attention, then clears after completion", async () => {
+  const host = fakePi();
+  const widgets: Array<string[] | undefined> = [];
+  let latest: SnapshotOutput = { ...snapshot("run-x"), lastSequence: 1 };
+  const piContext = {
+    ...context(),
+    ui: {
+      notify() {},
+      setStatus() {},
+      setWidget(key: string, lines: string[] | undefined) {
+        expect(key).toBe("loop-run");
+        widgets.push(lines);
+      },
+    },
+    sessionManager: { getBranch: () => [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-x", workingDirectory: "/project" } }] },
+  };
+  registerLoopExtension(host.api, fakeBackend({ async snapshot() { return latest; } }), undefined, settings);
+
+  await host.events.get("session_start")?.at(-1)?.({}, piContext);
+  await Bun.sleep(20);
+  expect(widgets.at(-1)).toEqual(["Loop · active · 0/1 verified", "Working: Implement · ask here to adjust"]);
+
+  latest = { ...latest, state: "attention", lastSequence: 2, openAttentionIds: ["a1"], attention: [{ id: "a1", kind: "question", summary: "Choose scope" }] };
+  await Bun.sleep(550);
+  expect(widgets.at(-1)).toEqual(["Loop · attention · 0/1 verified", "Decision: Choose scope · answer here"]);
+
+  latest = { ...latest, state: "completed", lastSequence: 3, openAttentionIds: [], attention: [], tasks: [{ ...latest.tasks[0]!, state: "done" }] };
+  await Bun.sleep(550);
+  expect(widgets.at(-1)).toBeUndefined();
+  await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
+});
+
+test("inspecting or controlling another run leaves the bound Pi widget on its run", async () => {
+  const host = fakePi();
+  const widgets: Array<string[] | undefined> = [];
+  let boundSequence = 1;
+  const piContext = {
+    ...context(),
+    ui: {
+      notify() {},
+      setStatus() {},
+      setWidget(_key: string, lines: string[] | undefined) { widgets.push(lines); },
+    },
+    sessionManager: { getBranch: () => [{ type: "custom", customType: "loop-run-binding", data: { runId: "a", workingDirectory: "/project" } }] },
+  };
+  registerLoopExtension(host.api, fakeBackend({
+    async snapshot(runId) { return { ...snapshot(runId), lastSequence: runId === "a" ? boundSequence : 100 }; },
+    async pause(runId) { return { ...snapshot(runId), state: "paused", lastSequence: 100 }; },
+  }), undefined, settings);
+
+  await host.events.get("session_start")?.at(-1)?.({}, piContext);
+  await Bun.sleep(20);
+  expect(widgets.at(-1)?.[0]).toContain("Loop · active");
+
+  await host.commands.get("loop")!.handler("status b", piContext);
+  await host.tools.get("loop_control")!.execute("pause-b", { action: "pause", runId: "b" }, new AbortController().signal, undefined, piContext);
+  expect(widgets.at(-1)?.[0]).toContain("Loop · active");
+  const currentStatus = await host.tools.get("loop_status")!.execute("status-a", {}, new AbortController().signal, undefined, piContext);
+  expect(currentStatus.details.runId).toBe("a");
+
+  boundSequence = 2;
+  await Bun.sleep(550);
+  expect(widgets.at(-1)?.[0]).toContain("Loop · active");
+  await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
+});
+
 test("final message prioritizes a late failed task over earlier successful tasks", async () => {
   const host = fakePi();
   const messages: string[] = [];
@@ -431,13 +497,15 @@ test("final message prioritizes a late failed task over earlier successful tasks
 test("observer resumes after attention and stops following the old session branch", async () => {
   const host = fakePi();
   const messages: string[] = [];
+  const widgets: Array<string[] | undefined> = [];
   host.api.sendMessage = message => messages.push(`${message.customType}:${message.content}`);
   let latest = { ...snapshot("run-x"), lastSequence: 1 };
   let branch: Array<{ type: string; customType: string; data: unknown }> = [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-x", workingDirectory: "/project" } }];
   registerLoopExtension(host.api, fakeBackend({ async snapshot() { return latest; }, async runs() { return []; } }), undefined, settings);
-  const piContext = { ...context(), ui: { notify() {}, setStatus() {} }, sessionManager: { getBranch: () => branch } };
+  const piContext = { ...context(), ui: { notify() {}, setStatus() {}, setWidget(_key: string, lines: string[] | undefined) { widgets.push(lines); } }, sessionManager: { getBranch: () => branch } };
   await host.events.get("session_start")?.at(-1)?.({}, piContext);
   await Bun.sleep(20);
+  expect(widgets.at(-1)?.[0]).toContain("Loop · active");
   latest = { ...latest, state: "attention", lastSequence: 2, openAttentionIds: ["a1"], attention: [{ id: "a1", kind: "question", summary: "Choose scope" }] };
   await Bun.sleep(550);
   expect(messages.filter(value => value.startsWith("loop-attention:"))).toHaveLength(1);
@@ -445,6 +513,7 @@ test("observer resumes after attention and stops following the old session branc
   await Bun.sleep(550);
   branch = [];
   await host.events.get("session_tree")?.at(-1)?.({}, piContext);
+  expect(widgets.at(-1)).toBeUndefined();
   latest = { ...latest, state: "completed", lastSequence: 4 };
   await Bun.sleep(550);
   expect(messages.filter(value => value.startsWith("loop-final:"))).toHaveLength(0);

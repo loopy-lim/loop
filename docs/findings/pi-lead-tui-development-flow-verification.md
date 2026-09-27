@@ -17,13 +17,16 @@
 
 ## 검증 영수증
 
-- 현재 작업 트리의 `bun run check`: Rust workspace, generated protocol, TypeScript, architecture 8개, Bun 641개 테스트 통과. 이 작업 트리에는 이번 커밋 밖의 기존 미커밋 변경도 있다.
-- 이번 커밋만 별도 디렉터리에 추출한 검사: codegen, TypeScript, architecture 6개, Rust workspace 통과. Bun은 358개 통과, 1개 실패(`fallback-transition.test.ts`의 exhausted fallback이 `attention` 대신 `failed`). 직전 커밋만 추출해 같은 테스트를 실행해도 동일하게 실패했다. 별도 미커밋 transport 분류 수정이 있는 현재 작업 트리에서는 통과한다. 따라서 이 실패는 이번 Pi Lead 변경으로 생긴 회귀가 아니다.
+- 현재 작업 트리의 `bun run check`: Rust workspace, generated protocol, TypeScript, architecture 8개, Bun 643개 테스트 통과. 이 작업 트리에는 Pi Lead 작업 밖의 기존 미커밋 변경도 있다.
+- 앞선 Pi Lead 구현 커밋 `86c4bd6`만 별도 디렉터리에 추출한 검사: codegen, TypeScript, architecture 6개, Rust workspace 통과. Bun은 358개 통과, 1개 실패(`fallback-transition.test.ts`의 exhausted fallback이 `attention` 대신 `failed`). 직전 커밋만 추출해 같은 테스트를 실행해도 동일하게 실패했다. 별도 미커밋 transport 분류 수정이 있는 현재 작업 트리에서는 통과한다. 따라서 이 실패는 Pi Lead 변경으로 생긴 회귀가 아니다.
 - `bun run build:cli`: Node 대상 Pi 확장과 CLI/native bridge 빌드 성공.
-- 설치본 `loop`, `loop-pi-extension.js`, `libloop_bridge.dylib`의 SHA-256이 각 `dist` 산출물과 일치했다. 설치본은 현재 작업 트리에서 빌드했으므로 이번 커밋 외의 기존 미커밋 변경도 포함한다.
+- 앞선 설치 검증에서 설치본 `loop`, `loop-pi-extension.js`, `libloop_bridge.dylib`의 SHA-256이 각 `dist` 산출물과 일치했다. 이번 위젯 변경 뒤 `loop-pi-extension.js`를 다시 빌드·설치했고 설치본과 `dist`의 SHA-256이 일치했다. 설치본은 현재 작업 트리에서 빌드했으므로 Pi Lead 작업 밖의 기존 미커밋 변경도 포함한다.
 - 실제 사용자 구성 경로에 누락된 `personas/*.md`와 `defaults.toml`을 추가했다. 기존 파일을 덮어쓰지 않는 동작은 임시 구성 경로에서 두 번 설치하는 테스트로 확인했다.
 - Herdr의 기존 `loop.agent` 플러그인은 활성 상태이고 저장소 플러그인을 가리킨다. worker 탭의 `--no-focus`, 작업별 라벨, worker 탭만 닫는 수명 규칙은 `packages/herdr/test/lifecycle.test.ts`에서 검증했다.
 - 최종 빌드의 로컬 설치본 `loop`를 임시 Pi/Loop 구성과 `PI_OFFLINE=1`로 PTY에서 시작했다. Pi 0.87.1 TUI가 `loop-pi-extension.js`를 로드하고 오류 없이 표시되었으며, 모델 요청 없이 종료했다.
+- Herdr의 임시 pane에서 설치본 `loop`를 `PI_OFFLINE=1`로 실행했다. Herdr가 해당 pane의 Pi를 `idle`로 인식했고, TUI의 확장 목록에 `loop-pi-extension.js`가 표시됐다. 생성한 pane은 Pi 종료 후 닫았다. 이는 Herdr 안의 Lead 시작 증거이며 worker 탭 생성이나 실제 steer 전달 증거는 아니다.
+- 설치된 Pi 0.87.1의 확장 API에서 `setStatus`, `setWidget`, 사용자 선택 UI, 커스텀 화면과 렌더러를 확인했다. 임시 확장의 3줄 위젯과 footer 상태를 Herdr pane의 Pi에서 모델 호출 없이 표시했다. 이후 실제 Loop 확장에 2줄 진행 위젯을 연결했다. Herdr pane에서 **설치본 `loop`와 설치본 확장**이 fake Loop CLI의 활성 스냅샷을 읽어 `Working: Implement proof` 위젯과 footer 상태를 함께 표시했다. 이 검사는 모델 호출이나 실제 worker 실행을 포함하지 않는다.
+- 다른 run의 명시적 상태 조회·제어가 Pi 대화에 묶인 run의 위젯과 관찰 sequence를 덮어쓰지 않는 회귀 검사를 추가했다.
 
 ## 증거의 한계
 
