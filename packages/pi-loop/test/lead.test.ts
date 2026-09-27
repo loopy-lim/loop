@@ -426,9 +426,9 @@ test("Pi attention status gives a conversational resolution path", async () => {
 test("observer records one final message with check evidence across session restoration", async () => {
   const host = fakePi();
   const entries: Array<{ type: string; customType: string; data: unknown }> = [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-x", workingDirectory: "/project" } }];
-  const messages: string[] = [];
+  const messages: Array<{ customType: string; content: string }> = [];
   host.api.appendEntry = (customType, data) => entries.push({ type: "custom", customType, data });
-  host.api.sendMessage = message => messages.push(message.content);
+  host.api.sendMessage = message => { messages.push(message); };
   const backend = fakeBackend({
     async snapshot() { return { ...snapshot("run-x"), state: "completed", tasks: [{ ...snapshot("run-x").tasks[0]!, state: "done", resultSummary: "Fixed the bug" }], lastSequence: 7 }; },
     async task(_runId, taskId) { return { ...taskContext(taskId), previousChecks: [{ id: "focused", command: "bun", args: ["test"], workingDirectory: "/project", exitCode: 0, stdout: "", stderr: "", timedOut: false, durationMs: 1 }] }; },
@@ -437,12 +437,78 @@ test("observer records one final message with check evidence across session rest
   const piContext = { ...context(), ui: { notify() {}, setStatus() {} }, sessionManager: { getBranch: () => entries } };
   await host.events.get("session_start")?.at(-1)?.({}, piContext);
   await Bun.sleep(20);
-  expect(messages).toHaveLength(1);
-  expect(messages[0]).toContain("checks focused");
-  expect(messages[0]).toContain("Verified tasks: 1/1");
+  expect(messages.filter(message => message.customType === "loop-final")).toHaveLength(1);
+  expect(messages.find(message => message.customType === "loop-final")?.content).toContain("checks focused");
+  expect(messages.find(message => message.customType === "loop-final")?.content).toContain("Verified tasks: 1/1");
+  expect(messages.filter(message => message.customType === "loop-final-review")).toHaveLength(1);
   await host.events.get("session_start")?.at(-1)?.({}, piContext);
   await Bun.sleep(20);
-  expect(messages).toHaveLength(1);
+  expect(messages.filter(message => message.customType === "loop-final")).toHaveLength(1);
+  expect(messages.filter(message => message.customType === "loop-final-review")).toHaveLength(1);
+  await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
+});
+
+test("Pi Lead reviews a completed goal once and does not recursively review its automatic follow-up", async () => {
+  const host = fakePi();
+  const entries: Array<{ type: string; customType: string; data: unknown }> = [
+    { type: "custom", customType: "loop-run-binding", data: { runId: "run-first", workingDirectory: "/project" } },
+  ];
+  const messages: Array<{ customType: string; content: string; display: boolean; triggerTurn?: boolean }> = [];
+  host.api.appendEntry = (customType, data) => entries.push({ type: "custom", customType, data });
+  host.api.sendMessage = (message, options) => { messages.push({ ...message, triggerTurn: options?.triggerTurn }); };
+  const backend = fakeBackend({
+    async run(input) {
+      return { status: "running", tasks: input.tasks.length, escalations: [], providersByTask: {}, startedAt: {}, finishedAt: {} };
+    },
+    async snapshot(runId) {
+      return {
+        ...emptySnapshot(runId),
+        state: "completed",
+        tasks: [{ ...snapshot(runId).tasks[0]!, state: "done" }],
+        lastSequence: 8,
+      };
+    },
+  });
+  registerLoopExtension(host.api, backend, undefined, settings);
+  const piContext = { ...context(), ui: { notify() {}, setStatus() {} }, sessionManager: { getBranch: () => entries } };
+  await host.hooks.get("before_agent_start")!({ prompt: "Fix the original bug", systemPrompt: "base" }, piContext);
+  await host.events.get("session_start")?.at(-1)?.({}, piContext);
+  await Bun.sleep(20);
+
+  expect(messages.filter(message => message.customType === "loop-final")).toHaveLength(1);
+  const review = messages.find(message => message.customType === "loop-final-review");
+  expect(review).toMatchObject({ display: false, triggerTurn: true });
+  expect(review?.content).toContain("original goal");
+
+  await host.hooks.get("before_agent_start")!({ prompt: review!.content, systemPrompt: "base" }, piContext);
+  await expect(host.tools.get("loop_steer")!.execute("review-steer", { taskId: "all" }, new AbortController().signal, undefined, piContext))
+    .rejects.toThrow("latest user message");
+  await host.tools.get("loop_run")!.execute("follow-up", {
+    intent: "Finish the uncovered requirement",
+    runId: "run-follow-up",
+    tasksJson: JSON.stringify([task("finish", "implementation", [], ["src/**"])]),
+  }, new AbortController().signal, undefined, piContext);
+  await Bun.sleep(20);
+
+  expect(messages.filter(message => message.customType === "loop-final")).toHaveLength(2);
+  expect(messages.filter(message => message.customType === "loop-final-review")).toHaveLength(1);
+  await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
+});
+
+test("explicitly cancelled runs report their result without starting an automatic review", async () => {
+  const host = fakePi();
+  const entries = [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-cancelled", workingDirectory: "/project" } }];
+  const messages: Array<{ customType: string }> = [];
+  host.api.sendMessage = message => { messages.push(message); };
+  registerLoopExtension(host.api, fakeBackend({
+    async snapshot(runId) { return { ...emptySnapshot(runId), state: "cancelled", lastSequence: 2 }; },
+  }), undefined, settings);
+  const piContext = { ...context(), ui: { notify() {}, setStatus() {} }, sessionManager: { getBranch: () => entries } };
+
+  await host.events.get("session_start")?.at(-1)?.({}, piContext);
+  await Bun.sleep(20);
+
+  expect(messages.map(message => message.customType)).toEqual(["loop-final"]);
   await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
 });
 
@@ -540,7 +606,7 @@ test("inspecting or controlling another run leaves the bound Pi widget on its ru
 test("final message prioritizes a late failed task over earlier successful tasks", async () => {
   const host = fakePi();
   const messages: string[] = [];
-  host.api.sendMessage = message => messages.push(message.content);
+  host.api.sendMessage = message => { messages.push(message.content); };
   const tasks = Array.from({ length: 6 }, (_, index) => ({ ...snapshot("run-x").tasks[0]!, id: `task-${index}`, state: index === 5 ? "failed" as const : "done" as const, lastFailure: index === 5 ? "focused check failed" : null }));
   registerLoopExtension(host.api, fakeBackend({ async snapshot() { return { ...snapshot("run-x"), state: "failed", tasks, lastSequence: 9 }; } }), undefined, settings);
   const piContext = { ...context(), ui: { notify() {}, setStatus() {} }, sessionManager: { getBranch: () => [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-x", workingDirectory: "/project" } }] } };
@@ -555,7 +621,7 @@ test("final message prioritizes a late failed task over earlier successful tasks
 test("Pi Lead surfaces a verifier FAIL even when executable checks marked the run completed", async () => {
   const host = fakePi();
   const messages: string[] = [];
-  host.api.sendMessage = message => messages.push(message.content);
+  host.api.sendMessage = message => { messages.push(message.content); };
   const failedReview = {
     ...snapshot("run-x"),
     state: "completed" as const,
@@ -582,7 +648,7 @@ test("observer resumes after attention and stops following the old session branc
   const host = fakePi();
   const messages: string[] = [];
   const widgets: Array<string[] | undefined> = [];
-  host.api.sendMessage = message => messages.push(`${message.customType}:${message.content}`);
+  host.api.sendMessage = message => { messages.push(`${message.customType}:${message.content}`); };
   let latest = { ...snapshot("run-x"), lastSequence: 1 };
   let branch: Array<{ type: string; customType: string; data: unknown }> = [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-x", workingDirectory: "/project" } }];
   registerLoopExtension(host.api, fakeBackend({ async snapshot() { return latest; }, async runs() { return []; } }), undefined, settings);

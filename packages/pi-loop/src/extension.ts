@@ -97,7 +97,7 @@ export interface PiExtensionApi {
     ): Promise<PiToolResult>;
   }): void;
   appendEntry?(customType: string, data: unknown): void;
-  sendMessage?(message: { customType: string; content: string; display: boolean }, options?: { triggerTurn?: boolean }): void;
+  sendMessage?(message: { customType: string; content: string; display: boolean }, options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" }): void | Promise<void>;
   on(
     event: PiLifecycleEvent | "session_tree",
     handler: (event: unknown, context: PiContext) => Promise<void> | void,
@@ -188,6 +188,9 @@ export function registerLoopExtension(
   let widgetContext: PiContext | undefined;
   const announcedAttention = new Set<string>();
   const announcedFinal = new Set<string>();
+  const automaticFollowUpRuns = new Set<string>();
+  let awaitingFinalReviewTurn = false;
+  let inFinalReviewTurn = false;
 
   const stopObserver = () => {
     observerVersion++;
@@ -223,7 +226,20 @@ export function registerLoopExtension(
       ...findings,
       ...(snapshot.tasks.length > findings.length ? [`… ${snapshot.tasks.length - findings.length} more tasks`] : []),
     ], { lineLimit: limits.statusLineLimit, lineTextLimit: limits.lineTextLimit, overflow: omitted => `… ${omitted} more` }).join("\n");
-    pi.sendMessage?.({ customType: "loop-final", content: body, display: true }, { triggerTurn: false });
+    await pi.sendMessage?.({ customType: "loop-final", content: body, display: true }, { triggerTurn: false });
+    if (snapshot.state !== "cancelled" && !automaticFollowUpRuns.has(snapshot.runId) && pi.sendMessage) {
+      awaitingFinalReviewTurn = true;
+      try {
+        await pi.sendMessage({
+          customType: "loop-final-review",
+          content: `Loop final review for ${snapshot.runId}. Compare the original goal and later user corrections with the durable tasks and executable check evidence. If a requirement remains unmet, start one focused follow-up run with an explicit completion check. If the goal is covered, summarize the verified result. Do not repeat this automatic review for a follow-up run.`,
+          display: false,
+        }, { triggerTurn: true, deliverAs: "followUp" });
+      } catch {
+        awaitingFinalReviewTurn = false;
+        context.ui.notify("Loop final review could not start; ask here to continue the goal.", "warning");
+      }
+    }
   };
   const acceptSnapshot = (snapshot: SnapshotOutput, context: PiContext) => {
     if (canonical(snapshot.workingDirectory) !== canonical(context.cwd)) throw new Error("Loop run belongs to another working directory");
@@ -291,6 +307,9 @@ export function registerLoopExtension(
     stopObserver();
     announcedAttention.clear();
     announcedFinal.clear();
+    automaticFollowUpRuns.clear();
+    awaitingFinalReviewTurn = false;
+    inFinalReviewTurn = false;
     currentRunId = undefined;
     const cwd = canonical(context.cwd);
     let lastBinding: { runId?: string; workingDirectory?: string } | undefined;
@@ -302,6 +321,10 @@ export function registerLoopExtension(
       if (entry.type === "custom" && entry.customType === "loop-run-attention") {
         const data = entry.data as { runId?: string; attentionId?: string } | undefined;
         if (data?.runId && data.attentionId) announcedAttention.add(`${data.runId}:${data.attentionId}`);
+      }
+      if (entry.type === "custom" && entry.customType === "loop-run-auto-follow-up") {
+        const data = entry.data as { runId?: string } | undefined;
+        if (data?.runId) automaticFollowUpRuns.add(data.runId);
       }
       if (entry.type !== "custom" || entry.customType !== "loop-run-binding") continue;
       lastBinding = entry.data as { runId?: string; workingDirectory?: string } | undefined;
@@ -380,6 +403,10 @@ export function registerLoopExtension(
           }));
         },
       }), tasks.length);
+      if (inFinalReviewTurn) {
+        automaticFollowUpRuns.add(runId);
+        pi.appendEntry?.("loop-run-auto-follow-up", { runId });
+      }
       bind(runId, context);
       const text = renderLeadRunSummary(runId, summary, limits);
       context.ui.notify(text, summary.status === "completed" ? "success" : "info");
@@ -437,6 +464,7 @@ export function registerLoopExtension(
     description: "Record the latest user's exact guidance for one running task within its existing completion contract. Use loop_add_task for changed acceptance criteria. Select taskId from loop_status; use 'all' only when the user explicitly addresses every task. The original user text is forwarded unchanged.",
     parameters: Type.Object({ taskId: Type.String(), runId: Type.Optional(Type.String()) }),
     async execute(_id, params, _signal, _update, context) {
+      if (inFinalReviewTurn) throw new Error("Steering needs the latest user message; this turn is an automatic final review");
       const snapshot = await current(context, params.runId);
       if (!params.taskId?.trim() || !lastUserPrompt.trim()) throw new Error("Steering needs a task target and the latest user message");
       if (params.taskId !== "all") {
@@ -568,9 +596,11 @@ export function registerLoopExtension(
 
   pi.on("session_start", restore);
   pi.on("session_tree", restore);
-  pi.on("session_shutdown", () => { restoreVersion++; stopObserver(); });
+  pi.on("session_shutdown", () => { restoreVersion++; stopObserver(); awaitingFinalReviewTurn = false; inFinalReviewTurn = false; });
   pi.on("before_agent_start", (event) => {
-    lastUserPrompt = event.prompt;
+    inFinalReviewTurn = awaitingFinalReviewTurn;
+    awaitingFinalReviewTurn = false;
+    if (!inFinalReviewTurn) lastUserPrompt = event.prompt;
     return { systemPrompt: `${event.systemPrompt}\n\n${leadInstructions(event.prompt, vocabulary, currentRunId)}` };
   });
 }
