@@ -720,7 +720,9 @@ export function registerLoopExtension(
 
   const resolveAttentionAndRestart = async (runId: string, attentionId: string, resolution: string, context: PiContext) => {
     const resolved = await backend.resolve(runId, attentionId, resolution, context.cwd);
-    if (resolved.state !== "active" || resolved.activeWorkers.length > 0) return { snapshot: resolved, restarted: false };
+    const leaseAlive = resolved.executionOwner && resolved.executionExpiresAt != null
+      && Number(resolved.executionExpiresAt) > Date.now();
+    if (resolved.state !== "active" || resolved.activeWorkers.length > 0 || leaseAlive) return { snapshot: resolved, restarted: false };
     try {
       return { snapshot: await backend.resume(runId, context.cwd), restarted: true };
     } catch {

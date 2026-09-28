@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -406,6 +406,46 @@ test("runs, pause, guidance and attention resolution operate on durable state", 
   expect(await runCli(["resolve", "controls", "approval", "approved", ...flags], { io: output().io })).toBe(0);
   expect((await protocol.getSnapshot(input)).openAttentionIds).toEqual([]);
   expect((await protocol.getSnapshot(input)).state).toBe("paused");
+});
+
+test("resolving attention starts an owner for ready or pending work", async () => {
+  await protocol.rustra.ready();
+  for (const initiallyReady of [true, false]) {
+    const directory = mkdtempSync(join(tmpdir(), "loop-cli-resolve-owner-"));
+    const databasePath = join(directory, "loop.sqlite");
+    const runId = initiallyReady ? "resolve-ready" : "resolve-pending";
+    await protocol.prepareRun({ databasePath, runId, intent: "Finish verification", workingDirectory: directory, tasks: [{
+      id: "verify", title: "Verify", kind: "verification", dependencies: [],
+      readScope: ["src/**"], writeScope: [], requirements: ["Return check evidence"],
+      completionChecks: [{ id: "check", command: "true", args: [], timeoutMs: 1_000 }],
+      preferredCompute: "fast", minimumCompute: "tiny", maximumCompute: "strong", maxAttempts: 1,
+    }] });
+    if (initiallyReady) {
+      await protocol.claimRunnableTasks({ databasePath, runId, runningTaskIds: [], maxWorkers: 1, maxFrontierWorkers: 1 });
+    }
+    await protocol.requestAttention({ databasePath, runId, attentionId: "failure", kind: "failure", summary: "Retry verification", taskId: "verify" });
+
+    const marker = join(directory, "owner-started");
+    const executablePath = join(directory, "fake-owner.sh");
+    writeFileSync(executablePath, '#!/bin/sh\nprintf "%s" "$$" > "$LOOP_TEST_OWNER_MARKER"\nsleep 2\n');
+    chmodSync(executablePath, 0o700);
+    const previous = process.env.LOOP_TEST_OWNER_MARKER;
+    process.env.LOOP_TEST_OWNER_MARKER = marker;
+    try {
+      const pending = runCli(["resolve", runId, "failure", "retry", "--config", join(root, "config"), "--database", databasePath, "--json"], {
+        io: output().io, executablePath,
+      });
+      for (let attempt = 0; attempt < 100 && !existsSync(marker); attempt++) await Bun.sleep(10);
+      expect(existsSync(marker)).toBe(true);
+      const ownerPid = readFileSync(marker, "utf8").trim();
+      await protocol.claimExecution({ databasePath, runId, owner: `${ownerPid}:test`, nowMs: Date.now(), ttlMs: 5_000 });
+      expect(await pending).toBe(0);
+      expect((await protocol.getSnapshot({ databasePath, runId })).state).toBe("active");
+    } finally {
+      if (previous === undefined) delete process.env.LOOP_TEST_OWNER_MARKER;
+      else process.env.LOOP_TEST_OWNER_MARKER = previous;
+    }
+  }
 });
 
 test("guidance status exposes delivery stage without revealing correction text", async () => {

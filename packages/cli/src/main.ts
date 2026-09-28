@@ -192,6 +192,13 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
         const [_, attentionId, ...resolution] = parsed.operands;
         if (!attentionId || !resolution.length) throw new UsageError("resolve requires <run-id> <attention-id> <approved|retry|cancel|answer>");
         await protocol.resolveAttention({ ...input, attentionId, resolution: resolution.join(" ") });
+        const resolved = await protocol.getSnapshot(input);
+        const leaseAlive = resolved.executionExpiresAt != null && Number(resolved.executionExpiresAt) > Date.now();
+        if (resolved.state === "active" && !leaseAlive) {
+          const plan = await protocol.getRunPlan(input);
+          const owner = await launchOwner(parsed, config, runId, plan.workingDirectory, options);
+          await waitForOwnerReady({ owner, snapshot: () => protocol.getSnapshot(input) });
+        }
       }
       if (parsed.command === "reconcile") {
         const taskId = parsed.operands[1];

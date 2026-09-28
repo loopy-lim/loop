@@ -444,6 +444,24 @@ test("resolving exhausted failure attention restarts the detached owner for read
   ]);
 });
 
+test("resolved attention does not start a second owner when the CLI already holds a lease", async () => {
+  const host = fakePi();
+  let resumeCalls = 0;
+  registerLoopExtension(host.api, fakeBackend({
+    async resolve(runId) {
+      return { ...snapshot(runId), tasks: [{ ...snapshot(runId).tasks[0]!, state: "ready" }],
+        activeWorkers: [], executionOwner: "123:owner", executionExpiresAt: Date.now() + 10_000 };
+    },
+    async resume(runId) { resumeCalls++; return snapshot(runId); },
+  }), undefined, settings);
+
+  const response = await host.tools.get("loop_resolve")!.execute("resolve", {
+    runId: "run-x", attentionId: "failure-1", resolution: "retry",
+  }, new AbortController().signal, undefined, context());
+  expect(response.details.state).toBe("active");
+  expect(resumeCalls).toBe(0);
+});
+
 test("resolved attention reports an owner restart failure to the Lead", async () => {
   const host = fakePi();
   registerLoopExtension(host.api, fakeBackend({
