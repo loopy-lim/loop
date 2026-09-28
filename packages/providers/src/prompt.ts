@@ -35,6 +35,7 @@ export function buildWorkerPrompt(input: StartWorkerInput): string {
       "Worker instructions:",
       "- Respect the declared write scope.",
       "- Guidance does not expand the write scope.",
+      "- Run focused feedback checks; Loop reruns the declared completion checks after your response. Add broader checks only to resolve a concrete remaining risk.",
       ...(context.task.writeScope.length === 0 ? [
         "- Do not create, edit, delete, or rename files, even if guidance requests a change.",
         "- Report requested edits to the Lead for a writable task.",

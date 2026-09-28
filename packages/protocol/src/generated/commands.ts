@@ -6,7 +6,7 @@
 // DO NOT EDIT — changes will be overwritten and fail codegen --check.
 // ────────────────────────────────────────────────────────────
 
-import type { AddTaskInput, Array_of_EventOutput, Array_of_RunListOutput, ClaimRunnableTasksInput, CleanupDispositionOutput, CleanupRunInput, CleanupRunOutput, CompareTracesInput, CompareTracesOutput, ConfigureRunInput, CreateRunInput, DecisionInput, EvaluateCleanupDispositionInput, EvaluateFailurePolicyInput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, ExecutionLeaseInput, FailurePolicyOutput, GetTraceInput, GetTraceOutput, ListRunsInput, OperationOutput, PolicyEvaluationOutput, PrepareRunInput, PrepareRunPreflightInput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RunInput, RunPlanOutput, SelectCandidateInput, SelectCandidateOutput, SnapshotOutput, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
+import type { AddTaskInput, Array_of_EventOutput, Array_of_RunListOutput, ClaimRunnableTasksInput, CleanupDispositionOutput, CleanupRunInput, CleanupRunOutput, CompareTracesInput, CompareTracesOutput, ConfigureRunInput, CreateRunInput, DecisionInput, EvaluateCleanupDispositionInput, EvaluateFailurePolicyInput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, ExecutionLeaseInput, FailurePolicyOutput, GetTraceInput, GetTraceOutput, ListRunsInput, OperationOutput, PolicyEvaluationOutput, PrepareRunInput, PrepareRunPreflightInput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, RecordGuidanceDeliveredInput, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RunInput, RunPlanOutput, SelectCandidateInput, SelectCandidateOutput, SnapshotOutput, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
 import { createGeneratedFields2, invokeGenerated, invokeGeneratedFields1, invokeGeneratedFields3 } from '@rustra/types';
 import type { InvokeOptions } from '@rustra/types';
 
@@ -112,6 +112,17 @@ export function recordDecision(input: DecisionInput, options?: InvokeOptions): P
   return invokeGenerated<OperationOutput>(10, 'recordDecision', input, options);
 }
 recordDecision.commandId = 'recordDecision';
+
+/**
+ * Records that a live worker received guidance up to `through_sequence`
+ * (ADR M-TL2 delivery watermark). The store's reducer enforces the
+ * ascending-only watermark per task, so an out-of-order or duplicate
+ * delivery record fails here instead of regressing the projection.
+ */
+export function recordGuidanceDelivered(input: RecordGuidanceDeliveredInput, options?: InvokeOptions): Promise<OperationOutput> {
+  return invokeGenerated<OperationOutput>(42, 'recordGuidanceDelivered', input, options);
+}
+recordGuidanceDelivered.commandId = 'recordGuidanceDelivered';
 
 export function recordVerification(input: VerificationInput, options?: InvokeOptions): Promise<OperationOutput> {
   return invokeGenerated<OperationOutput>(9, 'recordVerification', input, options);

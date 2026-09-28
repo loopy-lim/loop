@@ -343,6 +343,9 @@ function fakeBackend(overrides: Partial<LoopLeadBackend> = {}): LoopLeadBackend 
     async task() {
       throw new Error("not used in persona tests");
     },
+    async guidance() {
+      throw new Error("not used in persona tests");
+    },
     async runs() {
       return [];
     },

@@ -3,6 +3,7 @@ export * from "./coordinator";
 export * from "./completion";
 export * from "./config";
 export * from "./control";
+export * from "./mailbox";
 export * from "./model-registry";
 export * from "./composition";
 export * from "./persona";

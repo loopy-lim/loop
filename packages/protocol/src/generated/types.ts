@@ -254,6 +254,17 @@ export type CheckReceipt = {
   stderr: string;
   timedOut: boolean;
   durationMs: number | bigint;
+  outputArtifact?: string | null;
+  source?: SourceReceipt | null;
+};
+
+export type SourceReceipt = {
+  /** Digest of the declared read/write scope around the completion check batch. */
+  beforeFingerprint: string;
+  afterFingerprint: string;
+  /** Repository paths observed to change while a worker ran. Shared-tree observations cannot establish which actor wrote them. */
+  observedChangedPaths: string[];
+  observedOutsideWriteScope: string[];
 };
 
 export type RunListOutput = {
@@ -269,6 +280,15 @@ export type PreflightTaskSpecInput = {
   consumes: DependencyConsumptionInput[];
   completionCoverage: CompletionCoverageInput[];
   failurePolicy: FailurePolicy;
+};
+
+/**
+ * Wire shape of a steer-mailbox delivery record (ADR M-TL2): the mailbox appends one of these per live worker after a successful `provider.steer`, marking every `GuidanceAdded` at or below `through_sequence` as received by that worker's task. The delivery watermark projection lives in loop-core; this type is only the transport form (see `record_guidance_delivered`).
+ */
+export type GuidanceDeliveredEvent = {
+  taskId: string;
+  workerId: string;
+  throughSequence: number | bigint;
 };
 
 export type CheckResultInput = {
@@ -530,6 +550,13 @@ export type DecisionInput = {
   decisionId: string;
   taskId?: string | null;
   value: string;
+};
+
+export type RecordGuidanceDeliveredInput = {
+  databasePath: string;
+  runId: string;
+  guidance: GuidanceDeliveredEvent;
+  executionOwner?: string | null;
 };
 
 export type VerificationInput = {

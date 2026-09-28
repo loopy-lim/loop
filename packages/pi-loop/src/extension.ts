@@ -19,9 +19,11 @@ import type {
   SnapshotOutput,
   TaskContextOutput,
   TaskSpecInput,
+  ComputeClass,
 } from "@loop/protocol";
 
 import { validateDecomposition } from "./lead/decompose";
+import { codeMap } from "./lead/code-map";
 import { decompositionPrompt, taskSpecInputDescription } from "./lead/prompts";
 import { LeadTiming, formatFinalTiming, formatHandoffTiming } from "./lead/timing";
 
@@ -36,6 +38,7 @@ export interface LeadSettings {
   limits: OutputLimits;
   vocabulary: PersonaVocabulary;
   herdrVisible?: boolean;
+  defaultComputeClass?: ComputeClass;
 }
 
 function loadLeadSettings(): LeadSettings {
@@ -44,6 +47,7 @@ function loadLeadSettings(): LeadSettings {
     limits: config.output,
     vocabulary: derivePersonaVocabulary(config.personas, config.personaKindDefaults),
     herdrVisible: process.env.HERDR_ENV === "1",
+    defaultComputeClass: config.routing.defaultComputeClass,
   };
 }
 import {
@@ -69,6 +73,10 @@ interface PiContext {
 type LeadToolParams = {
   intent?: string; tasksJson?: string; runId?: string; taskId?: string;
   taskJson?: string; attentionId?: string; resolution?: string; action?: string;
+  title?: string; readScope?: string[]; writeScope?: string[];
+  requirements?: string[];
+  path?: string;
+  checks?: Array<Pick<TaskSpecInput["completionChecks"][number], "id" | "command" | "args">>;
 };
 
 interface PiToolResult {
@@ -133,6 +141,7 @@ export interface LoopLeadBackend {
     cwd: string,
   ): Promise<SnapshotOutput>;
   task(runId: string, taskId: string, cwd: string): Promise<TaskContextOutput>;
+  guidance(runId: string, taskId: string, cwd: string): Promise<string>;
   runs(cwd: string): Promise<RunListOutput[]>;
   models(cwd: string): Promise<string[]>;
   addTask(runId: string, task: TaskSpecInput, cwd: string): Promise<SnapshotOutput>;
@@ -237,7 +246,7 @@ export function registerLoopExtension(
       try {
         await pi.sendMessage({
           customType: "loop-final-review",
-          content: `Loop final review for ${snapshot.runId}. Compare the original goal and later user corrections with the durable tasks and executable check evidence. If a requirement remains unmet, start one focused follow-up run with an explicit completion check. If the goal is covered, summarize the verified result. Do not repeat this automatic review for a follow-up run.`,
+          content: `Loop final review for ${snapshot.runId}. Compare the original goal and later user corrections with the durable tasks and executable check evidence. If a requirement remains unmet, start one focused follow-up run with an explicit completion check. If the goal is covered, summarize the verified result in at most 8 lines: result, checks, and any material limit. Show details only when asked. Do not repeat this automatic review for a follow-up run.`,
           display: false,
         }, { triggerTurn: true, deliverAs: "followUp" });
       } catch {
@@ -366,7 +375,7 @@ export function registerLoopExtension(
 
   registerHerdrLifecycle(pi, lifecycle);
 
-  pi.registerTool({
+  const runTool: Parameters<PiExtensionApi["registerTool"]>[0] = {
     name: "loop_run",
     label: "Loop Run",
     description: [
@@ -433,6 +442,54 @@ export function registerLoopExtension(
       context.ui.notify(text, summary.status === "completed" ? "success" : "info");
       return result(text, { runId, status: summary.status });
     },
+  };
+  pi.registerTool(runTool);
+
+  pi.registerTool({
+    name: "loop_quick_run",
+    label: "Loop Quick Run",
+    description: "Start one bounded implementation task immediately. Supply exact read/write paths, concrete requirements, and every required executable check as a separate checks entry. Use loop_run for multiple tasks, decisions, or integration.",
+    parameters: Type.Object({
+      intent: Type.String(),
+      title: Type.String(),
+      readScope: Type.Array(Type.String()),
+      writeScope: Type.Array(Type.String()),
+      requirements: Type.Array(Type.String()),
+      checks: Type.Array(Type.Object({
+        id: Type.String(),
+        command: Type.String(),
+        args: Type.Array(Type.String()),
+      }), { minItems: 1 }),
+      runId: Type.Optional(Type.String()),
+    }),
+    async execute(id, params, signal, onUpdate, context) {
+      const readScope = params.readScope?.map(item => item.trim()).filter(Boolean) ?? [];
+      const writeScope = params.writeScope?.map(item => item.trim()).filter(Boolean) ?? [];
+      const requirements = params.requirements?.map(item => item.trim()).filter(Boolean) ?? [];
+      if (!params.intent?.trim() || !params.title?.trim()) throw new Error("intent and title are required");
+      if (writeScope.length === 0) throw new Error("writeScope must name the files owned by this task");
+      if (requirements.length === 0) throw new Error("requirements must name the expected result");
+      const checks = params.checks ?? [];
+      if (checks.length === 0 || checks.some(check => !check.id.trim() || !check.command.trim() || !Array.isArray(check.args))) {
+        throw new Error("checks must name each executable completion check with an id, command, and args");
+      }
+      if (new Set(checks.map(check => check.id.trim())).size !== checks.length) throw new Error("checks must have unique ids");
+      const task: TaskSpecInput = {
+        id: "implementation",
+        title: params.title.trim(),
+        kind: "implementation",
+        dependencies: [],
+        readScope,
+        writeScope,
+        requirements,
+        completionChecks: checks.map(check => ({ id: check.id.trim(), command: check.command.trim(), args: check.args, workingDirectory: null, timeoutMs: 120_000 })),
+        preferredCompute: settings.defaultComputeClass ?? "fast",
+        minimumCompute: "tiny",
+        maximumCompute: "frontier",
+        maxAttempts: 3,
+      };
+      return runTool.execute(id, { intent: params.intent, tasksJson: JSON.stringify([task]), runId: params.runId }, signal, onUpdate, context);
+    },
   });
 
   const current = async (context: PiContext, requested?: string) => {
@@ -452,6 +509,18 @@ export function registerLoopExtension(
     }
     return active;
   };
+
+  pi.registerTool({
+    name: "loop_code_map", label: "Loop Code Map",
+    description: "List file and exported symbol names under one project-relative path, at most eight lines. Use only when task ownership paths are unclear; open source text separately when needed.",
+    parameters: Type.Object({ path: Type.String({ description: "Project-relative file or directory" }) }),
+    async execute(_id, params, _signal, _update, context) {
+      return result(compactLines(codeMap(context.cwd, params.path ?? "", limits.listLineLimit).split("\n"), {
+        lineLimit: limits.listLineLimit, lineTextLimit: limits.lineTextLimit,
+        overflow: omitted => `… ${omitted} more files`,
+      }).join("\n"), {});
+    },
+  });
 
   pi.registerTool({
     name: "loop_status", label: "Loop Status",
@@ -478,6 +547,37 @@ export function registerLoopExtension(
       const snapshot = await current(context, params.runId);
       bind(snapshot.runId, context);
       return result(renderLeadSnapshot("status", snapshot, limits), { runId: snapshot.runId, state: snapshot.state });
+    },
+  });
+  pi.registerTool({
+    name: "loop_task", label: "Loop Task Detail",
+    description: "Read one task's durable requirements, ownership, dependency results, guidance, and check evidence in this Pi conversation. Choose taskId from loop_status graph or workers.",
+    parameters: Type.Object({ taskId: Type.String(), runId: Type.Optional(Type.String()) }),
+    async execute(_id, params, _signal, _update, context) {
+      const snapshot = await current(context, params.runId);
+      if (!params.taskId?.trim() || !snapshot.tasks.some(task => task.id === params.taskId)) {
+        throw new Error(`Task ${params.taskId ?? ""} is not in run ${snapshot.runId}`);
+      }
+      const detail = await backend.task(snapshot.runId, params.taskId, context.cwd);
+      const artifacts = detail.previousChecks.flatMap(check => check.outputArtifact ? [{ checkId: check.id, path: check.outputArtifact }] : []);
+      return result(renderTaskContext(detail, limits), { runId: snapshot.runId, taskId: params.taskId, artifacts });
+    },
+  });
+  pi.registerTool({
+    name: "loop_guidance", label: "Loop Guidance Status",
+    description: "Read recorded, delivered, and post-delivery checked correction stages for one task. Checked means stable-source task checks passed after delivery; inspect check coverage before claiming the new criterion is satisfied.",
+    parameters: Type.Object({ taskId: Type.String(), runId: Type.Optional(Type.String()) }),
+    async execute(_id, params, _signal, _update, context) {
+      const snapshot = await current(context, params.runId);
+      if (!params.taskId?.trim() || !snapshot.tasks.some(task => task.id === params.taskId)) {
+        throw new Error(`Task ${params.taskId ?? ""} is not in run ${snapshot.runId}`);
+      }
+      const stages = (await backend.guidance(snapshot.runId, params.taskId, context.cwd)).trim();
+      return result(compactLines([
+        `Guidance for ${params.taskId}`,
+        ...(stages ? stages.split("\n") : ["No guidance recorded for this task"]),
+        "Checked means later task checks passed on stable source; inspect coverage for the changed criterion.",
+      ], { lineLimit: limits.statusLineLimit, lineTextLimit: limits.lineTextLimit, overflow: omitted => `… ${omitted} more guidance items` }).join("\n"), { runId: snapshot.runId, taskId: params.taskId });
     },
   });
   pi.registerTool({
@@ -708,6 +808,10 @@ class DefaultLoopLeadBackend implements LoopLeadBackend {
     return this.#json(["task", runId, taskId, "--json"], cwd);
   }
 
+  async guidance(runId: string, taskId: string, cwd: string): Promise<string> {
+    return runLoopCommand(["guidance", runId, taskId], cwd);
+  }
+
   async runs(cwd: string): Promise<RunListOutput[]> {
     return this.#json(["runs", "--json"], cwd);
   }
@@ -878,7 +982,8 @@ function leadInstructions(intent: string, vocabulary: PersonaVocabulary, current
     currentRunId
       ? `Current bound run: ${currentRunId}. For progress questions use loop_status; for a correction to a live task use loop_steer, for an added requirement use loop_add_task, for attention use loop_resolve, and for explicit pause/resume/cancel use loop_control. Read the durable snapshot before acting. Do not submit another run while this goal's run is active. If the bound run is terminal and the user has an unfinished requirement, start a follow-up run carrying that requirement and its completion checks. If the user asks for a separate goal while this run is active, ask whether to include it or queue it after completion.`
       : "No run is bound. Use loop_status without arguments to list active runs and their intents, then loop_select_run after the user identifies the goal. Do not ask the user to supply an internal run ID.",
-    "For a new engineering execution request, inspect only the minimum path and contract context needed to create a small dependency DAG, then call loop_run exactly once.",
+    "For a new engineering execution request, inspect only the minimum path and contract context needed. If ownership paths are unclear, use loop_code_map for file and symbol names, then open source text only as needed. For one bounded implementation task with exact scope, call loop_quick_run once and put every required command in a separate checks entry. For a dependency DAG, call loop_run exactly once.",
+    "When the user asks about a worker or its evidence, use loop_status to select the task and loop_task to inspect its durable detail in this conversation. Use loop_guidance to distinguish correction recorded, worker delivered, and post-delivery checks; inspect coverage before claiming the changed criterion passed.",
     "Do not deeply debug, investigate root causes, or implement the change yourself; delegate that work promptly to Loop tasks.",
     "Every task must declare dependencies, exact read and write ownership, requirements, preferredCompute, minimumCompute, maximumCompute, maxAttempts, and at least one machine-verifiable completionChecks entry.",
     "Requirements must name the result and evidence the worker returns; downstream tasks receive dependency result summaries rather than implicit context.",

@@ -160,6 +160,186 @@ fn recovery_keeps_a_confirmed_live_worker_running() {
 }
 
 #[test]
+fn reconciled_attempt_row_is_cancelled_then_reused_on_redispatch() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("loop.db");
+    let setup = [
+        Event::new("run-1", EventKind::RunCreated),
+        Event::new("run-1", EventKind::TaskCreated(task())),
+        Event::new("run-1", EventKind::TaskReady(TaskId::from("impl"))),
+        Event::new(
+            "run-1",
+            EventKind::WorkerStarted {
+                task_id: TaskId::from("impl"),
+                worker_id: "worker-1".into(),
+            },
+        ),
+    ];
+    {
+        let mut store = SqliteStore::open(&path).unwrap();
+        store.append_batch(&setup).unwrap();
+    }
+
+    // The worker is orphaned and an operator reconciles the execution. The
+    // abandoned attempt must be marked cancelled in the queryable index while
+    // the task returns to ready.
+    {
+        let mut store = SqliteStore::open(&path).unwrap();
+        store
+            .append(&Event::new(
+                "run-1",
+                EventKind::TaskExecutionReconciled {
+                    task_id: TaskId::from("impl"),
+                },
+            ))
+            .unwrap();
+    }
+    {
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        let attempt_state: String = connection
+            .query_row(
+                "SELECT state FROM attempts WHERE run_id = 'run-1' AND task_id = 'impl' AND attempt = 0",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(attempt_state, "cancelled");
+        let worker_state: String = connection
+            .query_row(
+                "SELECT state FROM workers WHERE run_id = 'run-1' AND id = 'worker-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(worker_state, "cancelled");
+    }
+
+    // Redispatching the same attempt must reuse the row instead of violating
+    // the attempts PRIMARY KEY, and a later genuine retry (attempt incremented
+    // by a verification failure) must still open its own row.
+    {
+        let mut store = SqliteStore::open(&path).unwrap();
+        store
+            .append(&Event::new(
+                "run-1",
+                EventKind::WorkerStarted {
+                    task_id: TaskId::from("impl"),
+                    worker_id: "worker-2".into(),
+                },
+            ))
+            .unwrap();
+        store
+            .append(&Event::new(
+                "run-1",
+                EventKind::WorkerFinished {
+                    task_id: TaskId::from("impl"),
+                    worker_id: "worker-2".into(),
+                },
+            ))
+            .unwrap();
+        store
+            .append(&Event::new(
+                "run-1",
+                EventKind::VerificationFailed {
+                    task_id: TaskId::from("impl"),
+                    reason: "checks failed".into(),
+                },
+            ))
+            .unwrap();
+        store
+            .append(&Event::new(
+                "run-1",
+                EventKind::WorkerStarted {
+                    task_id: TaskId::from("impl"),
+                    worker_id: "worker-3".into(),
+                },
+            ))
+            .unwrap();
+
+        let projection = store.projection("run-1").unwrap();
+        assert_eq!(
+            projection.tasks[&TaskId::from("impl")].state,
+            TaskState::Running
+        );
+        assert_eq!(
+            projection.tasks[&TaskId::from("impl")].attempt, 1,
+            "only the verification failure may consume retry budget"
+        );
+        assert_eq!(
+            projection.active_workers.get("worker-3").map(|id| id.as_str()),
+            Some("impl")
+        );
+    }
+
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    let rows: Vec<(i64, String)> = connection
+        .prepare(
+            "SELECT attempt, state FROM attempts WHERE run_id = 'run-1' AND task_id = 'impl' ORDER BY attempt",
+        )
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec![(0, "failed".to_string()), (1, "running".to_string())],
+        "exactly one attempts row per attempt number; no duplicates"
+    );
+}
+
+#[test]
+fn reconcile_cancels_verifying_attempt_rows_of_a_finished_worker() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("loop.db");
+    let mut store = SqliteStore::open(&path).unwrap();
+    store
+        .append_batch(&[
+            Event::new("run-1", EventKind::RunCreated),
+            Event::new("run-1", EventKind::TaskCreated(task())),
+            Event::new("run-1", EventKind::TaskReady(TaskId::from("impl"))),
+            Event::new(
+                "run-1",
+                EventKind::WorkerStarted {
+                    task_id: TaskId::from("impl"),
+                    worker_id: "worker-1".into(),
+                },
+            ),
+            Event::new(
+                "run-1",
+                EventKind::WorkerFinished {
+                    task_id: TaskId::from("impl"),
+                    worker_id: "worker-1".into(),
+                },
+            ),
+        ])
+        .unwrap();
+    store
+        .append(&Event::new(
+            "run-1",
+            EventKind::TaskExecutionReconciled {
+                task_id: TaskId::from("impl"),
+            },
+        ))
+        .unwrap();
+
+    assert_eq!(
+        store.projection("run-1").unwrap().tasks[&TaskId::from("impl")].state,
+        TaskState::Ready
+    );
+    drop(store);
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    let attempt_state: String = connection
+        .query_row(
+            "SELECT state FROM attempts WHERE run_id = 'run-1' AND task_id = 'impl' AND attempt = 0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(attempt_state, "cancelled");
+}
+
+#[test]
 fn query_indexes_follow_the_validated_event_projection() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("loop.db");

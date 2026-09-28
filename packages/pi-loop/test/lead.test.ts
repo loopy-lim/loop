@@ -38,10 +38,13 @@ test("natural-language Pi turns receive the Loop Lead contract", async () => {
 
   expect(result.systemPrompt).toContain("interactive Lead for Loop");
   expect(result.systemPrompt).toContain("call loop_run exactly once");
+  expect(result.systemPrompt).toContain("loop_quick_run");
   expect(result.systemPrompt).toContain("Do not deeply debug, investigate root causes, or implement the change yourself");
   expect(result.systemPrompt).toContain("minimum path and contract context");
   expect(result.systemPrompt).toContain("same parallel frontier");
   expect(result.systemPrompt).toContain("non-overlapping implementation tasks");
+  expect(result.systemPrompt).toContain("A sibling task's write path in readScope serializes them");
+  expect(result.systemPrompt).toContain("Put a check that needs downstream consumer edits on the downstream task");
   expect(result.systemPrompt).toContain("Keep dependency-ordered work sequential");
   expect(result.systemPrompt).toContain("serialize decision and integration tasks");
   expect(result.systemPrompt).toContain("Do not add ceremonial research or decision tasks");
@@ -51,6 +54,7 @@ test("natural-language Pi turns receive the Loop Lead contract", async () => {
   expect(result.systemPrompt).toContain("acceptance criteria");
   expect(result.systemPrompt).toContain("separate verification task only for material risk");
   expect(result.systemPrompt).toContain("executable checks that cover each acceptance criterion");
+  expect(result.systemPrompt).toContain("generated protocol changes also need a TypeScript typecheck");
   expect(result.systemPrompt).toContain("If a verifier reports FAIL");
   expect(result.systemPrompt).toContain("Do not poll or sleep after loop_run returns");
   expect(result.systemPrompt).toContain("For changed acceptance criteria, add a dependent task");
@@ -65,6 +69,112 @@ test("natural-language Pi turns receive the Loop Lead contract", async () => {
   expect(tasksDescription).toContain('"completionChecks"');
   expect(tasksDescription).toContain('"preferredCompute"');
   expect(host.tools.get("loop_steer")?.description).toContain("Use loop_add_task for changed acceptance criteria");
+  expect(host.tools.get("loop_code_map")?.description).toContain("file and exported symbol names");
+});
+
+test("a bounded single-file change starts through a compact typed task", async () => {
+  const host = fakePi();
+  const submitted: TaskSpecInput[][] = [];
+  registerLoopExtension(host.api, fakeBackend({
+    async run(input) {
+      submitted.push(input.tasks);
+      return { status: "running", tasks: input.tasks.length, escalations: [], providersByTask: {}, startedAt: {}, finishedAt: {} };
+    },
+  }), undefined, settings);
+
+  const quick = host.tools.get("loop_quick_run");
+  expect(quick).toBeDefined();
+  const response = await quick.execute("quick-1", {
+    intent: "Deduplicate models without changing order",
+    title: "Deduplicate model list",
+    readScope: ["packages/pi-loop/src/ui/models.ts"],
+    writeScope: ["packages/pi-loop/src/ui/models.ts", "packages/pi-loop/test/models.test.ts"],
+    requirements: ["Duplicate models appear once in original order"],
+    checks: [{ id: "focused", command: "bun", args: ["test", "packages/pi-loop/test/models.test.ts"] }],
+  }, new AbortController().signal, undefined, context());
+
+  expect(response.details.status).toBe("running");
+  expect(submitted).toHaveLength(1);
+  expect(submitted[0]).toHaveLength(1);
+  expect(submitted[0]?.[0]).toMatchObject({
+    kind: "implementation",
+    dependencies: [],
+    readScope: ["packages/pi-loop/src/ui/models.ts"],
+    writeScope: ["packages/pi-loop/src/ui/models.ts", "packages/pi-loop/test/models.test.ts"],
+    requirements: ["Duplicate models appear once in original order"],
+    completionChecks: [{ command: "bun", args: ["test", "packages/pi-loop/test/models.test.ts"] }],
+  });
+});
+
+test("quick run preserves every required executable check", async () => {
+  const host = fakePi();
+  const submitted: TaskSpecInput[][] = [];
+  registerLoopExtension(host.api, fakeBackend({
+    async run(input) {
+      submitted.push(input.tasks);
+      return { status: "running", tasks: input.tasks.length, escalations: [], providersByTask: {}, startedAt: {}, finishedAt: {} };
+    },
+  }), undefined, settings);
+  await host.tools.get("loop_quick_run")!.execute("quick-many", {
+    intent: "Update Rust and generated consumers", title: "Update bridge",
+    readScope: ["crates/loop-bridge/src/execution.rs"],
+    writeScope: ["crates/loop-bridge/src/execution.rs", "packages/protocol/src/generated/**"],
+    requirements: ["Bridge and generated consumers compile"],
+    checks: [
+      { id: "rust", command: "cargo", args: ["test", "-p", "loop-bridge"] },
+      { id: "typecheck", command: "bun", args: ["run", "typecheck"] },
+    ],
+  }, new AbortController().signal, undefined, context());
+  expect(submitted[0]?.[0]?.completionChecks).toMatchObject([
+    { id: "rust", command: "cargo", args: ["test", "-p", "loop-bridge"] },
+    { id: "typecheck", command: "bun", args: ["run", "typecheck"] },
+  ]);
+});
+
+test("quick run rejects missing ownership and executable evidence before handoff", async () => {
+  const host = fakePi();
+  let submissions = 0;
+  registerLoopExtension(host.api, fakeBackend({
+    async run(input) {
+      submissions++;
+      return { status: "running", tasks: input.tasks.length, escalations: [], providersByTask: {}, startedAt: {}, finishedAt: {} };
+    },
+  }), undefined, settings);
+  const quick = host.tools.get("loop_quick_run")!;
+
+  await expect(quick.execute("quick-no-scope", {
+    intent: "Change a file", title: "Change", readScope: [], writeScope: [],
+    requirements: ["Change"], checks: [{ id: "focused", command: "bun", args: ["test"] }],
+  }, new AbortController().signal, undefined, context())).rejects.toThrow(/writeScope/);
+  await expect(quick.execute("quick-no-check", {
+    intent: "Change a file", title: "Change", readScope: [], writeScope: ["src/file.ts"],
+    requirements: ["Change"], checks: [],
+  }, new AbortController().signal, undefined, context())).rejects.toThrow(/checks/);
+  expect(submissions).toBe(0);
+});
+
+test("Pi conversation can inspect bounded durable detail for a selected task", async () => {
+  const host = fakePi();
+  registerLoopExtension(host.api, fakeBackend(), undefined, settings);
+  const inspect = host.tools.get("loop_task");
+  expect(inspect).toBeDefined();
+  const detail = await inspect.execute("task-detail", { runId: "run-x", taskId: "impl" }, new AbortController().signal, undefined, context());
+  expect(detail.content[0]?.text).toContain("Dependencies: research");
+  expect(detail.content[0]?.text).toContain("Write: src/impl.ts");
+  expect(detail.content[0]?.text.split("\n").length).toBeLessThanOrEqual(8);
+});
+
+test("Pi reports a correction as recorded until worker delivery is proven", async () => {
+  const host = fakePi();
+  registerLoopExtension(host.api, fakeBackend({
+    async guidance() { return "4 · delivered\n5 · recorded\n"; },
+  }), undefined, settings);
+  const inspect = host.tools.get("loop_guidance");
+  expect(inspect).toBeDefined();
+  const status = await inspect.execute("guidance-detail", { runId: "run-x", taskId: "impl" }, new AbortController().signal, undefined, context());
+  expect(status.content[0]?.text).toContain("4 · delivered");
+  expect(status.content[0]?.text).toContain("5 · recorded");
+  expect(status.content[0]?.text).toContain("inspect coverage for the changed criterion");
 });
 
 test("loop_run validates the DAG and delegates execution to Loop", async () => {
@@ -522,6 +632,8 @@ test("Pi Lead reviews a completed goal once and does not recursively review its 
   const review = messages.find(message => message.customType === "loop-final-review");
   expect(review).toMatchObject({ display: false, triggerTurn: true });
   expect(review?.content).toContain("original goal");
+  expect(review?.content).toContain("at most 8 lines");
+  expect(review?.content).toContain("details only when asked");
 
   await host.events.get("message_start")?.at(-1)?.({ message: { role: "custom", customType: "loop-final-review" } }, piContext);
   await expect(host.tools.get("loop_steer")!.execute("review-steer", { taskId: "all" }, new AbortController().signal, undefined, piContext))
@@ -959,6 +1071,9 @@ function fakeBackend(overrides: Partial<LoopLeadBackend> = {}): LoopLeadBackend 
     },
     async task(_runId, taskId) {
       return taskContext(taskId);
+    },
+    async guidance() {
+      return "No guidance recorded for this task\n";
     },
     async runs() {
       return [];

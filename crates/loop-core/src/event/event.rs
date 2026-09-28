@@ -41,7 +41,9 @@ pub fn worker_recovery_attention(run_id: &str, task_id: &TaskId, worker_id: &str
     Attention::for_task(
         format!("recovery-{run_id}-{worker_id}"),
         crate::attention::AttentionKind::Failure,
-        format!("Worker {worker_id} stopped outside cancellation; confirm it is stopped before retrying"),
+        format!(
+            "Worker {worker_id} stopped outside cancellation; confirm it is stopped before retrying"
+        ),
         task_id.clone(),
     )
 }
@@ -66,6 +68,11 @@ pub enum EventKind {
     GuidanceAdded {
         task_id: Option<TaskId>,
         message: String,
+    },
+    GuidanceDelivered {
+        task_id: TaskId,
+        worker_id: String,
+        through_sequence: i64,
     },
     TaskOutputRecorded {
         task_id: TaskId,
@@ -157,6 +164,28 @@ pub struct CheckReceipt {
     pub stderr: String,
     pub timed_out: bool,
     pub duration_ms: u64,
+    #[serde(default)]
+    pub output_artifact: Option<String>,
+    #[serde(default)]
+    pub source: Option<SourceReceipt>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceReceipt {
+    /// Digest of the declared read/write scope around the completion check batch.
+    pub before_fingerprint: String,
+    pub after_fingerprint: String,
+    /// Repository paths observed to change while a worker ran. Shared-tree
+    /// observations cannot establish which actor wrote them.
+    pub observed_changed_paths: Vec<String>,
+    pub observed_outside_write_scope: Vec<String>,
+}
+
+impl SourceReceipt {
+    pub fn is_stable(&self) -> bool {
+        !self.before_fingerprint.is_empty() && self.before_fingerprint == self.after_fingerprint
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

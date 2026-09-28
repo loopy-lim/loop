@@ -4,10 +4,12 @@ use loop_bridge::{
     ResolveAttentionInput, RunInput, SubmitPlanInput, TaskContextInput, TaskSpecInput,
     VerificationInput, WorkerInput, WorkerResultInput, cancel_run, claim_runnable_tasks,
     cleanup_run, compare_traces, create_run, get_run_plan, get_snapshot, get_task_context,
-    get_trace, loop_package, record_verification, record_worker_result, record_worker_started,
+    get_trace, loop_package, record_check_receipts, record_verification, record_worker_result, record_worker_started,
     request_attention, resolve_attention, submit_plan,
 };
+use loop_bridge::RecordCheckReceiptsInput;
 use loop_core::attention::AttentionKind;
+use loop_core::event::{CheckReceipt, SourceReceipt};
 use loop_core::policy::ComputeClass;
 use loop_core::run::RunState;
 use loop_core::task::{TaskKind, TaskState};
@@ -40,6 +42,43 @@ fn exhaustible(id: &str) -> TaskSpecInput {
     let mut task = research(id);
     task.max_attempts = 1;
     task
+}
+
+#[test]
+fn successful_check_cannot_complete_after_source_drift_and_scope_observation_is_unattributed() {
+    let dir = tempfile::tempdir().unwrap();
+    let database_path = dir.path().join("loop.db").display().to_string();
+    let run_id = "source-receipt";
+    create_run(CreateRunInput { database_path: database_path.clone(), run_id: run_id.into() }).unwrap();
+    let mut task = research("change");
+    task.write_scope = vec!["src/**".into()];
+    submit_plan(SubmitPlanInput { database_path: database_path.clone(), run_id: run_id.into(), tasks: vec![task] }).unwrap();
+    claim_and_work(&database_path, run_id, "change", "worker");
+    finish_worker(&database_path, run_id, "change", "worker", true);
+    record_check_receipts(RecordCheckReceiptsInput {
+        database_path: database_path.clone(),
+        run_id: run_id.into(),
+        task_id: "change".into(),
+        checks: vec![CheckReceipt {
+            id: "tests".into(), command: "true".into(), args: vec![], working_directory: ".".into(),
+            exit_code: 0, stdout: String::new(), stderr: String::new(), timed_out: false, duration_ms: 1,
+            output_artifact: None,
+            source: Some(SourceReceipt {
+                before_fingerprint: "before".into(), after_fingerprint: "after".into(),
+                observed_changed_paths: vec!["src/change.rs".into(), "docs/user.md".into()],
+                observed_outside_write_scope: Vec::new(),
+            }),
+        }],
+        execution_owner: None,
+    }).unwrap();
+    let context = get_task_context(TaskContextInput {
+        database_path: database_path.clone(), run_id: run_id.into(), task_id: "change".into(),
+    }).unwrap();
+    assert_eq!(context.previous_checks[0].source.as_ref().unwrap().observed_outside_write_scope, vec!["docs/user.md"]);
+    pass_verification(&database_path, run_id, "change");
+    let snapshot = get_snapshot(RunInput { database_path, run_id: run_id.into() }).unwrap();
+    assert_ne!(snapshot.tasks[0].state, TaskState::Done);
+    assert!(snapshot.tasks[0].last_failure.as_deref().unwrap_or_default().contains("Source changed during completion checks"));
 }
 
 #[test]
@@ -278,6 +317,195 @@ fn exhausted_worker_failure_creates_retryable_human_attention() {
     let resumed = get_snapshot(RunInput {
         database_path,
         run_id: "failure-run".into(),
+    })
+    .unwrap();
+    assert_eq!(resumed.state, RunState::Active);
+    assert_eq!(resumed.tasks[0].state, TaskState::Ready);
+}
+
+#[test]
+fn connection_error_worker_result_takes_the_attention_path_not_terminal_failure() {
+    use loop_bridge::{ExecutionLeaseInput, claim_execution};
+
+    let dir = tempfile::tempdir().unwrap();
+    let database_path = dir.path().join("loop.db").display().to_string();
+    create_run(CreateRunInput {
+        database_path: database_path.clone(),
+        run_id: "transport-run".into(),
+    })
+    .unwrap();
+    let mut task = research("lonely");
+    task.max_attempts = 1;
+    submit_plan(SubmitPlanInput {
+        database_path: database_path.clone(),
+        run_id: "transport-run".into(),
+        tasks: vec![task],
+    })
+    .unwrap();
+    claim_execution(ExecutionLeaseInput {
+        database_path: database_path.clone(),
+        run_id: "transport-run".into(),
+        owner: "owner-1".into(),
+        now_ms: 0,
+        ttl_ms: 30_000,
+    })
+    .unwrap();
+    claim_runnable_tasks(ClaimRunnableTasksInput {
+        database_path: database_path.clone(),
+        run_id: "transport-run".into(),
+        running_task_ids: vec![],
+        max_workers: 1,
+        max_frontier_workers: 1,
+        execution_owner: Some("owner-1".into()),
+    })
+    .unwrap();
+    record_worker_started(WorkerInput {
+        database_path: database_path.clone(),
+        run_id: "transport-run".into(),
+        task_id: "lonely".into(),
+        worker_id: "worker-1".into(),
+        execution_owner: Some("owner-1".into()),
+    })
+    .unwrap();
+    // With the attempt ladder spent (max_attempts = 1), a connection error
+    // must land in attention — not terminal assertion failure.
+    record_worker_result(WorkerResultInput {
+        database_path: database_path.clone(),
+        run_id: "transport-run".into(),
+        task_id: "lonely".into(),
+        worker_id: "worker-1".into(),
+        success: false,
+        summary: "Error: Connection error.".into(),
+        execution_owner: Some("owner-1".into()),
+    })
+    .unwrap();
+
+    let interrupted = get_snapshot(RunInput {
+        database_path: database_path.clone(),
+        run_id: "transport-run".into(),
+    })
+    .unwrap();
+    assert_eq!(interrupted.state, RunState::Attention);
+    assert_eq!(interrupted.tasks[0].state, TaskState::Attention);
+    assert_eq!(interrupted.tasks[0].attempt, 1);
+    assert_eq!(interrupted.open_attention_ids.len(), 1);
+
+    resolve_attention(ResolveAttentionInput {
+        database_path: database_path.clone(),
+        run_id: "transport-run".into(),
+        attention_id: interrupted.open_attention_ids[0].clone(),
+        resolution: "retry".into(),
+    })
+    .unwrap();
+    let resumed = get_snapshot(RunInput {
+        database_path: database_path.clone(),
+        run_id: "transport-run".into(),
+    })
+    .unwrap();
+    assert_eq!(resumed.state, RunState::Active);
+    assert_eq!(resumed.tasks[0].state, TaskState::Ready);
+    assert_eq!(resumed.tasks[0].attempt, 1);
+
+    let reclaimed = claim_runnable_tasks(ClaimRunnableTasksInput {
+        database_path,
+        run_id: "transport-run".into(),
+        running_task_ids: vec![],
+        max_workers: 1,
+        max_frontier_workers: 1,
+        execution_owner: Some("owner-1".into()),
+    })
+    .unwrap();
+    assert_eq!(reclaimed.task_ids, vec!["lonely"]);
+}
+
+#[test]
+fn connection_error_verification_failure_takes_the_attention_path_not_terminal_failure() {
+    use loop_bridge::{ExecutionLeaseInput, claim_execution};
+
+    let dir = tempfile::tempdir().unwrap();
+    let database_path = dir.path().join("loop.db").display().to_string();
+    create_run(CreateRunInput {
+        database_path: database_path.clone(),
+        run_id: "transport-verify-run".into(),
+    })
+    .unwrap();
+    let mut task = research("verify-lonely");
+    task.max_attempts = 1;
+    submit_plan(SubmitPlanInput {
+        database_path: database_path.clone(),
+        run_id: "transport-verify-run".into(),
+        tasks: vec![task],
+    })
+    .unwrap();
+    claim_execution(ExecutionLeaseInput {
+        database_path: database_path.clone(),
+        run_id: "transport-verify-run".into(),
+        owner: "owner-1".into(),
+        now_ms: 0,
+        ttl_ms: 30_000,
+    })
+    .unwrap();
+    claim_runnable_tasks(ClaimRunnableTasksInput {
+        database_path: database_path.clone(),
+        run_id: "transport-verify-run".into(),
+        running_task_ids: vec![],
+        max_workers: 1,
+        max_frontier_workers: 1,
+        execution_owner: Some("owner-1".into()),
+    })
+    .unwrap();
+    record_worker_started(WorkerInput {
+        database_path: database_path.clone(),
+        run_id: "transport-verify-run".into(),
+        task_id: "verify-lonely".into(),
+        worker_id: "worker-1".into(),
+        execution_owner: Some("owner-1".into()),
+    })
+    .unwrap();
+    record_worker_result(WorkerResultInput {
+        database_path: database_path.clone(),
+        run_id: "transport-verify-run".into(),
+        task_id: "verify-lonely".into(),
+        worker_id: "worker-1".into(),
+        success: true,
+        summary: "done".into(),
+        execution_owner: Some("owner-1".into()),
+    })
+    .unwrap();
+    // A check-free verification failure carrying a transport fault text must
+    // classify as Interrupted, not burn the final attempt into a terminal
+    // Environment/Assertion classification.
+    record_verification(VerificationInput {
+        database_path: database_path.clone(),
+        run_id: "transport-verify-run".into(),
+        task_id: "verify-lonely".into(),
+        passed: false,
+        checks: vec![],
+        reason: "Error: Connection error.".into(),
+        execution_owner: Some("owner-1".into()),
+    })
+    .unwrap();
+
+    let interrupted = get_snapshot(RunInput {
+        database_path: database_path.clone(),
+        run_id: "transport-verify-run".into(),
+    })
+    .unwrap();
+    assert_eq!(interrupted.state, RunState::Attention);
+    assert_eq!(interrupted.tasks[0].state, TaskState::Attention);
+    assert_eq!(interrupted.tasks[0].attempt, 1);
+    assert_eq!(interrupted.open_attention_ids.len(), 1);
+
+    resolve_attention(ResolveAttentionInput {
+        database_path: database_path.clone(),
+        run_id: "transport-verify-run".into(),
+        attention_id: interrupted.open_attention_ids[0].clone(),
+        resolution: "retry".into(),
+    })
+    .unwrap();
+    let resumed = get_snapshot(RunInput {
+        database_path,
+        run_id: "transport-verify-run".into(),
     })
     .unwrap();
     assert_eq!(resumed.state, RunState::Active);

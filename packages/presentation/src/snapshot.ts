@@ -40,7 +40,14 @@ export function renderTaskContext(context: TaskContextOutput, limits: OutputLimi
     ...(context.previousFailure ? [`Failure: ${context.previousFailure}`] : []),
     ...context.previousChecks.map((check) => {
       const evidence = check.exitCode === 0 ? check.stdout : check.stderr || check.stdout;
-      return `Check ${check.id} ${separator.list} exit ${check.exitCode}${evidence ? ` ${separator.list} ${evidence}` : ""}`;
+      const source = check.source
+        ? ` ${separator.list} source ${check.source.beforeFingerprint === check.source.afterFingerprint ? "stable" : "changed"}`
+        : "";
+      const outside = check.source?.observedOutsideWriteScope?.length
+        ? ` ${separator.list} ${check.source.observedOutsideWriteScope.length} path(s) outside write scope (writer unknown)`
+        : "";
+      const artifact = check.outputArtifact ? ` ${separator.list} artifact ${check.outputArtifact}` : "";
+      return `Check ${check.id} ${separator.list} exit ${check.exitCode}${source}${outside}${artifact}${evidence ? ` ${separator.list} ${evidence}` : ""}`;
     }),
     ...context.dependencyResults.map((result) => `Result ${result.taskId}: ${result.summary}`),
     ...context.guidance.map((guidance) => `Guidance: ${guidance}`),
@@ -183,7 +190,7 @@ function taskDetails(task: SnapshotOutput["tasks"][number]): string[] {
   const latestActivity = task.activities.at(-1);
   return [
     ...(task.blockedBy.length > 0 ? [`blocked: ${task.blockedBy.join(", ")}`] : []),
-    ...(task.lastFailure ? [`failure: ${task.lastFailure}`] : []),
+    ...(task.state !== "done" && task.lastFailure ? [`failure: ${task.lastFailure}`] : []),
     ...(latestActivity ? [`activity: ${latestActivity}`] : []),
     ...(task.resultSummary ? [`result: ${task.resultSummary}`] : []),
   ];

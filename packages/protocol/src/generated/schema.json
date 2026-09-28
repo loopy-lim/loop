@@ -2734,6 +2734,55 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0.0
+            },
+            "outputArtifact": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "default": null,
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SourceReceipt"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "SourceReceipt": {
+          "type": "object",
+          "required": [
+            "afterFingerprint",
+            "beforeFingerprint",
+            "observedChangedPaths",
+            "observedOutsideWriteScope"
+          ],
+          "properties": {
+            "beforeFingerprint": {
+              "description": "Digest of the declared read/write scope around the completion check batch.",
+              "type": "string"
+            },
+            "afterFingerprint": {
+              "type": "string"
+            },
+            "observedChangedPaths": {
+              "description": "Repository paths observed to change while a worker ran. Shared-tree observations cannot establish which actor wrote them.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "observedOutsideWriteScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           }
         }
@@ -3838,6 +3887,55 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0.0
+            },
+            "outputArtifact": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "default": null,
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SourceReceipt"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "SourceReceipt": {
+          "type": "object",
+          "required": [
+            "afterFingerprint",
+            "beforeFingerprint",
+            "observedChangedPaths",
+            "observedOutsideWriteScope"
+          ],
+          "properties": {
+            "beforeFingerprint": {
+              "description": "Digest of the declared read/write scope around the completion check batch.",
+              "type": "string"
+            },
+            "afterFingerprint": {
+              "type": "string"
+            },
+            "observedChangedPaths": {
+              "description": "Repository paths observed to change while a worker ran. Shared-tree observations cannot establish which actor wrote them.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "observedOutsideWriteScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           }
         }
@@ -3891,6 +3989,75 @@
         }
       },
       "execution": "sync"
+    },
+    {
+      "name": "recordGuidanceDelivered",
+      "commandId": 42,
+      "inputType": "RecordGuidanceDeliveredInput",
+      "outputType": "OperationOutput",
+      "inputSchema": {
+        "title": "RecordGuidanceDeliveredInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "guidance",
+          "runId"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "guidance": {
+            "$ref": "#/definitions/GuidanceDeliveredEvent"
+          },
+          "executionOwner": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "OperationOutput",
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "execution": "sync",
+      "description": "Records that a live worker received guidance up to `through_sequence`\n(ADR M-TL2 delivery watermark). The store's reducer enforces the\nascending-only watermark per task, so an out-of-order or duplicate\ndelivery record fails here instead of regressing the projection.",
+      "definitions": {
+        "GuidanceDeliveredEvent": {
+          "description": "Wire shape of a steer-mailbox delivery record (ADR M-TL2): the mailbox appends one of these per live worker after a successful `provider.steer`, marking every `GuidanceAdded` at or below `through_sequence` as received by that worker's task. The delivery watermark projection lives in loop-core; this type is only the transport form (see `record_guidance_delivered`).",
+          "type": "object",
+          "required": [
+            "taskId",
+            "throughSequence",
+            "workerId"
+          ],
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "workerId": {
+              "type": "string"
+            },
+            "throughSequence": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        }
+      }
     },
     {
       "name": "recordVerification",

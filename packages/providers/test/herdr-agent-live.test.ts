@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { HerdrWorkerRuntime, type HerdrRunner } from "@loop/herdr";
+import { classifyFailure } from "../src/process-provider";
 
 import {
   FakeProvider,
@@ -198,6 +199,10 @@ test("interactive Pi quota exhaustion is a provider failure, not a completed wor
   expect(reads).toBe(2);
   await provider.release(handle.id);
   expect(runner.calls).toContainEqual(["tab", "close", "w1:t2"]);
+});
+
+test("a bare HTTP 429 retry failure is classified as quota", () => {
+  expect(classifyFailure("Error: Retry failed after 3 attempts: 429")).toBe("quota");
 });
 
 test("steer propagates agent_blocked so the recorded-steer fallback keeps the message", async () => {

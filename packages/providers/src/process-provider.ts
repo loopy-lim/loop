@@ -225,7 +225,7 @@ export function classifyFailure(value: string): ProviderFailureKind {
   const normalized = value.toLowerCase();
   if (/cancel(?:led|ed)|aborted|interrupt/.test(normalized)) return "cancelled";
   if (/timed?\s*out|deadline/.test(normalized)) return "timeout";
-  if (/quota|rate.?limit|too many requests|resource_exhausted/.test(normalized)) return "quota";
+  if (/quota|rate.?limit|too many requests|resource_exhausted|\b429\b/.test(normalized)) return "quota";
   if (/unauthorized|authorization\s*[:=]|forbidden|authentication|not logged in|login required|invalid.?key/.test(normalized)) {
     return "authentication";
   }

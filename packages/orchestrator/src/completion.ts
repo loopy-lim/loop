@@ -1,6 +1,6 @@
 import { NodeProcessRunner } from "@loop/providers";
 import { realpathSync } from "node:fs";
-import { resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 
 import type { CompletionCheckInput } from "@loop/protocol";
 import { redact } from "./redact";
@@ -61,7 +61,17 @@ export class CompletionVerifier {
 
 export class NodeCompletionRunner implements CompletionRunner {
   async run(command: string, args: string[], options: { cwd: string; timeoutMs: number; signal?: AbortSignal }): Promise<CompletionProcessResult> {
-    const process = new NodeProcessRunner().start(command, args, { cwd: options.cwd });
+    // The compiled Loop CLI points Rustra at its adjacent native bridge.
+    // Passing that private path to checks in another checkout can load a
+    // library with an older generated contract. Keep an explicit project
+    // override; remove only the path inserted by Loop itself.
+    const library = globalThis.process.platform === "darwin" ? "libloop_bridge.dylib"
+      : globalThis.process.platform === "win32" ? "loop_bridge.dll" : "libloop_bridge.so";
+    const privateBridge = join(dirname(globalThis.process.execPath), library);
+    const env = globalThis.process.env.RUSTRA_BUN_LIBRARY === privateBridge
+      ? { RUSTRA_BUN_LIBRARY: undefined }
+      : undefined;
+    const process = new NodeProcessRunner().start(command, args, { cwd: options.cwd, env });
     let timedOut = false;
     let stopping: Promise<void> | undefined;
     let rejectStop!: (error: unknown) => void;

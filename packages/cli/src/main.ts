@@ -14,6 +14,7 @@ import {
 import { compactLines, renderSnapshot, renderTaskContext, type OutputLimits, type SnapshotRenderOptions } from "@loop/presentation";
 import { cleanupBullet, emptyState, moreItems, separator, statusGlyph } from "@loop/presentation";
 import { observeRun, spawnOwner, waitForOwnerReady } from "./dispatcher";
+import { guidanceStatus } from "./guidance-status";
 import type { BenchmarkReport } from "@loop/orchestrator";
 import type { ProviderRegistry } from "@loop/providers";
 import type { SnapshotOutput, TaskSpecInput } from "@loop/protocol";
@@ -129,6 +130,26 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
       const runs = await protocol.listRuns({ databasePath: config.databasePath });
       if (parsed.json) print(runs, true, io);
       else io.stdout(compactLines(runs.map(run => `${run.runId} ${separator.list} ${run.state}`), { lineLimit: config.output.listLineLimit, lineTextLimit: config.output.lineTextLimit, overflow: n => moreItems(n, "runs") }).join("\n") + "\n");
+      return 0;
+    }
+    if (parsed.command === "guidance") {
+      const [runId, taskId] = parsed.operands;
+      if (!runId || !taskId) throw new UsageError("guidance requires <run-id> <task-id>");
+      const config = configuration(parsed);
+      const protocol = await loadProtocol();
+      await protocol.rustra.ready();
+      const events: import("@loop/protocol").EventOutput[] = [];
+      let afterSequence = 0;
+      while (true) {
+        const batch = await protocol.subscribeEvents({ databasePath: config.databasePath, runId, afterSequence, limit: 500 });
+        events.push(...batch);
+        if (events.length > 100_000) throw new Error("guidance history exceeds the bounded read limit");
+        if (batch.length < 500) break;
+        afterSequence = Number(batch.at(-1)!.sequence);
+      }
+      const statuses = guidanceStatus(events, taskId);
+      if (parsed.json) print(statuses, true, io);
+      else io.stdout(`${compactLines(statuses.map(item => `${item.sequence} · ${item.state}`), { lineLimit: config.output.listLineLimit, lineTextLimit: config.output.lineTextLimit, overflow: n => moreItems(n, "guidance items") }).join("\n") || "No guidance recorded for this task"}\n`);
       return 0;
     }
     if (parsed.command === "add-task") {
@@ -830,6 +851,7 @@ Usage:
   loop watch [run-id] [--json]
   loop reconcile <run-id> <task-id> stopped  Confirm an orphaned task stopped before retrying
   loop task <run-id> <task-id>       Show context, results and verification evidence
+  loop guidance <run-id> <task-id>   Show recorded, delivered, and post-delivery checked guidance
   loop add-task <run-id> --json      Read TaskSpecInput JSON from stdin and add it atomically
   loop steer <run-id> <task-id|all> <message>
   loop resolve <run-id> <attention-id> <approved|retry|cancel|answer>

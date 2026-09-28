@@ -18,7 +18,7 @@ use loop_store::{SqliteStore, StoreError};
 use rustra::prelude::*;
 use std::sync::OnceLock;
 
-use crate::{EventOutput, RunChangedEvent};
+use crate::{EventOutput, GuidanceDeliveredEvent, RunChangedEvent};
 
 #[bridge_type]
 pub struct CreateRunInput {
@@ -150,6 +150,14 @@ pub struct WorkerInput {
     pub run_id: String,
     pub task_id: String,
     pub worker_id: String,
+    pub execution_owner: Option<String>,
+}
+
+#[bridge_type]
+pub struct RecordGuidanceDeliveredInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub guidance: GuidanceDeliveredEvent,
     pub execution_owner: Option<String>,
 }
 
@@ -555,6 +563,38 @@ pub fn record_worker_started(input: WorkerInput) -> Result<OperationOutput> {
     )
 }
 
+/// Records that a live worker received guidance up to `through_sequence`
+/// (ADR M-TL2 delivery watermark). The store's reducer enforces the
+/// ascending-only watermark per task, so an out-of-order or duplicate
+/// delivery record fails here instead of regressing the projection.
+#[command]
+pub fn record_guidance_delivered(input: RecordGuidanceDeliveredInput) -> Result<OperationOutput> {
+    if input.guidance.worker_id.trim().is_empty() {
+        return Err(bridge_error(
+            "invalid_guidance_delivery",
+            "worker id is required",
+        ));
+    }
+    if input.guidance.through_sequence <= 0 {
+        return Err(bridge_error(
+            "invalid_guidance_delivery",
+            "through_sequence must be a positive event-log sequence",
+        ));
+    }
+    append_owned(
+        &input.database_path,
+        Event::new(
+            input.run_id,
+            EventKind::GuidanceDelivered {
+                task_id: TaskId::from(input.guidance.task_id),
+                worker_id: input.guidance.worker_id,
+                through_sequence: input.guidance.through_sequence,
+            },
+        ),
+        input.execution_owner.as_deref(),
+    )
+}
+
 #[command]
 pub fn record_worker_result(input: WorkerResultInput) -> Result<OperationOutput> {
     let run_id = input.run_id.clone();
@@ -587,9 +627,14 @@ pub fn record_worker_result(input: WorkerResultInput) -> Result<OperationOutput>
         let failure = Event::new(
             &input.run_id,
             if input.execution_owner.is_some() {
+                // Transport faults (connection errors, socket resets, request
+                // timeouts) take the Interrupted attention/retry path instead
+                // of burning the attempt ladder toward terminal failure.
+                let failure_class = FailureClass::classify_transport(&failure_summary)
+                    .unwrap_or(FailureClass::Environment);
                 EventKind::VerificationClassifiedFailure {
                     task_id,
-                    failure_class: FailureClass::Environment,
+                    failure_class,
                     reason: input.summary,
                 }
             } else {
@@ -623,24 +668,36 @@ pub fn record_verification(input: VerificationInput) -> Result<OperationOutput> 
     let execution_owner = input.execution_owner.clone();
     let task_id = TaskId::from(input.task_id);
     let failed_task_id = task_id.clone();
-    let failure_reason = input.reason.clone();
-    let passed = input.passed;
     let mut store = store(&input.database_path)?;
+    let projection = store
+        .projection(&input.run_id)
+        .map_err(|error| bridge_error("snapshot_failed", error))?;
+    let source_drift = !input.checks.is_empty() && projection.checks.get(&task_id)
+        .is_some_and(|receipts| receipts.iter().any(|receipt| {
+            receipt.source.as_ref().is_some_and(|source| !source.is_stable())
+        }));
+    let passed = input.passed && !source_drift;
+    let failure_reason = if source_drift {
+        "Source changed during completion checks; rerun checks on stable source".to_string()
+    } else {
+        input.reason.clone()
+    };
     let failure_class = if passed {
         FailureClass::Assertion
     } else {
-        let projection = store
-            .projection(&input.run_id)
-            .map_err(|error| bridge_error("snapshot_failed", error))?;
         match projection.checks.get(&task_id) {
             Some(receipts) if receipts.iter().any(|receipt| receipt.timed_out) => {
                 FailureClass::Timeout
             }
             Some(_) if !input.checks.is_empty() => FailureClass::Assertion,
-            _ => FailureClass::Environment,
+            // Check-free reasons are owner errors, not check evidence, so a
+            // transport fault text classifies as Interrupted rather than
+            // Environment (which would consume the attempt ladder).
+            _ => FailureClass::classify_transport(&input.reason)
+                .unwrap_or(FailureClass::Environment),
         }
     };
-    let kind = if input.passed {
+    let kind = if passed {
         EventKind::VerificationPassed {
             task_id,
             evidence: VerificationEvidence::new(
@@ -654,12 +711,12 @@ pub fn record_verification(input: VerificationInput) -> Result<OperationOutput> 
         EventKind::VerificationClassifiedFailure {
             task_id,
             failure_class,
-            reason: input.reason,
+            reason: failure_reason.clone(),
         }
     } else {
         EventKind::VerificationFailed {
             task_id,
-            reason: input.reason,
+            reason: failure_reason.clone(),
         }
     };
     let event = Event::new(&input.run_id, kind);
@@ -1536,40 +1593,46 @@ pub(crate) fn task_from_input(input: TaskSpecInput) -> Result<Task> {
 pub fn loop_package() -> &'static Package {
     static PACKAGE: OnceLock<Package> = OnceLock::new();
     PACKAGE.get_or_init(|| {
-        let package = crate::execution::register_preflight(register!(
-            crate::execution::register_execution(register!(
-                Package::builder("loop.orchestration"),
-                create_run,
-                get_run,
-                submit_plan,
-                add_task,
-                update_task,
-                claim_runnable_tasks,
-                record_worker_started,
-                record_worker_result,
-                record_verification,
-                record_decision,
-                request_attention,
-                resolve_attention,
-                cancel_run,
-                pause_run,
-                confirm_paused,
-                record_worker_stopped,
-                resume_run,
-                get_snapshot,
-                subscribe_events,
-                cleanup_run,
-                evaluate_worktree_removal,
-                evaluate_surface_removal,
-                get_trace,
-                compare_traces
+        let package = register!(
+            crate::execution::register_preflight(register!(
+                crate::execution::register_execution(register!(
+                    Package::builder("loop.orchestration"),
+                    create_run,
+                    get_run,
+                    submit_plan,
+                    add_task,
+                    update_task,
+                    claim_runnable_tasks,
+                    record_worker_started,
+                    record_worker_result,
+                    record_verification,
+                    record_decision,
+                    request_attention,
+                    resolve_attention,
+                    cancel_run,
+                    pause_run,
+                    confirm_paused,
+                    record_worker_stopped,
+                    resume_run,
+                    get_snapshot,
+                    subscribe_events,
+                    cleanup_run,
+                    evaluate_worktree_removal,
+                    evaluate_surface_removal,
+                    get_trace,
+                    compare_traces
+                )),
+                // Registered after the execution module so existing command ids
+                // stay stable (additive exposure of the routing decision).
+                select_candidate,
+                evaluate_failure_policy,
+                evaluate_cleanup_disposition
             )),
-            // Registered after the execution module so existing command ids
-            // stay stable (additive exposure of the routing decision).
-            select_candidate,
-            evaluate_failure_policy,
-            evaluate_cleanup_disposition
-        ))
+            // Appended after preflight so every existing command id stays
+            // stable (additive exposure of the M-TL2 steer-mailbox delivery
+            // record).
+            record_guidance_delivered
+        )
         .event::<RunChangedEvent>("loop.run_changed")
         .build();
         package.register_ffi_with_default(FfiFormat::Json);

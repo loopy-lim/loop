@@ -57,6 +57,12 @@ pub struct RunProjection {
     pub intent: String,
     pub working_directory: String,
     pub guidance: Vec<Guidance>,
+    /// Delivery watermark per task: the highest `GuidanceAdded` log sequence
+    /// that a live worker has provably received (recorded via
+    /// `GuidanceDelivered`). Guidance at or below the watermark must not be
+    /// re-injected into the task's next claim context; guidance above it is
+    /// still undelivered and remains the recorded-steer fallback.
+    pub guidance_delivered_through: BTreeMap<TaskId, i64>,
     pub outputs: BTreeMap<TaskId, String>,
     pub checks: BTreeMap<TaskId, Vec<CheckReceipt>>,
     pub activities: BTreeMap<TaskId, VecDeque<String>>,
@@ -100,6 +106,28 @@ impl RunProjection {
                     task_id: task_id.clone(),
                     message: message.clone(),
                 });
+            }
+            EventKind::GuidanceDelivered {
+                task_id,
+                through_sequence,
+                ..
+            } => {
+                self.task_mut(task_id)?;
+                if *through_sequence <= 0 {
+                    return Err(ProjectionError::InvalidGuidanceSequence(*through_sequence));
+                }
+                let watermark = self
+                    .guidance_delivered_through
+                    .entry(task_id.clone())
+                    .or_insert(0);
+                if *through_sequence <= *watermark {
+                    return Err(ProjectionError::GuidanceDeliveryRegression {
+                        task_id: task_id.clone(),
+                        through_sequence: *through_sequence,
+                        watermark: *watermark,
+                    });
+                }
+                *watermark = *through_sequence;
             }
             EventKind::TaskOutputRecorded { task_id, summary } => {
                 self.task_mut(task_id)?;
@@ -558,6 +586,16 @@ pub enum ProjectionError {
     ArtifactAlreadyCreated(String),
     #[error("artifact was not found: {0}")]
     ArtifactNotFound(String),
+    #[error("guidance delivery sequence must be positive: {0}")]
+    InvalidGuidanceSequence(i64),
+    #[error(
+        "guidance delivery for task {task_id} regressed: through_sequence {through_sequence} is not above watermark {watermark}"
+    )]
+    GuidanceDeliveryRegression {
+        task_id: TaskId,
+        through_sequence: i64,
+        watermark: i64,
+    },
     #[error(transparent)]
     Transition(#[from] TaskTransitionError),
     #[error(transparent)]

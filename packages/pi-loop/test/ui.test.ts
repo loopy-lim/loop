@@ -37,6 +37,32 @@ test("completed run summary stays compact", () => {
   expect(output.split("\n").length).toBeLessThanOrEqual(8);
 });
 
+test("model and worker lists keep first occurrence and original order", () => {
+  expect(renderModels(["fast · a", "strong · b", "fast · a"], limits)).toBe("fast · a\nstrong · b");
+  expect(renderWorkers([
+    { id: "w1", provider: "zai", state: "running" },
+    { id: "w2", provider: "zai", state: "running" },
+    { id: "w1", provider: "zai", state: "running" },
+  ], limits)).toBe("w1 · zai · running\nw2 · zai · running");
+});
+
+test("completed task status and graph favor successful result over an old failed attempt", () => {
+  const complete: SnapshotOutput = {
+    runId: "repaired", state: "completed", intent: "Fix contract", workingDirectory: "/project",
+    guidance: [], lastSequence: 8, activeWorkers: [], openAttentionIds: [], attention: [],
+    tasks: [{
+      id: "impl", title: "Implement", kind: "implementation", state: "done", attempt: 4,
+      preferredCompute: "fast", dependencies: [], readScope: [], writeScope: ["src/file.ts"],
+      blockedBy: [], activities: [], lastFailure: "old contract mismatch", resultSummary: "native check passed",
+    }],
+  };
+  for (const action of ["status", "graph"]) {
+    const output = renderSnapshot(action, complete, limits);
+    expect(output).toContain("native check passed");
+    expect(output).not.toContain("old contract mismatch");
+  }
+});
+
 test("default status stays within eight lines and answers current progress", () => {
   const output = renderStatus({
     runId: "8K2",
@@ -218,6 +244,7 @@ test("run discovery and generated task context stay bounded and show execution e
       stderr: "expected status line",
       timedOut: false,
       durationMs: 12,
+      source: { beforeFingerprint: "before", afterFingerprint: "after", observedChangedPaths: ["packages/presentation/src/snapshot.ts", "docs/other.md"], observedOutsideWriteScope: ["docs/other.md"] },
     }],
     guidance: ["Preserve the generated type boundary"],
   };
@@ -228,7 +255,7 @@ test("run discovery and generated task context stay bounded and show execution e
   expect(detail).toContain("Result research: SnapshotOutput owns the display fields");
   expect(detail).toContain("Result: Renderer implemented with generated types");
   expect(detail).toContain("Failure: Previous typecheck failed");
-  expect(detail).toContain("Check tests · exit 1 · expected status line");
+  expect(detail).toContain("Check tests · exit 1 · source changed · 1 path(s) outside write scope (writer unknown) · expected status line");
   expect(detail.split("\n").length).toBeLessThanOrEqual(8);
 });
 

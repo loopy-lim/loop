@@ -47,6 +47,7 @@ impl TraceSummary {
                 EventKind::RunCreated
                 | EventKind::RunConfigured { .. }
                 | EventKind::GuidanceAdded { .. }
+                | EventKind::GuidanceDelivered { .. }
                 | EventKind::TaskOutputRecorded { .. }
                 | EventKind::CheckReceiptsRecorded { .. }
                 | EventKind::TaskActivityRecorded { .. }

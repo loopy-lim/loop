@@ -494,6 +494,7 @@ fn apply_indexes(transaction: &Transaction<'_>, event: &Event) -> Result<(), Sto
     match &event.kind {
         EventKind::RunConfigured { .. }
         | EventKind::GuidanceAdded { .. }
+        | EventKind::GuidanceDelivered { .. }
         | EventKind::TaskOutputRecorded { .. }
         | EventKind::CheckReceiptsRecorded { .. }
         | EventKind::TaskActivityRecorded { .. } => {}
@@ -531,8 +532,13 @@ fn apply_indexes(transaction: &Transaction<'_>, event: &Event) -> Result<(), Sto
                 |row| row.get(0),
             )?;
             let task: loop_core::task::Task = serde_json::from_str(&task_json)?;
+            // Re-dispatching an attempt that never produced a verification
+            // result (orphan reconcile, stopped worker) keeps the same
+            // `task.attempt` number, so the row already exists. Reuse it
+            // instead of inserting: one attempts row per attempt number makes
+            // the PRIMARY KEY collision impossible by construction.
             transaction.execute(
-                "INSERT INTO attempts (run_id, task_id, attempt, compute_class, state) VALUES (?1, ?2, ?3, ?4, 'running')",
+                "INSERT INTO attempts (run_id, task_id, attempt, compute_class, state) VALUES (?1, ?2, ?3, ?4, 'running') ON CONFLICT(run_id, task_id, attempt) DO UPDATE SET compute_class = excluded.compute_class, state = 'running'",
                 params![
                     event.run_id,
                     task_id.as_str(),
@@ -614,7 +620,12 @@ fn apply_indexes(transaction: &Transaction<'_>, event: &Event) -> Result<(), Sto
             }
         }
         EventKind::TaskExecutionReconciled { task_id } => {
-            transaction.execute("UPDATE workers SET state = 'cancelled' WHERE run_id = ?1 AND task_id = ?2 AND state = 'running'", params![event.run_id, task_id.to_string()])?;
+            transaction.execute("UPDATE workers SET state = 'cancelled', updated_at = unixepoch() WHERE run_id = ?1 AND task_id = ?2 AND state = 'running'", params![event.run_id, task_id.to_string()])?;
+            // The reconciled execution is abandoned, not completed: park its
+            // attempts row as 'cancelled' so the index matches the projection
+            // (the task leaves running/verifying). Rows are never removed — the
+            // full reconcile history stays in `events` and `workers`.
+            transaction.execute("UPDATE attempts SET state = 'cancelled' WHERE run_id = ?1 AND task_id = ?2 AND state IN ('running', 'verifying')", params![event.run_id, task_id.to_string()])?;
         }
         EventKind::WorkerStopped { task_id, worker_id } => {
             transaction.execute(

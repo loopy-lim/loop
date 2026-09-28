@@ -4,6 +4,8 @@ import type { CompletionVerifier } from "./completion";
 import type { OrchestrationControl } from "./control";
 import { resolvePersona, type PersonaKindDefaults, type PersonaRegistry } from "./persona";
 import { redact } from "./redact";
+import { storeCheckOutput } from "./evidence-artifact";
+import { captureSourceState, changedSourcePaths, scopedFingerprint } from "./source-state";
 
 export interface TaskExecution {
   done: Promise<void>;
@@ -69,6 +71,7 @@ async function run({ input, context, workerId, provider, selectFallback, control
   };
   try {
     if (signal.aborted) { await control.recordWorkerStopped(workerInput); return; }
+    const sourceBeforeWorker = await captureSourceState(context.workingDirectory, [input.databasePath]);
     const startInput: StartWorkerInput = { runId: input.runId, taskId, title: context.task.title, kind: context.task.kind, computeClass: context.task.preferredCompute, attempt: context.attempt, requirements: context.task.requirements, workingDirectory: context.workingDirectory, context, ...(persona.instructions ? { personaInstructions: persona.instructions } : {}) };
     const excludedProviderIds = new Set<string>();
     let result: WorkerResult;
@@ -154,9 +157,25 @@ async function run({ input, context, workerId, provider, selectFallback, control
     workerFinished = true;
     await release();
     if (!result.success) return;
+    const sourceBeforeChecks = await captureSourceState(context.workingDirectory, [input.databasePath]);
+    const observedChangedPaths = sourceBeforeWorker && sourceBeforeChecks
+      ? changedSourcePaths(sourceBeforeWorker, sourceBeforeChecks) : [];
     const evidence = await verifier.verify(context.task.completionChecks, context.workingDirectory, signal);
     if (signal.aborted) { await control.stopVerification({ ...input, taskId }); return; }
-    await control.recordCheckReceipts({ ...input, taskId, checks: evidence.map(check => ({ id: check.id, command: check.command, args: check.args, workingDirectory: check.workingDirectory, exitCode: check.exitCode, stdout: redact(check.stdout), stderr: redact(check.stderr), timedOut: check.timedOut, durationMs: check.durationMs })) });
+    const sourceAfterChecks = await captureSourceState(context.workingDirectory, [input.databasePath], [...context.task.readScope, ...context.task.writeScope]);
+    const source = sourceBeforeChecks && sourceAfterChecks ? {
+      beforeFingerprint: scopedFingerprint(sourceBeforeChecks, [...context.task.readScope, ...context.task.writeScope]),
+      afterFingerprint: scopedFingerprint(sourceAfterChecks, [...context.task.readScope, ...context.task.writeScope]),
+      observedChangedPaths,
+      observedOutsideWriteScope: [],
+    } : undefined;
+    const receipts = await Promise.all(evidence.map(async check => {
+      const artifact = await storeCheckOutput(input.databasePath, input.runId, taskId, check.id, check.stdout, check.stderr);
+      return { id: check.id, command: check.command, args: check.args, workingDirectory: check.workingDirectory,
+        exitCode: check.exitCode, stdout: redact(check.stdout), stderr: redact(check.stderr), timedOut: check.timedOut,
+        durationMs: check.durationMs, ...(artifact ? { outputArtifact: artifact.path } : {}), ...(source ? { source } : {}) };
+    }));
+    await control.recordCheckReceipts({ ...input, taskId, checks: receipts });
     const checks = evidence.map(({ id, passed }) => ({ id, passed }));
     const passed = checks.every(check => check.passed);
     const reason = evidence.filter(check => !check.passed).map(check => `${check.id}: exit ${check.exitCode}${check.timedOut ? " (timeout)" : ""}\n${check.stderr || check.stdout}`).join("\n");

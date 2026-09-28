@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { CompletionVerifier, NodeCompletionRunner } from "../src/completion";
 
@@ -85,4 +85,34 @@ test("cancellation stops verification and preserves redacted evidence", async ()
   expect(result.exitCode).not.toBe(0);
   expect(result.stdout).not.toContain("secret");
   expect(result.timedOut).toBe(false);
+});
+
+test("completion checks do not inherit the Loop executable's private native bridge path", async () => {
+  const root = mkdtempSync(join(tmpdir(), "loop-check-env-"));
+  const library = process.platform === "darwin" ? "libloop_bridge.dylib" : process.platform === "win32" ? "loop_bridge.dll" : "libloop_bridge.so";
+  const internal = join(dirname(process.execPath), library);
+  const previous = process.env.RUSTRA_BUN_LIBRARY;
+  try {
+    process.env.RUSTRA_BUN_LIBRARY = internal;
+    const result = await new NodeCompletionRunner().run(process.execPath, ["--eval", "console.log(process.env.RUSTRA_BUN_LIBRARY ?? 'unset')"], { cwd: root, timeoutMs: 2_000 });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.trim()).toBe("unset");
+  } finally {
+    if (previous === undefined) delete process.env.RUSTRA_BUN_LIBRARY;
+    else process.env.RUSTRA_BUN_LIBRARY = previous;
+  }
+});
+
+test("completion checks preserve a project-selected native bridge path", async () => {
+  const root = mkdtempSync(join(tmpdir(), "loop-check-env-"));
+  const previous = process.env.RUSTRA_BUN_LIBRARY;
+  try {
+    process.env.RUSTRA_BUN_LIBRARY = "/project/target/debug/libloop_bridge.dylib";
+    const result = await new NodeCompletionRunner().run(process.execPath, ["--eval", "console.log(process.env.RUSTRA_BUN_LIBRARY ?? 'unset')"], { cwd: root, timeoutMs: 2_000 });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.trim()).toBe("/project/target/debug/libloop_bridge.dylib");
+  } finally {
+    if (previous === undefined) delete process.env.RUSTRA_BUN_LIBRARY;
+    else process.env.RUSTRA_BUN_LIBRARY = previous;
+  }
 });

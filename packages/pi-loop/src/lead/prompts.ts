@@ -48,10 +48,13 @@ export function decompositionPrompt(intent: string, vocabulary: PersonaVocabular
   return [
     "Decompose this engineering intent into a small dependency DAG.",
     "Put independent fact-finding and non-overlapping implementation tasks in the same parallel frontier.",
+    "Keep each readScope to files the task actually reads. A sibling task's write path in readScope serializes them even when their write scopes do not overlap.",
     "Keep dependency-ordered work sequential, and serialize decision and integration tasks.",
     "For a small bounded change, delegate directly to one execution task with focused completion checks. Do not add ceremonial research or decision tasks.",
     "Add a separate verification task only for material risk or acceptance criteria that need an independent reviewer; each extra worker has latency and cost.",
     "Map the original intent to executable checks that cover each acceptance criterion; a generic test command is insufficient when its tests omit a stated behavior.",
+    "Rust bridge or generated protocol changes also need a TypeScript typecheck after codegen; focused Rust and generated-runtime tests alone can miss stale TypeScript consumers and fixtures.",
+    "Put a check that needs downstream consumer edits on the downstream task. If the producer's completion checks require those edits, its dependent consumer task can never start.",
     "Every task needs dependencies, exact read and write ownership, compute bounds, and machine-verifiable completion checks.",
     "Describe expected outputs in requirements so each worker returns a concise result summary with evidence; dependent tasks receive dependency result summaries.",
     taskSpecInputDescription(vocabulary),

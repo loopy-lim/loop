@@ -323,13 +323,26 @@ pub fn get_task_context(input: TaskContextInput) -> Result<TaskContextOutput> {
 
 #[command]
 pub fn record_check_receipts(input: RecordCheckReceiptsInput) -> Result<OperationOutput> {
+    let projection = store(&input.database_path)?
+        .projection(&input.run_id)
+        .map_err(|error| bridge_error("snapshot_failed", error))?;
+    let task_id = TaskId::from(input.task_id);
+    let task = projection.tasks.get(&task_id)
+        .ok_or_else(|| bridge_error("task_not_found", &task_id))?;
+    let mut checks = input.checks;
+    for check in &mut checks {
+        if let Some(source) = &mut check.source {
+            source.observed_outside_write_scope = task.ownership
+                .observed_outside_write_scope(&source.observed_changed_paths);
+        }
+    }
     append_owned(
         &input.database_path,
         Event::new(
             input.run_id,
             EventKind::CheckReceiptsRecorded {
-                task_id: TaskId::from(input.task_id),
-                checks: input.checks,
+                task_id,
+                checks,
             },
         ),
         input.execution_owner.as_deref(),

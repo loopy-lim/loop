@@ -9,6 +9,7 @@ import { cleanupRun, type CleanupRunReport, type CleanupRunRequest } from "./cle
 import type { WorkerVisibility } from "./config";
 import type { OrchestrationControl } from "./control";
 import type { PersonaKindDefaults, PersonaRegistry } from "./persona";
+import { GuidanceMailbox, resolveMailboxOptions, steerCoalescingOf, type GuidanceMailboxOptions } from "./mailbox";
 import { executeTask, type TaskExecution } from "./task-execution";
 import { redact } from "./redact";
 
@@ -23,6 +24,8 @@ interface OrchestratorOptions {
   personas?: PersonaRegistry;
   personaKindDefaults?: PersonaKindDefaults;
   workerVisibility?: WorkerVisibility;
+  /** Async human-input mailbox (docs/research/async-human-input.md §6); enabled by default. */
+  guidanceMailbox?: GuidanceMailboxOptions;
 }
 export interface RunRequest {
   databasePath: string;
@@ -52,6 +55,7 @@ export class Orchestrator {
   readonly #personas: PersonaRegistry;
   readonly #personaKindDefaults?: PersonaKindDefaults;
   readonly #workerVisibility: WorkerVisibility;
+  readonly #guidanceMailbox: Required<GuidanceMailboxOptions>;
   constructor(options: OrchestratorOptions) {
     this.#control = options.control;
     this.#providers = options.providers;
@@ -62,6 +66,7 @@ export class Orchestrator {
     this.#personas = options.personas ?? {};
     this.#personaKindDefaults = options.personaKindDefaults;
     this.#workerVisibility = options.workerVisibility ?? "off";
+    this.#guidanceMailbox = resolveMailboxOptions(options.guidanceMailbox);
   }
   cleanupRun(request: CleanupRunRequest): Promise<CleanupRunReport> {
     return cleanupRun(this.#control, { ...request, herdr: request.herdr ?? this.#herdr });
@@ -113,6 +118,7 @@ export class Orchestrator {
     };
     const active = new Map<string, TaskExecution>();
     let leaseLost = false;
+    let mailbox: GuidanceMailbox | undefined;
     let heartbeatRunning = false;
     let heartbeatPending: Promise<void> = Promise.resolve();
     const heartbeat = setInterval(() => {
@@ -140,6 +146,13 @@ export class Orchestrator {
         summary.status = "attention";
         return summary;
       }
+      // Read-only GuidanceAdded tap filling per-worker mailboxes; drains only
+      // happen at safe boundaries (mailbox.ts) and never touch run state.
+      // The lease owner authorizes the mailbox's GuidanceDelivered appends.
+      mailbox = this.#guidanceMailbox.enabled
+        ? new GuidanceMailbox(this.#control, input.databasePath, input.runId, this.#guidanceMailbox, owner)
+        : undefined;
+      mailbox?.start();
       while (true) {
         if (leaseLost) throw new Error("execution ownership was lost; stopped local workers");
         if (request.signal?.aborted) await this.#control.cancelRun(input);
@@ -148,6 +161,7 @@ export class Orchestrator {
           for (const task of active.values()) task.abort();
           await Promise.all([...active.values()].map(task => task.done));
           for (const task of active.values()) if (task.error) throw task.error;
+          for (const id of active.keys()) mailbox?.release(id);
           active.clear();
           await this.#control.cancelRun(input);
           summary.status = (await this.#control.getSnapshot(input)).state === "cancelled" ? "cancelled" : "attention";
@@ -156,6 +170,7 @@ export class Orchestrator {
         for (const [id, task] of active) {
           if (!task.settled) continue;
           active.delete(id);
+          mailbox?.release(id);
           if (task.error) throw task.error;
           summary.finishedAt[id] = Date.now();
         }
@@ -174,6 +189,12 @@ export class Orchestrator {
           snapshot = await this.#control.getSnapshot(input);
           if (snapshot.state !== "active") break;
           const context = await this.#control.getTaskContext({ ...input, taskId });
+          // Claim-context steering (M-TL2): the mailbox filters guidance the
+          // delivery watermark already covered and appends ancestor-targeted
+          // guidance for descendant sub-tasks. Without a mailbox the context
+          // stays exactly as the bridge produced it.
+          const claimGuidance = await mailbox?.claimContext(taskId, context.guidance);
+          const startContext = claimGuidance ? { ...context, guidance: claimGuidance.guidance } : context;
           let provider: AgentProvider | undefined;
           try {
             const selection = this.#providers.select(context.task.preferredCompute);
@@ -199,8 +220,8 @@ export class Orchestrator {
             throw error;
           }
           summary.startedAt[taskId] = Date.now();
-          active.set(taskId, executeTask({
-            ...taskExecutionOptions, context, workerId, provider,
+          const execution = executeTask({
+            ...taskExecutionOptions, context: startContext, workerId, provider,
             selectFallback: async excluded => {
               const next = await selectWhileActive(this.#providers.select(context.task.preferredCompute, excluded), async () => {
                 if (request.signal?.aborted) await this.#control.cancelRun(input);
@@ -214,7 +235,26 @@ export class Orchestrator {
               }
               return next;
             },
-          }));
+          });
+          mailbox?.register({
+            taskId,
+            workerId,
+            // Watermark: everything the assembled start context covered.
+            // Guidance at/below it is already with this worker; later
+            // guidance arrives through the tap instead.
+            deliveredThroughSequence: claimGuidance ? claimGuidance.throughSequence : Number(snapshot.lastSequence ?? 0),
+            // Live delivery follows the provider's current handle (the
+            // execution binds it), not the durable worker id. The drain
+            // policy reads the provider's steer-delivery capability: a
+            // turn-boundary inbox self-coalesces and is handed off on every
+            // tap tick, a conversation channel keeps the spam window.
+            ...(provider.steer ? { steer: async message => {
+              const live = execution.steer;
+              if (!live) throw new Error("worker has no live steer channel yet");
+              await live(message);
+            }, steerCoalescing: steerCoalescingOf(provider) } : {}),
+          });
+          active.set(taskId, execution);
         }
         if (leaseLost) throw new Error("execution ownership was lost");
         if (active.size === 0) {
@@ -238,6 +278,7 @@ export class Orchestrator {
     } finally {
       clearInterval(heartbeat);
       await heartbeatPending;
+      await mailbox?.stop();
       await this.#control.releaseExecution({ ...input, owner });
     }
   }

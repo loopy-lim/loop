@@ -5,6 +5,7 @@ import type { ProviderRegistry } from "@loop/providers";
 import type { CompletionVerifier } from "./completion";
 import type { WorkerVisibility } from "./config";
 import type { OrchestrationControl } from "./control";
+import type { GuidanceMailboxOptions } from "./mailbox";
 import type { PersonaKindDefaults, PersonaRegistry } from "./persona";
 import { Orchestrator, type CleanupRunReport, type CleanupRunRequest, type RunSummary } from "./coordinator";
 
@@ -25,6 +26,8 @@ export interface LoopRuntimeOptions {
   personas?: PersonaRegistry;
   personaKindDefaults?: PersonaKindDefaults;
   workerVisibility?: WorkerVisibility;
+  /** Async human-input mailbox (docs/research/async-human-input.md §6); enabled by default. */
+  guidanceMailbox?: GuidanceMailboxOptions;
 }
 
 export interface StartRunInput {
@@ -53,6 +56,7 @@ export class LoopRuntime {
       personas: options.personas,
       personaKindDefaults: options.personaKindDefaults,
       workerVisibility: options.workerVisibility,
+      guidanceMailbox: options.guidanceMailbox,
     });
   }
 

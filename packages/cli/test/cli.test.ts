@@ -408,6 +408,25 @@ test("runs, pause, guidance and attention resolution operate on durable state", 
   expect((await protocol.getSnapshot(input)).state).toBe("paused");
 });
 
+test("guidance status exposes delivery stage without revealing correction text", async () => {
+  await protocol.rustra.ready();
+  const databasePath = join(mkdtempSync(join(tmpdir(), "loop-cli-guidance-")), "loop.sqlite");
+  const runId = "guidance-status-run";
+  await protocol.createRun({ databasePath, runId });
+  await protocol.addTask({ databasePath, runId, task: {
+    id: "impl", title: "Implement", kind: "implementation", dependencies: [],
+    readScope: [], writeScope: ["src/**"], requirements: ["Return evidence"],
+    completionChecks: [{ id: "test", command: "bun", args: ["test"], timeoutMs: 1000 }],
+    preferredCompute: "fast", minimumCompute: "tiny", maximumCompute: "strong", maxAttempts: 1,
+  } });
+  await protocol.steerRun({ databasePath, runId, taskId: "impl", message: "private correction text" });
+  const capture = output();
+  const code = await runCli(["guidance", runId, "impl", "--config", join(root, "config"), "--database", databasePath, "--json"], { io: capture.io });
+  expect(code).toBe(0);
+  expect(JSON.parse(capture.stdout())).toEqual([{ sequence: expect.any(Number), taskId: "impl", state: "recorded" }]);
+  expect(capture.stdout()).not.toContain("private correction text");
+});
+
 test("add-task accepts generated task JSON and reports graph rejection", async () => {
   await protocol.rustra.ready();
   const databasePath = join(mkdtempSync(join(tmpdir(), "loop-cli-add-task-")), "loop.sqlite");
