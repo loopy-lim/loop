@@ -4,6 +4,285 @@
   "fieldOrder": "declaration",
   "commands": [
     {
+      "name": "addGoalTask",
+      "commandId": 29,
+      "inputType": "AddGoalTaskInput",
+      "outputType": "OperationOutput",
+      "inputSchema": {
+        "title": "AddGoalTaskInput",
+        "type": "object",
+        "required": [
+          "criteria",
+          "databasePath",
+          "runId",
+          "task"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "task": {
+            "$ref": "#/definitions/TaskSpecInput"
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/GoalCriterionInput"
+            }
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "OperationOutput",
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "TaskSpecInput": {
+          "type": "object",
+          "required": [
+            "completionChecks",
+            "dependencies",
+            "id",
+            "kind",
+            "maxAttempts",
+            "maximumCompute",
+            "minimumCompute",
+            "preferredCompute",
+            "readScope",
+            "requirements",
+            "title",
+            "writeScope"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/definitions/TaskKind"
+            },
+            "dependencies": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "readScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "writeScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "requirements": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "persona": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "completionChecks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/CompletionCheckInput"
+              }
+            },
+            "preferredCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "minimumCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "maximumCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "routing": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TaskRouting"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxAttempts": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            }
+          }
+        },
+        "TaskKind": {
+          "type": "string",
+          "enum": [
+            "research",
+            "decision",
+            "implementation",
+            "verification",
+            "integration"
+          ]
+        },
+        "CompletionCheckInput": {
+          "type": "object",
+          "required": [
+            "args",
+            "command",
+            "id",
+            "timeoutMs"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "workingDirectory": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        },
+        "ComputeClass": {
+          "type": "string",
+          "enum": [
+            "deterministic",
+            "typed_decision",
+            "tiny",
+            "fast",
+            "balanced",
+            "strong",
+            "frontier"
+          ]
+        },
+        "TaskRouting": {
+          "type": "object",
+          "required": [
+            "required",
+            "risk"
+          ],
+          "properties": {
+            "risk": {
+              "$ref": "#/definitions/Risk"
+            },
+            "required": {
+              "$ref": "#/definitions/ComputeCapabilities"
+            }
+          }
+        },
+        "Risk": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "ComputeCapabilities": {
+          "type": "object",
+          "required": [
+            "coding",
+            "long_context",
+            "reasoning",
+            "tools",
+            "vision"
+          ],
+          "properties": {
+            "coding": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "reasoning": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "tools": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "vision": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "long_context": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            }
+          }
+        },
+        "GoalCriterionInput": {
+          "type": "object",
+          "required": [
+            "checkIds",
+            "description",
+            "id",
+            "taskId"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "checkIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "name": "addTask",
       "commandId": 4,
       "inputType": "AddTaskInput",
@@ -113,6 +392,16 @@
             "maximumCompute": {
               "$ref": "#/definitions/ComputeClass"
             },
+            "routing": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TaskRouting"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "maxAttempts": {
               "type": "integer",
               "format": "uint16",
@@ -175,6 +464,137 @@
             "strong",
             "frontier"
           ]
+        },
+        "TaskRouting": {
+          "type": "object",
+          "required": [
+            "required",
+            "risk"
+          ],
+          "properties": {
+            "risk": {
+              "$ref": "#/definitions/Risk"
+            },
+            "required": {
+              "$ref": "#/definitions/ComputeCapabilities"
+            }
+          }
+        },
+        "Risk": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "ComputeCapabilities": {
+          "type": "object",
+          "required": [
+            "coding",
+            "long_context",
+            "reasoning",
+            "tools",
+            "vision"
+          ],
+          "properties": {
+            "coding": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "reasoning": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "tools": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "vision": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "long_context": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "appendGoalCriteria",
+      "commandId": 28,
+      "inputType": "AppendGoalCriteriaInput",
+      "outputType": "OperationOutput",
+      "inputSchema": {
+        "title": "AppendGoalCriteriaInput",
+        "type": "object",
+        "required": [
+          "criteria",
+          "databasePath",
+          "runId"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/GoalCriterionInput"
+            }
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "OperationOutput",
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "GoalCriterionInput": {
+          "type": "object",
+          "required": [
+            "checkIds",
+            "description",
+            "id",
+            "taskId"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "checkIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     },
@@ -215,7 +635,7 @@
     },
     {
       "name": "claimExecution",
-      "commandId": 33,
+      "commandId": 38,
       "inputType": "ExecutionLeaseInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -327,7 +747,7 @@
     },
     {
       "name": "cleanupRun",
-      "commandId": 20,
+      "commandId": 21,
       "inputType": "CleanupRunInput",
       "outputType": "CleanupRunOutput",
       "inputSchema": {
@@ -399,7 +819,7 @@
     },
     {
       "name": "compareTraces",
-      "commandId": 24,
+      "commandId": 25,
       "inputType": "CompareTracesInput",
       "outputType": "CompareTracesOutput",
       "inputSchema": {
@@ -605,7 +1025,7 @@
     },
     {
       "name": "configureRun",
-      "commandId": 26,
+      "commandId": 30,
       "inputType": "ConfigureRunInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -708,6 +1128,7 @@
         "required": [
           "activeWorkers",
           "attention",
+          "goalCriteria",
           "guidance",
           "intent",
           "lastSequence",
@@ -758,6 +1179,12 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "goalCriteria": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/GoalCriterionStatusOutput"
             }
           },
           "lastSequence": {
@@ -959,12 +1386,49 @@
             "conflict",
             "failure"
           ]
+        },
+        "GoalCriterionStatusOutput": {
+          "type": "object",
+          "required": [
+            "checkIds",
+            "description",
+            "id",
+            "state",
+            "taskId"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "checkIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "state": {
+              "$ref": "#/definitions/GoalCriterionState"
+            }
+          }
+        },
+        "GoalCriterionState": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "verified"
+          ]
         }
       }
     },
     {
       "name": "evaluateCleanupDisposition",
-      "commandId": 40,
+      "commandId": 45,
       "inputType": "EvaluateCleanupDispositionInput",
       "outputType": "CleanupDispositionOutput",
       "inputSchema": {
@@ -1039,7 +1503,7 @@
     },
     {
       "name": "evaluateFailurePolicy",
-      "commandId": 39,
+      "commandId": 44,
       "inputType": "EvaluateFailurePolicyInput",
       "outputType": "FailurePolicyOutput",
       "inputSchema": {
@@ -1157,7 +1621,7 @@
           ]
         },
         "FailurePolicy": {
-          "description": "Deterministic retry decision table. Missing classes fail closed.",
+          "description": "Deterministic retry decision table. Missing classes fail closed, and deterministic failure classes fail closed even when a budget exists: retry is only ever granted for nondeterministic verification failures ([`FailureClass::is_nondeterministic`]). The deterministic terminal policy — first assertion (or invalid-contract, process-start) failure is terminal — holds regardless of configuration.",
           "type": "object",
           "required": [
             "onUnbudgetedFailure",
@@ -1302,7 +1766,7 @@
     },
     {
       "name": "evaluateSurfaceRemoval",
-      "commandId": 22,
+      "commandId": 23,
       "inputType": "EvaluateSurfaceRemovalInput",
       "outputType": "PolicyEvaluationOutput",
       "inputSchema": {
@@ -1349,7 +1813,7 @@
     },
     {
       "name": "evaluateWorktreeRemoval",
-      "commandId": 21,
+      "commandId": 22,
       "inputType": "EvaluateWorktreeRemovalInput",
       "outputType": "PolicyEvaluationOutput",
       "inputSchema": {
@@ -1429,6 +1893,7 @@
         "required": [
           "activeWorkers",
           "attention",
+          "goalCriteria",
           "guidance",
           "intent",
           "lastSequence",
@@ -1479,6 +1944,12 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "goalCriteria": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/GoalCriterionStatusOutput"
             }
           },
           "lastSequence": {
@@ -1680,12 +2151,238 @@
             "conflict",
             "failure"
           ]
+        },
+        "GoalCriterionStatusOutput": {
+          "type": "object",
+          "required": [
+            "checkIds",
+            "description",
+            "id",
+            "state",
+            "taskId"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "checkIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "state": {
+              "$ref": "#/definitions/GoalCriterionState"
+            }
+          }
+        },
+        "GoalCriterionState": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "verified"
+          ]
+        }
+      }
+    },
+    {
+      "name": "getRunGraph",
+      "commandId": 19,
+      "inputType": "RunGraphInput",
+      "outputType": "RunGraphOutput",
+      "inputSchema": {
+        "title": "RunGraphInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "nowMs",
+          "runId"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "nowMs": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "RunGraphOutput",
+        "type": "object",
+        "required": [
+          "lastSequence",
+          "nodes",
+          "openAttentionCount",
+          "ownerHealth",
+          "runId",
+          "state"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/definitions/RunState"
+          },
+          "lastSequence": {
+            "type": "string"
+          },
+          "ownerHealth": {
+            "$ref": "#/definitions/GraphOwnerHealth"
+          },
+          "openAttentionCount": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0.0
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/GraphNodeOutput"
+            }
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "RunState": {
+          "type": "string",
+          "enum": [
+            "active",
+            "pausing",
+            "paused",
+            "cancelling",
+            "attention",
+            "completed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "GraphOwnerHealth": {
+          "type": "string",
+          "enum": [
+            "live",
+            "missing",
+            "expired",
+            "inactive"
+          ]
+        },
+        "GraphNodeOutput": {
+          "type": "object",
+          "required": [
+            "attempt",
+            "blockedBy",
+            "dependencies",
+            "id",
+            "kind",
+            "readScope",
+            "state",
+            "title",
+            "workers",
+            "writeScope"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/definitions/TaskKind"
+            },
+            "state": {
+              "$ref": "#/definitions/TaskState"
+            },
+            "dependencies": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "blockedBy": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "readScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "writeScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "workers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "attempt": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "resultSummary": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "lastFailure": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "TaskKind": {
+          "type": "string",
+          "enum": [
+            "research",
+            "decision",
+            "implementation",
+            "verification",
+            "integration"
+          ]
+        },
+        "TaskState": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "ready",
+            "running",
+            "verifying",
+            "attention",
+            "blocked",
+            "done",
+            "failed",
+            "cancelled"
+          ]
         }
       }
     },
     {
       "name": "getRunPlan",
-      "commandId": 27,
+      "commandId": 31,
       "inputType": "RunInput",
       "outputType": "RunPlanOutput",
       "inputSchema": {
@@ -1800,6 +2497,16 @@
             "maximumCompute": {
               "$ref": "#/definitions/ComputeClass"
             },
+            "routing": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TaskRouting"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "maxAttempts": {
               "type": "integer",
               "format": "uint16",
@@ -1862,6 +2569,67 @@
             "strong",
             "frontier"
           ]
+        },
+        "TaskRouting": {
+          "type": "object",
+          "required": [
+            "required",
+            "risk"
+          ],
+          "properties": {
+            "risk": {
+              "$ref": "#/definitions/Risk"
+            },
+            "required": {
+              "$ref": "#/definitions/ComputeCapabilities"
+            }
+          }
+        },
+        "Risk": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "ComputeCapabilities": {
+          "type": "object",
+          "required": [
+            "coding",
+            "long_context",
+            "reasoning",
+            "tools",
+            "vision"
+          ],
+          "properties": {
+            "coding": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "reasoning": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "tools": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "vision": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "long_context": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            }
+          }
         }
       }
     },
@@ -1892,6 +2660,7 @@
         "required": [
           "activeWorkers",
           "attention",
+          "goalCriteria",
           "guidance",
           "intent",
           "lastSequence",
@@ -1942,6 +2711,12 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "goalCriteria": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/GoalCriterionStatusOutput"
             }
           },
           "lastSequence": {
@@ -2143,12 +2918,49 @@
             "conflict",
             "failure"
           ]
+        },
+        "GoalCriterionStatusOutput": {
+          "type": "object",
+          "required": [
+            "checkIds",
+            "description",
+            "id",
+            "state",
+            "taskId"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "checkIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "state": {
+              "$ref": "#/definitions/GoalCriterionState"
+            }
+          }
+        },
+        "GoalCriterionState": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "verified"
+          ]
         }
       }
     },
     {
       "name": "getTaskContext",
-      "commandId": 28,
+      "commandId": 32,
       "inputType": "TaskContextInput",
       "outputType": "TaskContextOutput",
       "inputSchema": {
@@ -2313,6 +3125,16 @@
             "maximumCompute": {
               "$ref": "#/definitions/ComputeClass"
             },
+            "routing": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TaskRouting"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "maxAttempts": {
               "type": "integer",
               "format": "uint16",
@@ -2375,6 +3197,67 @@
             "strong",
             "frontier"
           ]
+        },
+        "TaskRouting": {
+          "type": "object",
+          "required": [
+            "required",
+            "risk"
+          ],
+          "properties": {
+            "risk": {
+              "$ref": "#/definitions/Risk"
+            },
+            "required": {
+              "$ref": "#/definitions/ComputeCapabilities"
+            }
+          }
+        },
+        "Risk": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "ComputeCapabilities": {
+          "type": "object",
+          "required": [
+            "coding",
+            "long_context",
+            "reasoning",
+            "tools",
+            "vision"
+          ],
+          "properties": {
+            "coding": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "reasoning": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "tools": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "vision": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "long_context": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            }
+          }
         },
         "DecompositionContractOutput": {
           "type": "object",
@@ -2565,7 +3448,7 @@
           ]
         },
         "FailurePolicy": {
-          "description": "Deterministic retry decision table. Missing classes fail closed.",
+          "description": "Deterministic retry decision table. Missing classes fail closed, and deterministic failure classes fail closed even when a budget exists: retry is only ever granted for nondeterministic verification failures ([`FailureClass::is_nondeterministic`]). The deterministic terminal policy — first assertion (or invalid-contract, process-start) failure is terminal — holds regardless of configuration.",
           "type": "object",
           "required": [
             "onUnbudgetedFailure",
@@ -2790,7 +3673,7 @@
     },
     {
       "name": "getTrace",
-      "commandId": 23,
+      "commandId": 24,
       "inputType": "GetTraceInput",
       "outputType": "GetTraceOutput",
       "inputSchema": {
@@ -2939,7 +3822,7 @@
     },
     {
       "name": "listRuns",
-      "commandId": 37,
+      "commandId": 42,
       "inputType": "ListRunsInput",
       "outputType": "Array_of_RunListOutput",
       "inputSchema": {
@@ -3029,8 +3912,298 @@
       "execution": "sync"
     },
     {
+      "name": "prepareGoalRun",
+      "commandId": 27,
+      "inputType": "PrepareGoalRunInput",
+      "outputType": "OperationOutput",
+      "inputSchema": {
+        "title": "PrepareGoalRunInput",
+        "type": "object",
+        "required": [
+          "criteria",
+          "databasePath",
+          "intent",
+          "runId",
+          "tasks",
+          "workingDirectory"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "intent": {
+            "type": "string"
+          },
+          "workingDirectory": {
+            "type": "string"
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/TaskSpecInput"
+            }
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/GoalCriterionInput"
+            }
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "OperationOutput",
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "execution": "sync",
+      "definitions": {
+        "TaskSpecInput": {
+          "type": "object",
+          "required": [
+            "completionChecks",
+            "dependencies",
+            "id",
+            "kind",
+            "maxAttempts",
+            "maximumCompute",
+            "minimumCompute",
+            "preferredCompute",
+            "readScope",
+            "requirements",
+            "title",
+            "writeScope"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/definitions/TaskKind"
+            },
+            "dependencies": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "readScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "writeScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "requirements": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "persona": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "completionChecks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/CompletionCheckInput"
+              }
+            },
+            "preferredCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "minimumCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "maximumCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "routing": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TaskRouting"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxAttempts": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            }
+          }
+        },
+        "TaskKind": {
+          "type": "string",
+          "enum": [
+            "research",
+            "decision",
+            "implementation",
+            "verification",
+            "integration"
+          ]
+        },
+        "CompletionCheckInput": {
+          "type": "object",
+          "required": [
+            "args",
+            "command",
+            "id",
+            "timeoutMs"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "workingDirectory": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        },
+        "ComputeClass": {
+          "type": "string",
+          "enum": [
+            "deterministic",
+            "typed_decision",
+            "tiny",
+            "fast",
+            "balanced",
+            "strong",
+            "frontier"
+          ]
+        },
+        "TaskRouting": {
+          "type": "object",
+          "required": [
+            "required",
+            "risk"
+          ],
+          "properties": {
+            "risk": {
+              "$ref": "#/definitions/Risk"
+            },
+            "required": {
+              "$ref": "#/definitions/ComputeCapabilities"
+            }
+          }
+        },
+        "Risk": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "ComputeCapabilities": {
+          "type": "object",
+          "required": [
+            "coding",
+            "long_context",
+            "reasoning",
+            "tools",
+            "vision"
+          ],
+          "properties": {
+            "coding": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "reasoning": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "tools": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "vision": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "long_context": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            }
+          }
+        },
+        "GoalCriterionInput": {
+          "type": "object",
+          "required": [
+            "checkIds",
+            "description",
+            "id",
+            "taskId"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "checkIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "name": "prepareRun",
-      "commandId": 25,
+      "commandId": 26,
       "inputType": "PrepareRunInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -3149,6 +4322,16 @@
             "maximumCompute": {
               "$ref": "#/definitions/ComputeClass"
             },
+            "routing": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TaskRouting"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "maxAttempts": {
               "type": "integer",
               "format": "uint16",
@@ -3211,12 +4394,73 @@
             "strong",
             "frontier"
           ]
+        },
+        "TaskRouting": {
+          "type": "object",
+          "required": [
+            "required",
+            "risk"
+          ],
+          "properties": {
+            "risk": {
+              "$ref": "#/definitions/Risk"
+            },
+            "required": {
+              "$ref": "#/definitions/ComputeCapabilities"
+            }
+          }
+        },
+        "Risk": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "ComputeCapabilities": {
+          "type": "object",
+          "required": [
+            "coding",
+            "long_context",
+            "reasoning",
+            "tools",
+            "vision"
+          ],
+          "properties": {
+            "coding": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "reasoning": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "tools": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "vision": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "long_context": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            }
+          }
         }
       }
     },
     {
       "name": "prepareRunPreflight",
-      "commandId": 41,
+      "commandId": 46,
       "inputType": "PrepareRunPreflightInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -3385,6 +4629,16 @@
             "maximumCompute": {
               "$ref": "#/definitions/ComputeClass"
             },
+            "routing": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TaskRouting"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "maxAttempts": {
               "type": "integer",
               "format": "uint16",
@@ -3447,6 +4701,67 @@
             "strong",
             "frontier"
           ]
+        },
+        "TaskRouting": {
+          "type": "object",
+          "required": [
+            "required",
+            "risk"
+          ],
+          "properties": {
+            "risk": {
+              "$ref": "#/definitions/Risk"
+            },
+            "required": {
+              "$ref": "#/definitions/ComputeCapabilities"
+            }
+          }
+        },
+        "Risk": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "ComputeCapabilities": {
+          "type": "object",
+          "required": [
+            "coding",
+            "long_context",
+            "reasoning",
+            "tools",
+            "vision"
+          ],
+          "properties": {
+            "coding": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "reasoning": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "tools": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "vision": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "long_context": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            }
+          }
         },
         "AssumptionInput": {
           "type": "object",
@@ -3591,7 +4906,7 @@
           ]
         },
         "FailurePolicy": {
-          "description": "Deterministic retry decision table. Missing classes fail closed.",
+          "description": "Deterministic retry decision table. Missing classes fail closed, and deterministic failure classes fail closed even when a budget exists: retry is only ever granted for nondeterministic verification failures ([`FailureClass::is_nondeterministic`]). The deterministic terminal policy — first assertion (or invalid-contract, process-start) failure is terminal — holds regardless of configuration.",
           "type": "object",
           "required": [
             "onUnbudgetedFailure",
@@ -3699,7 +5014,7 @@
     },
     {
       "name": "reconcileTask",
-      "commandId": 36,
+      "commandId": 41,
       "inputType": "ReconcileTaskInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -3742,7 +5057,7 @@
     },
     {
       "name": "recordActivity",
-      "commandId": 31,
+      "commandId": 35,
       "inputType": "RecordActivityInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -3791,7 +5106,7 @@
     },
     {
       "name": "recordCheckReceipts",
-      "commandId": 29,
+      "commandId": 33,
       "inputType": "RecordCheckReceiptsInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -3992,7 +5307,7 @@
     },
     {
       "name": "recordGuidanceDelivered",
-      "commandId": 42,
+      "commandId": 47,
       "inputType": "RecordGuidanceDeliveredInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -4058,6 +5373,55 @@
           }
         }
       }
+    },
+    {
+      "name": "recordTaskOutput",
+      "commandId": 36,
+      "inputType": "RecordTaskOutputInput",
+      "outputType": "OperationOutput",
+      "inputSchema": {
+        "title": "RecordTaskOutputInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "runId",
+          "summary",
+          "taskId"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "executionOwner": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "OperationOutput",
+        "type": "object",
+        "required": [
+          "accepted"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "execution": "sync"
     },
     {
       "name": "recordVerification",
@@ -4293,7 +5657,7 @@
     },
     {
       "name": "releaseExecution",
-      "commandId": 35,
+      "commandId": 40,
       "inputType": "ReleaseExecutionInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -4332,7 +5696,7 @@
     },
     {
       "name": "renewExecution",
-      "commandId": 34,
+      "commandId": 39,
       "inputType": "ExecutionLeaseInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -4530,7 +5894,7 @@
     },
     {
       "name": "selectCandidate",
-      "commandId": 38,
+      "commandId": 43,
       "inputType": "SelectCandidateInput",
       "outputType": "SelectCandidateOutput",
       "inputSchema": {
@@ -4666,6 +6030,8 @@
           "type": "object",
           "required": [
             "capabilities",
+            "criticalRiskFloor",
+            "highRiskFloor",
             "maximumCompute",
             "minimumCompute",
             "risk"
@@ -4682,6 +6048,12 @@
             },
             "risk": {
               "$ref": "#/definitions/RoutingRisk"
+            },
+            "highRiskFloor": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "criticalRiskFloor": {
+              "$ref": "#/definitions/ComputeClass"
             }
           }
         },
@@ -4699,7 +6071,7 @@
     },
     {
       "name": "steerRun",
-      "commandId": 32,
+      "commandId": 37,
       "inputType": "SteerRunInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -4744,7 +6116,7 @@
     },
     {
       "name": "stopVerification",
-      "commandId": 30,
+      "commandId": 34,
       "inputType": "StopVerificationInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -4902,6 +6274,16 @@
             "maximumCompute": {
               "$ref": "#/definitions/ComputeClass"
             },
+            "routing": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TaskRouting"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "maxAttempts": {
               "type": "integer",
               "format": "uint16",
@@ -4964,12 +6346,73 @@
             "strong",
             "frontier"
           ]
+        },
+        "TaskRouting": {
+          "type": "object",
+          "required": [
+            "required",
+            "risk"
+          ],
+          "properties": {
+            "risk": {
+              "$ref": "#/definitions/Risk"
+            },
+            "required": {
+              "$ref": "#/definitions/ComputeCapabilities"
+            }
+          }
+        },
+        "Risk": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "ComputeCapabilities": {
+          "type": "object",
+          "required": [
+            "coding",
+            "long_context",
+            "reasoning",
+            "tools",
+            "vision"
+          ],
+          "properties": {
+            "coding": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "reasoning": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "tools": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "vision": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "long_context": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            }
+          }
         }
       }
     },
     {
       "name": "subscribeEvents",
-      "commandId": 19,
+      "commandId": 20,
       "inputType": "SubscribeEventsInput",
       "outputType": "Array_of_EventOutput",
       "inputSchema": {
@@ -5088,6 +6531,574 @@
   ],
   "events": [
     {
+      "name": "loop.assistant_delta",
+      "payload": {
+        "title": "ConversationAssistantDelta",
+        "description": "One assistant streaming delta (SSE event `assistant_delta`) for the `message_id` buffer. Gateway-merged (bounded cadence); tokens are never forwarded one-by-one (D4 §2). The final `ConversationAssistantMessage` replaces the whole buffer, so lost or duplicated deltas always converge.",
+        "type": "object",
+        "required": [
+          "delta",
+          "messageId",
+          "occurredAt"
+        ],
+        "properties": {
+          "messageId": {
+            "type": "string"
+          },
+          "delta": {
+            "description": "Bounded, redacted merged-delta text (append to the buffer).",
+            "type": "string"
+          },
+          "occurredAt": {
+            "description": "UTC RFC 3339 timestamp of the gateway merge.",
+            "type": "string"
+          }
+        }
+      },
+      "definitions": {}
+    },
+    {
+      "name": "loop.assistant_message",
+      "payload": {
+        "title": "ConversationAssistantMessage",
+        "description": "The authoritative final assistant message (SSE event `assistant_message`): replaces the entire `message_id` buffer (D4 §2).",
+        "type": "object",
+        "required": [
+          "messageId",
+          "occurredAt",
+          "text",
+          "truncated"
+        ],
+        "properties": {
+          "messageId": {
+            "type": "string"
+          },
+          "text": {
+            "description": "Bounded, redacted final text.",
+            "type": "string"
+          },
+          "truncated": {
+            "description": "True when the final text exceeded the frame byte bound and was cut.",
+            "type": "boolean"
+          },
+          "occurredAt": {
+            "description": "UTC RFC 3339 timestamp of the tap observation.",
+            "type": "string"
+          }
+        }
+      },
+      "definitions": {}
+    },
+    {
+      "name": "loop.context_summary",
+      "payload": {
+        "title": "ContextSummaryEvent",
+        "description": "Wire shape of one context summarization observation (G1): emitted by the orchestrator when it replaces advisory context with a bounded summary at the task-execution boundary. Preserved sets (completion contract, decision records, failure evidence, guidance) are never summarized, so the record counts them honestly instead of folding them.",
+        "type": "object",
+        "required": [
+          "attempt",
+          "occurredAt",
+          "preservedEntryCount",
+          "reason",
+          "runId",
+          "summarizedEntryCount",
+          "summary",
+          "taskId",
+          "truncated"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "attempt": {
+            "description": "Worker attempt the summarized context belonged to.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0.0
+          },
+          "reason": {
+            "$ref": "#/definitions/ContextSummaryReason"
+          },
+          "summarizedEntryCount": {
+            "description": "Advisory entries folded into the summary (activity notes, retry history). Preserved entries are never counted here.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0.0
+          },
+          "preservedEntryCount": {
+            "description": "Preserved entries passed through untouched (completion contract, decision records, failure evidence, guidance).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0.0
+          },
+          "summary": {
+            "description": "Bounded, redacted summary text that replaced the folded entries.",
+            "type": "string"
+          },
+          "truncated": {
+            "description": "True when `summary` exceeded the frame byte bound and was cut.",
+            "type": "boolean"
+          },
+          "occurredAt": {
+            "description": "UTC RFC 3339 timestamp of the summarization.",
+            "type": "string"
+          }
+        }
+      },
+      "definitions": {
+        "ContextSummaryReason": {
+          "description": "Why advisory context was folded into a summary (G1). Variant casing follows the bridge codegen's camelCase rule, so the wire values are `budgetThreshold` / `explicit`.",
+          "oneOf": [
+            {
+              "description": "The advisory context approached the configured budget threshold and the summarization policy fired (the default trigger).",
+              "type": "string",
+              "enum": [
+                "budgetThreshold"
+              ]
+            },
+            {
+              "description": "A lead or operator explicitly requested the summarization.",
+              "type": "string",
+              "enum": [
+                "explicit"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "loop.conversation_reset",
+      "payload": {
+        "title": "RemoteSessionResetEvent",
+        "description": "Session stream reset frame (SSE event `conversation_reset`): the convergence contract for cursors, lifetime, and backpressure (decision D3). Connection-local for `cursor_unavailable` / `slow_consumer` (never buffered for replay); `session_gone` is shared-recorded and replayed so reconnects converge identically (pane `paneGone` precedent).",
+        "type": "object",
+        "required": [
+          "occurredAt",
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "$ref": "#/definitions/RemoteSessionResetReason"
+          },
+          "occurredAt": {
+            "description": "UTC RFC 3339 timestamp of the gateway observation.",
+            "type": "string"
+          }
+        }
+      },
+      "definitions": {
+        "RemoteSessionResetReason": {
+          "description": "Why a session stream converged to a reset frame (decision D3). Variant casing follows the bridge codegen's camelCase rule, so the wire values are `cursorUnavailable` / `sessionGone` / `slowConsumer`. Mirrors the pane family's reset reasons with the session-gone cause named for the session lifetime.",
+          "oneOf": [
+            {
+              "description": "The presented cursor is malformed, foreign, or points at evicted history; the client restarts from a fresh frame.",
+              "type": "string",
+              "enum": [
+                "cursorUnavailable"
+              ]
+            },
+            {
+              "description": "The session no longer exists (pi session shutdown); shared-recorded so reconnects converge identically (unlike the other two reasons, this one IS replayed after being recorded — pane `paneGone` precedent).",
+              "type": "string",
+              "enum": [
+                "sessionGone"
+              ]
+            },
+            {
+              "description": "The connection's outbound queue overflowed; identical in effect to `cursor_unavailable` (fresh start) but named for the cause, connection-local, never buffered for replay.",
+              "type": "string",
+              "enum": [
+                "slowConsumer"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "loop.lifecycle",
+      "payload": {
+        "title": "ConversationLifecycle",
+        "description": "A session/turn lifecycle boundary (SSE event `lifecycle`): the running badge axis. Not a conversation item — never rendered on the timeline (D4 §6).",
+        "type": "object",
+        "required": [
+          "occurredAt",
+          "phase"
+        ],
+        "properties": {
+          "phase": {
+            "$ref": "#/definitions/ConversationLifecyclePhase"
+          },
+          "occurredAt": {
+            "description": "UTC RFC 3339 timestamp of the tap observation.",
+            "type": "string"
+          }
+        }
+      },
+      "definitions": {
+        "ConversationLifecyclePhase": {
+          "description": "Lifecycle phase of the observed session (decision D2). Variant casing follows the bridge codegen's camelCase rule, so the wire values are `sessionStarted` / `turnStarted` / `turnEnded` / `sessionEnded`.\n\nLifecycle frames are a UI axis, not a conversation item: the app uses them for the running badge and never renders them on the timeline (D4 §6).",
+          "type": "string",
+          "enum": [
+            "sessionStarted",
+            "turnStarted",
+            "turnEnded",
+            "sessionEnded"
+          ]
+        }
+      }
+    },
+    {
+      "name": "loop.lifecycle_hook",
+      "payload": {
+        "title": "LifecycleHookEvent",
+        "description": "Typed seam event for adapter lifecycle hooks (G13): the bridge form of one hook observation. Adapters frame these over their own event surfaces; the native bridge never emits or interprets them, and completion checks remain the only completion gate (core judgment invariant).",
+        "type": "object",
+        "required": [
+          "hookId",
+          "occurredAt",
+          "outcome",
+          "output",
+          "phase",
+          "truncated"
+        ],
+        "properties": {
+          "hookId": {
+            "description": "Adapter-assigned hook identity (its own hook-system name); opaque to the bridge.",
+            "type": "string"
+          },
+          "phase": {
+            "$ref": "#/definitions/LifecycleHookPhase"
+          },
+          "outcome": {
+            "$ref": "#/definitions/LifecycleHookOutcome"
+          },
+          "runId": {
+            "description": "Correlated run, when the hook ran inside a run-scoped worker.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "taskId": {
+            "description": "Correlated task, when the hook ran inside a task-scoped worker.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "output": {
+            "description": "Bounded, redacted hook output (formatter logs, policy findings).",
+            "type": "string"
+          },
+          "truncated": {
+            "description": "True when `output` exceeded the frame byte bound and was cut.",
+            "type": "boolean"
+          },
+          "exitCode": {
+            "description": "Hook process exit code, when the hook ran a process.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "occurredAt": {
+            "description": "UTC RFC 3339 timestamp of the hook observation.",
+            "type": "string"
+          }
+        }
+      },
+      "definitions": {
+        "LifecycleHookPhase": {
+          "description": "Which lifecycle boundary fired a hook (G13). The typed vocabulary is fixed at v1; adapters map their own hook systems onto these phases. Variant casing follows the bridge codegen's camelCase rule, so the wire values are `workerStarted` / `workerEnded` / `turnStarted` / `turnEnded` / `toolCallStarted` / `toolCallEnded`.",
+          "oneOf": [
+            {
+              "description": "A worker process started.",
+              "type": "string",
+              "enum": [
+                "workerStarted"
+              ]
+            },
+            {
+              "description": "A worker process ended (any terminal state).",
+              "type": "string",
+              "enum": [
+                "workerEnded"
+              ]
+            },
+            {
+              "description": "A worker turn began.",
+              "type": "string",
+              "enum": [
+                "turnStarted"
+              ]
+            },
+            {
+              "description": "A worker turn ended.",
+              "type": "string",
+              "enum": [
+                "turnEnded"
+              ]
+            },
+            {
+              "description": "A tool call began inside a worker turn.",
+              "type": "string",
+              "enum": [
+                "toolCallStarted"
+              ]
+            },
+            {
+              "description": "A tool call ended inside a worker turn.",
+              "type": "string",
+              "enum": [
+                "toolCallEnded"
+              ]
+            }
+          ]
+        },
+        "LifecycleHookOutcome": {
+          "description": "Outcome the hook observer reported (G13). Hooks observe; a failed hook is recorded evidence and never overrides run or task state. Variant casing follows the bridge codegen's camelCase rule, so the wire values are `completed` / `failed` / `skipped`.",
+          "oneOf": [
+            {
+              "description": "The hook ran to completion.",
+              "type": "string",
+              "enum": [
+                "completed"
+              ]
+            },
+            {
+              "description": "The hook ran and reported a failure (carried as evidence only).",
+              "type": "string",
+              "enum": [
+                "failed"
+              ]
+            },
+            {
+              "description": "The hook could not run (missing binary, misconfiguration).",
+              "type": "string",
+              "enum": [
+                "skipped"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "loop.pane_list",
+      "payload": {
+        "title": "RemotePaneListOutput",
+        "description": "GET /v1/panes response body: the pane inventory (decision D4).",
+        "type": "object",
+        "required": [
+          "panes"
+        ],
+        "properties": {
+          "panes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/RemotePaneSummary"
+            }
+          }
+        }
+      },
+      "definitions": {
+        "RemotePaneSummary": {
+          "description": "One subscribable pane in the terminal-mirror inventory.",
+          "type": "object",
+          "required": [
+            "paneId",
+            "state",
+            "workspaceId"
+          ],
+          "properties": {
+            "paneId": {
+              "type": "string"
+            },
+            "label": {
+              "description": "Human label (herdr pane label/title); null when the pane has none.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "taskId": {
+              "description": "Loop task id when derivable (e.g. the `mirror·<taskId>` mirror-pane label convention); null when the pane is not task-associated.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/definitions/RemotePaneState"
+            }
+          }
+        },
+        "RemotePaneState": {
+          "description": "Lifecycle/state vocabulary of an observable pane (decision `2026-xx-terminal-mirror` §6: fixed at M-TM1 from herdr `pane.agent_status_changed` plus gateway-side observation marks). Variant casing follows the bridge codegen's camelCase rule (wire: `active`/`idle`/… single words; multi-word variants camelCase).",
+          "oneOf": [
+            {
+              "description": "herdr agent_status=working: the pane backs a live agent.",
+              "type": "string",
+              "enum": [
+                "active"
+              ]
+            },
+            {
+              "description": "herdr agent_status=idle.",
+              "type": "string",
+              "enum": [
+                "idle"
+              ]
+            },
+            {
+              "description": "herdr agent_status=blocked.",
+              "type": "string",
+              "enum": [
+                "blocked"
+              ]
+            },
+            {
+              "description": "herdr agent_status=done.",
+              "type": "string",
+              "enum": [
+                "done"
+              ]
+            },
+            {
+              "description": "Inventory-only mark: above the gateway's pane observation cap, so no pane stream is served for it (decision D5 upstream bound).",
+              "type": "string",
+              "enum": [
+                "unobserved"
+              ]
+            },
+            {
+              "description": "herdr agent_status=unknown (no confident streaming source); apps render this pane as lifecycle-only.",
+              "type": "string",
+              "enum": [
+                "unknown"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "loop.pane_reset",
+      "payload": {
+        "title": "RemotePaneResetEvent",
+        "description": "Pane stream reset frame (SSE event `pane_reset`): carries the pane's latest known snapshot so a client converges without waiting for the next revision change. Connection-local semantics match the run family (ADR §4.5): resets are never buffered for replay.",
+        "type": "object",
+        "required": [
+          "occurredAt",
+          "paneId",
+          "reason",
+          "revision",
+          "text",
+          "truncated"
+        ],
+        "properties": {
+          "paneId": {
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/definitions/RemotePaneResetReason"
+          },
+          "revision": {
+            "description": "Latest known snapshot counter at reset time; decimal string on the wire.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "text": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "occurredAt": {
+            "description": "UTC RFC 3339 timestamp of the gateway observation.",
+            "type": "string"
+          }
+        }
+      },
+      "definitions": {
+        "RemotePaneResetReason": {
+          "description": "Why a pane stream converged to a reset frame (decision D5). Variant casing follows the bridge codegen's camelCase rule, so the wire values are `cursorUnavailable` / `paneGone` / `slowConsumer` (the decision's `cursor_unavailable` / `pane_gone` vocabulary, camelized by codegen).",
+          "oneOf": [
+            {
+              "description": "The presented cursor is malformed, foreign, or points at evicted history; the client restarts from the latest snapshot.",
+              "type": "string",
+              "enum": [
+                "cursorUnavailable"
+              ]
+            },
+            {
+              "description": "The pane no longer exists (worker lifetime ended); the stream closes after this frame.",
+              "type": "string",
+              "enum": [
+                "paneGone"
+              ]
+            },
+            {
+              "description": "The connection's outbound queue overflowed; identical in effect to `cursor_unavailable` (fresh start from the latest snapshot) but named for the cause, mirroring the run family's `slow_consumer`.",
+              "type": "string",
+              "enum": [
+                "slowConsumer"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "loop.pane_text",
+      "payload": {
+        "title": "RemotePaneTextEvent",
+        "description": "One pane text frame on `GET /v1/panes/{paneId}/events` (SSE event `pane_text`): the pane's screen-buffer snapshot at `revision`.",
+        "type": "object",
+        "required": [
+          "occurredAt",
+          "paneId",
+          "revision",
+          "text",
+          "truncated"
+        ],
+        "properties": {
+          "paneId": {
+            "type": "string"
+          },
+          "revision": {
+            "description": "Monotonic herdr snapshot counter; decimal string on the JSON wire.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "text": {
+            "description": "Screen-buffer snapshot text (redacted, UTF-8 bounded by the gateway).",
+            "type": "string"
+          },
+          "truncated": {
+            "description": "True when the snapshot exceeded the frame byte bound and was cut.",
+            "type": "boolean"
+          },
+          "occurredAt": {
+            "description": "UTC RFC 3339 timestamp of the gateway observation.",
+            "type": "string"
+          }
+        }
+      },
+      "definitions": {}
+    },
+    {
       "name": "loop.run_changed",
       "payload": {
         "title": "RunChangedEvent",
@@ -5107,6 +7118,502 @@
         }
       },
       "definitions": {}
+    },
+    {
+      "name": "loop.sandbox_capabilities",
+      "payload": {
+        "title": "SandboxCapabilityReport",
+        "description": "Inventory of adapter sandbox capability declarations (G4a), mirroring the session/pane list-report shape: one declaration per adapter known to the reporter.",
+        "type": "object",
+        "required": [
+          "capabilities"
+        ],
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/SandboxCapabilityDeclaration"
+            }
+          }
+        }
+      },
+      "definitions": {
+        "SandboxCapabilityDeclaration": {
+          "description": "One adapter's sandbox capability declaration (G4a): what the adapter can offer, reported by diagnostic surfaces. The declaration is adapter metadata — never loop-core state — and an adapter with no sandbox support declares `isolation: none` rather than omitting itself.",
+          "type": "object",
+          "required": [
+            "adapterId",
+            "filesystemScoped",
+            "isolation",
+            "networkIsolated"
+          ],
+          "properties": {
+            "adapterId": {
+              "description": "Adapter-reported identity label (e.g. \"codex\", \"herdr\"); opaque to the bridge.",
+              "type": "string"
+            },
+            "isolation": {
+              "$ref": "#/definitions/SandboxIsolation"
+            },
+            "filesystemScoped": {
+              "description": "True when the adapter can confine writes to the declared write scope at the OS level; false means write scope is a scheduler contract only.",
+              "type": "boolean"
+            },
+            "networkIsolated": {
+              "description": "True when the adapter can block worker network egress.",
+              "type": "boolean"
+            },
+            "detail": {
+              "description": "Bounded human note on the mechanism and its limits; null when the flags say everything the adapter can honestly claim.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "SandboxIsolation": {
+          "description": "Honestly-declared OS isolation strength an adapter applies around worker execution (G4a). Variant casing follows the bridge codegen's camelCase rule, so the wire values are `none` / `partial` / `enforced`.",
+          "oneOf": [
+            {
+              "description": "No OS isolation: worker commands run with the caller's full authority and write scopes are advisory only.",
+              "type": "string",
+              "enum": [
+                "none"
+              ]
+            },
+            {
+              "description": "Best-effort isolation (allowlists, policy files, reduced tokens) that a determined process may escape; not a security boundary.",
+              "type": "string",
+              "enum": [
+                "partial"
+              ]
+            },
+            {
+              "description": "OS-enforced isolation (container, seatbelt profile, restricted token) applied to every worker start.",
+              "type": "string",
+              "enum": [
+                "enforced"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "loop.session_list",
+      "payload": {
+        "title": "RemoteSessionListOutput",
+        "description": "GET /v1/sessions response body: the session inventory (decision D3).",
+        "type": "object",
+        "required": [
+          "sessions"
+        ],
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/RemoteSessionSummary"
+            }
+          }
+        }
+      },
+      "definitions": {
+        "RemoteSessionSummary": {
+          "description": "One subscribable session in the conversation inventory (decision D2). The run/task/worker correlation is adapter metadata (env-marker backed), not loop-core state; uncorrelated sessions report nulls honestly.",
+          "type": "object",
+          "required": [
+            "lane",
+            "sessionId",
+            "state"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "runId": {
+              "description": "Correlated run, when the worker was started with a run marker.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "taskId": {
+              "description": "Correlated task, when the worker was started with a task marker.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "workerId": {
+              "description": "Owning worker, when the session backs a registered worker.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "lane": {
+              "description": "Execution lane the session runs on (adapter-reported label).",
+              "type": "string"
+            },
+            "title": {
+              "description": "Human label for list rendering; null when the session has none.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/definitions/RemoteSessionState"
+            }
+          }
+        },
+        "RemoteSessionState": {
+          "description": "Lifecycle/state vocabulary of an observable session (decision D2). Variant casing follows the bridge codegen's camelCase rule, so the wire values are `live` / `ended` / `unobserved`.",
+          "oneOf": [
+            {
+              "description": "The tap stream is live for this session.",
+              "type": "string",
+              "enum": [
+                "live"
+              ]
+            },
+            {
+              "description": "The session ended (`session_shutdown` observed); the stream closes after the shared `session_gone` reset converges.",
+              "type": "string",
+              "enum": [
+                "ended"
+              ]
+            },
+            {
+              "description": "Known to exist but no tap stream is served for it (honest inventory mark, mirroring the pane family's `unobserved`).",
+              "type": "string",
+              "enum": [
+                "unobserved"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "loop.steer_queued",
+      "payload": {
+        "title": "ConversationSteerQueued",
+        "description": "Mirror of an accepted steer on the mapped session's stream (SSE event `steer_queued`): step 2 of the honest 3-step steer feedback (D4 §4 — submit receipt → this frame → the observed `user_message` with `source=steer`). Emitted only for sessions with a run correlation.",
+        "type": "object",
+        "required": [
+          "occurredAt",
+          "runId",
+          "steerId",
+          "text"
+        ],
+        "properties": {
+          "steerId": {
+            "description": "Steer acceptance identity; pairs the app's local pending marker.",
+            "type": "string"
+          },
+          "text": {
+            "description": "Bounded, redacted steer text.",
+            "type": "string"
+          },
+          "runId": {
+            "description": "The run the steer was accepted against (adapter correlation).",
+            "type": "string"
+          },
+          "occurredAt": {
+            "description": "UTC RFC 3339 timestamp of the gateway acceptance.",
+            "type": "string"
+          }
+        }
+      },
+      "definitions": {}
+    },
+    {
+      "name": "loop.tool_call_ended",
+      "payload": {
+        "title": "ConversationToolCallEnded",
+        "description": "A tool call ended (SSE event `tool_call_ended`): closes the `tool_call_id` card as `done` or `error` (D4 §3). A card with no prior `started` frame (replay eviction, collector gap) is synthesized closed — never through the `running` state.",
+        "type": "object",
+        "required": [
+          "isError",
+          "occurredAt",
+          "resultText",
+          "resultTruncated",
+          "toolCallId"
+        ],
+        "properties": {
+          "toolCallId": {
+            "type": "string"
+          },
+          "resultText": {
+            "description": "Bounded, redacted result text for the card's collapsed view.",
+            "type": "string"
+          },
+          "resultTruncated": {
+            "description": "True when `result_text` exceeded the frame byte bound and was cut.",
+            "type": "boolean"
+          },
+          "isError": {
+            "description": "True renders the card's error state; the run state is unaffected.",
+            "type": "boolean"
+          },
+          "occurredAt": {
+            "description": "UTC RFC 3339 timestamp of the tap observation.",
+            "type": "string"
+          }
+        }
+      },
+      "definitions": {}
+    },
+    {
+      "name": "loop.tool_call_started",
+      "payload": {
+        "title": "ConversationToolCallStarted",
+        "description": "A tool call began (SSE event `tool_call_started`): opens the app's tool card in the `running` state (D4 §3).",
+        "type": "object",
+        "required": [
+          "argsJson",
+          "argsTruncated",
+          "occurredAt",
+          "toolCallId",
+          "toolName"
+        ],
+        "properties": {
+          "toolCallId": {
+            "description": "Tap-assigned tool-call identity (pi `toolCallId` correlation); the card's idempotent render key.",
+            "type": "string"
+          },
+          "toolName": {
+            "type": "string"
+          },
+          "argsJson": {
+            "description": "Bounded, redacted JSON encoding of the call arguments.",
+            "type": "string"
+          },
+          "argsTruncated": {
+            "description": "True when `args_json` exceeded the frame byte bound and was cut.",
+            "type": "boolean"
+          },
+          "occurredAt": {
+            "description": "UTC RFC 3339 timestamp of the tap observation.",
+            "type": "string"
+          }
+        }
+      },
+      "definitions": {}
+    },
+    {
+      "name": "loop.usage_recorded",
+      "payload": {
+        "title": "UsageRecordEvent",
+        "description": "Wire shape of one usage observation (G17): emitted by the collecting surface and recorded by the orchestrator. Worker/task correlation is optional so run-level totals use the same record shape.",
+        "type": "object",
+        "required": [
+          "occurredAt",
+          "runId",
+          "usage"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "taskId": {
+            "description": "Worker task the usage belongs to; null for run-level usage.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "workerId": {
+            "description": "Adapter worker identity; opaque correlation label.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "usage": {
+            "$ref": "#/definitions/UsageMetadata"
+          },
+          "occurredAt": {
+            "description": "UTC RFC 3339 timestamp of the observation window end.",
+            "type": "string"
+          }
+        }
+      },
+      "definitions": {
+        "UsageMetadata": {
+          "description": "Optional usage metadata (G17): present only when the upstream reports it. Individual axes are null when unreported; `basis` qualifies every figure in the record at once (adapters do not mix observed and estimated axes).",
+          "type": "object",
+          "required": [
+            "basis"
+          ],
+          "properties": {
+            "inputTokens": {
+              "description": "Prompt (input) tokens; null when unreported.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "outputTokens": {
+              "description": "Completion (output) tokens; null when unreported.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "cacheReadTokens": {
+              "description": "Cache-read tokens when the upstream reports a separate cache axis.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "basis": {
+              "$ref": "#/definitions/UsageBasis"
+            },
+            "cost": {
+              "description": "Bounded decimal-string cost in `currency`; null when unpriced.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "currency": {
+              "description": "ISO 4217 code for `cost`; null when unpriced.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "UsageBasis": {
+          "description": "How a usage figure was obtained (G17 추정치/실측 구별). Variant casing follows the bridge codegen's camelCase rule, so the wire values are `observed` / `estimated`.",
+          "oneOf": [
+            {
+              "description": "Upstream-reported actuals.",
+              "type": "string",
+              "enum": [
+                "observed"
+              ]
+            },
+            {
+              "description": "Locally derived estimate; reporting surfaces must label it as an estimate, never as a measured cost.",
+              "type": "string",
+              "enum": [
+                "estimated"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "loop.user_message",
+      "payload": {
+        "title": "ConversationUserMessage",
+        "description": "One user input on the session stream (SSE event `user_message`): a complete user turn as observed by the tap (decision D5, M2).",
+        "type": "object",
+        "required": [
+          "attachments",
+          "imageCount",
+          "messageId",
+          "occurredAt",
+          "source",
+          "text"
+        ],
+        "properties": {
+          "messageId": {
+            "description": "Tap-assigned message identity; the app's idempotent render key.",
+            "type": "string"
+          },
+          "text": {
+            "description": "Bounded, redacted input text.",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/definitions/ConversationUserMessageSource"
+          },
+          "imageCount": {
+            "description": "Number of image attachments observed in this input. The honest observed count; `attachments` is the referenceable subset (bodies the gateway actually holds), so it may be smaller (D5).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0.0
+          },
+          "attachments": {
+            "description": "Reference-shaped attachment metadata. Bodies are served out-of-band at `GET /v1/sessions/{sessionId}/attachments/{attachmentId}` — never inline (ring-buffer/replay budget, D5).",
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/RemoteSessionAssetRef"
+            }
+          },
+          "occurredAt": {
+            "description": "UTC RFC 3339 timestamp of the tap observation.",
+            "type": "string"
+          }
+        }
+      },
+      "definitions": {
+        "ConversationUserMessageSource": {
+          "description": "Channel a user input arrived through, as observed by the in-session tap (decision D2). Variant casing follows the bridge codegen's camelCase rule, so the wire values are `interactive` / `steer` / `api`.",
+          "oneOf": [
+            {
+              "description": "Normal interactive user turn in the pi session.",
+              "type": "string",
+              "enum": [
+                "interactive"
+              ]
+            },
+            {
+              "description": "Steer injected mid-turn (mailbox drain surfaced in the conversation).",
+              "type": "string",
+              "enum": [
+                "steer"
+              ]
+            },
+            {
+              "description": "Programmatic input (non-interactive invocation path).",
+              "type": "string",
+              "enum": [
+                "api"
+              ]
+            }
+          ]
+        },
+        "RemoteSessionAssetRef": {
+          "description": "Reference to one attachment body served by the gateway (decision D5, M2): metadata only, never the body. `byte_len` is the DECODED body size in bytes and is bounded far below u32 by the gateway's per-asset cap, so the family stays free of the u64 decimal-string rule.",
+          "type": "object",
+          "required": [
+            "attachmentId",
+            "byteLen",
+            "mimeType"
+          ],
+          "properties": {
+            "attachmentId": {
+              "description": "Gateway-assigned attachment identity; addresses the body endpoint.",
+              "type": "string"
+            },
+            "mimeType": {
+              "description": "Bounded RFC 2045 media type (`type/subtype`), e.g. `image/png`.",
+              "type": "string"
+            },
+            "byteLen": {
+              "description": "Decoded body size in bytes; advisory render metadata (sizing/labels).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
     }
   ]
 }

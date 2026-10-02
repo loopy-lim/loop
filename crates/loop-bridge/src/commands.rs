@@ -18,6 +18,16 @@ use loop_store::{SqliteStore, StoreError};
 use rustra::prelude::*;
 use std::sync::OnceLock;
 
+use crate::conversation::{
+    ConversationAssistantDelta, ConversationAssistantMessage, ConversationLifecycle,
+    ConversationSteerQueued, ConversationToolCallEnded, ConversationToolCallStarted,
+    ConversationUserMessage, RemoteSessionListOutput, RemoteSessionResetEvent,
+};
+use crate::pane::{RemotePaneListOutput, RemotePaneResetEvent, RemotePaneTextEvent};
+use crate::context_summary::ContextSummaryEvent;
+use crate::hooks::LifecycleHookEvent;
+use crate::sandbox::SandboxCapabilityReport;
+use crate::usage::UsageRecordEvent;
 use crate::{EventOutput, GuidanceDeliveredEvent, RunChangedEvent};
 
 #[bridge_type]
@@ -55,6 +65,7 @@ pub struct TaskSpecInput {
     pub preferred_compute: ComputeClass,
     pub minimum_compute: ComputeClass,
     pub maximum_compute: ComputeClass,
+    pub routing: Option<loop_core::policy::TaskRouting>,
     pub max_attempts: u16,
 }
 
@@ -258,6 +269,47 @@ pub struct TaskSnapshotOutput {
 }
 
 #[bridge_type]
+pub struct RunGraphInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub now_ms: i64,
+}
+
+#[bridge_type]
+pub enum GraphOwnerHealth {
+    Live,
+    Missing,
+    Expired,
+    Inactive,
+}
+
+#[bridge_type]
+pub struct GraphNodeOutput {
+    pub id: String,
+    pub title: String,
+    pub kind: TaskKind,
+    pub state: TaskState,
+    pub dependencies: Vec<String>,
+    pub blocked_by: Vec<String>,
+    pub read_scope: Vec<String>,
+    pub write_scope: Vec<String>,
+    pub workers: Vec<String>,
+    pub attempt: u16,
+    pub result_summary: Option<String>,
+    pub last_failure: Option<String>,
+}
+
+#[bridge_type]
+pub struct RunGraphOutput {
+    pub run_id: String,
+    pub state: RunState,
+    pub last_sequence: String,
+    pub owner_health: GraphOwnerHealth,
+    pub open_attention_count: u32,
+    pub nodes: Vec<GraphNodeOutput>,
+}
+
+#[bridge_type]
 pub struct ActiveWorkerOutput {
     pub id: String,
     pub task_id: String,
@@ -274,9 +326,19 @@ pub struct SnapshotOutput {
     pub intent: String,
     pub working_directory: String,
     pub guidance: Vec<String>,
+    pub goal_criteria: Vec<GoalCriterionStatusOutput>,
     pub last_sequence: i64,
     pub execution_owner: Option<String>,
     pub execution_expires_at: Option<i64>,
+}
+
+#[bridge_type]
+pub struct GoalCriterionStatusOutput {
+    pub id: String,
+    pub description: String,
+    pub task_id: String,
+    pub check_ids: Vec<String>,
+    pub state: loop_core::event::GoalCriterionState,
 }
 
 #[bridge_type]
@@ -921,6 +983,43 @@ pub fn get_snapshot(input: RunInput) -> Result<SnapshotOutput> {
 }
 
 #[command]
+pub fn get_run_graph(input: RunGraphInput) -> Result<RunGraphOutput> {
+    let store = store(&input.database_path)?;
+    let snapshot = snapshot(&store, &input.run_id)?;
+    let owner_health = if snapshot.state != RunState::Active {
+        GraphOwnerHealth::Inactive
+    } else {
+        match snapshot.execution_expires_at {
+            Some(expires_at) if expires_at > input.now_ms => GraphOwnerHealth::Live,
+            Some(_) => GraphOwnerHealth::Expired,
+            None => GraphOwnerHealth::Missing,
+        }
+    };
+    let nodes = snapshot.tasks.into_iter().map(|task| GraphNodeOutput {
+        workers: snapshot.active_workers.iter().filter(|worker| worker.task_id == task.id).map(|worker| worker.id.clone()).collect(),
+        id: task.id,
+        title: task.title,
+        kind: task.kind,
+        state: task.state,
+        dependencies: task.dependencies,
+        blocked_by: task.blocked_by,
+        read_scope: task.read_scope,
+        write_scope: task.write_scope,
+        attempt: task.attempt,
+        result_summary: task.result_summary,
+        last_failure: task.last_failure,
+    }).collect();
+    Ok(RunGraphOutput {
+        run_id: snapshot.run_id,
+        state: snapshot.state,
+        last_sequence: snapshot.last_sequence.to_string(),
+        owner_health,
+        open_attention_count: snapshot.open_attention_ids.len() as u32,
+        nodes,
+    })
+}
+
+#[command]
 pub fn subscribe_events(input: SubscribeEventsInput) -> Result<Vec<EventOutput>> {
     let store = store(&input.database_path)?;
     store
@@ -1137,6 +1236,8 @@ pub struct CapabilityRequirementsInput {
     pub minimum_compute: ComputeClass,
     pub maximum_compute: ComputeClass,
     pub risk: RoutingRisk,
+    pub high_risk_floor: ComputeClass,
+    pub critical_risk_floor: ComputeClass,
 }
 
 #[bridge_type]
@@ -1202,7 +1303,11 @@ pub fn select_candidate(input: SelectCandidateInput) -> Result<SelectCandidateOu
         input.requirements.minimum_compute,
         input.requirements.maximum_compute,
     )
-    .with_risk(input.requirements.risk.into());
+    .with_risk(input.requirements.risk.into())
+    .with_risk_floors(
+        input.requirements.high_risk_floor,
+        input.requirements.critical_risk_floor,
+    );
     let candidates: Vec<loop_core::policy::ComputeCandidate> =
         input.candidates.into_iter().map(Into::into).collect();
     let eligible_candidate_ids: std::collections::BTreeSet<String> =
@@ -1475,6 +1580,13 @@ fn snapshot(store: &SqliteStore, run_id: &str) -> Result<SnapshotOutput> {
     let lease = store
         .execution_lease(run_id)
         .map_err(|error| bridge_error("lease_failed", error))?;
+    let goal_criteria = projection.goal_criteria_status().into_iter().map(|item| GoalCriterionStatusOutput {
+        id: item.criterion.id,
+        description: item.criterion.description,
+        task_id: item.criterion.task_id.to_string(),
+        check_ids: item.criterion.check_ids,
+        state: item.state,
+    }).collect();
     Ok(SnapshotOutput {
         execution_owner: lease.as_ref().map(|(owner, _)| owner.clone()),
         execution_expires_at: lease.map(|(_, expires)| expires),
@@ -1498,6 +1610,7 @@ fn snapshot(store: &SqliteStore, run_id: &str) -> Result<SnapshotOutput> {
             .iter()
             .map(|item| item.message.clone())
             .collect(),
+        goal_criteria,
         last_sequence: store
             .last_sequence(run_id)
             .map_err(|error| bridge_error("sequence_failed", error))?,
@@ -1585,6 +1698,7 @@ pub(crate) fn task_from_input(input: TaskSpecInput) -> Result<Task> {
             input.minimum_compute,
             input.maximum_compute,
         )
+        .routing(input.routing.unwrap_or_default())
         .max_attempts(input.max_attempts)
         .build()
         .map_err(|error| bridge_error("invalid_task", error))
@@ -1615,6 +1729,7 @@ pub fn loop_package() -> &'static Package {
                     record_worker_stopped,
                     resume_run,
                     get_snapshot,
+                    get_run_graph,
                     subscribe_events,
                     cleanup_run,
                     evaluate_worktree_removal,
@@ -1634,6 +1749,50 @@ pub fn loop_package() -> &'static Package {
             record_guidance_delivered
         )
         .event::<RunChangedEvent>("loop.run_changed")
+        // Terminal mirror v1 (decision 2026-xx-terminal-mirror D3): the pane
+        // frame payloads are schema-anchored here so the gateway and the apps
+        // consume GENERATED wire types. The native bridge never emits these
+        // events — the gateway adapter frames them from herdr pane
+        // observations over its own SSE surface; these declarations fix the
+        // payload contracts (field names, u64 decimal-string rule) in Rust.
+        .event::<RemotePaneListOutput>("loop.pane_list")
+        .event::<RemotePaneTextEvent>("loop.pane_text")
+        .event::<RemotePaneResetEvent>("loop.pane_reset")
+        // GUI conversation view v1 (decision 2026-xx-gui-conversation D2): the
+        // session conversation frame payloads are schema-anchored here so the
+        // gateway and the apps consume GENERATED wire types. The native bridge
+        // never emits these events — the gateway adapter frames them from the
+        // pi extension tap over its own SSE surface; these declarations fix
+        // the payload contracts (field names, identity keys, redacted bounded
+        // text) in Rust. SSE frame names are these event names minus the
+        // `loop.` prefix. Appended after the pane events so every existing
+        // event id stays stable (additive third frame family).
+        .event::<RemoteSessionListOutput>("loop.session_list")
+        .event::<ConversationUserMessage>("loop.user_message")
+        .event::<ConversationAssistantDelta>("loop.assistant_delta")
+        .event::<ConversationAssistantMessage>("loop.assistant_message")
+        .event::<ConversationToolCallStarted>("loop.tool_call_started")
+        .event::<ConversationToolCallEnded>("loop.tool_call_ended")
+        .event::<ConversationLifecycle>("loop.lifecycle")
+        .event::<ConversationSteerQueued>("loop.steer_queued")
+        .event::<RemoteSessionResetEvent>("loop.conversation_reset")
+        // Gap-analysis wire families (docs/research/loop-gap-analysis.md):
+        // schema-anchored declarative events the native bridge does not emit
+        // or interpret. The orchestrator/adapters frame them over their own
+        // transports; these declarations fix the payload contracts in Rust so
+        // downstream surfaces consume GENERATED wire types. Appended after
+        // the conversation events so every existing event id stays stable.
+        // G1 context lifecycle: orchestrator summarization observations.
+        .event::<ContextSummaryEvent>("loop.context_summary")
+        // G4a sandbox capability: honest adapter isolation declarations for
+        // doctor-style reporting (absence declares `none`, never inferred).
+        .event::<SandboxCapabilityReport>("loop.sandbox_capabilities")
+        // G17 usage: optional upstream-reported usage records; estimated and
+        // observed figures are distinguished on the wire (`basis`).
+        .event::<UsageRecordEvent>("loop.usage_recorded")
+        // G13 lifecycle hooks: adapter typed event seam; hook outcomes are
+        // evidence only — core completion judgment stays invariant.
+        .event::<LifecycleHookEvent>("loop.lifecycle_hook")
         .build();
         package.register_ffi_with_default(FfiFormat::Json);
         package
@@ -1677,6 +1836,8 @@ mod routing_tests {
             minimum_compute: minimum,
             maximum_compute: maximum,
             risk,
+            high_risk_floor: ComputeClass::Strong,
+            critical_risk_floor: ComputeClass::Frontier,
         }
     }
 
@@ -1752,6 +1913,8 @@ mod routing_tests {
                 minimum_compute: ComputeClass::Fast,
                 maximum_compute: ComputeClass::Strong,
                 risk: RoutingRisk::Low,
+                high_risk_floor: ComputeClass::Strong,
+                critical_risk_floor: ComputeClass::Frontier,
             },
         })
         .unwrap();

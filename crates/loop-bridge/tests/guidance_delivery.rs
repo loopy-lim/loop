@@ -38,6 +38,7 @@ fn task_spec(id: &str) -> TaskSpecInput {
         preferred_compute: ComputeClass::Fast,
         minimum_compute: ComputeClass::Tiny,
         maximum_compute: ComputeClass::Strong,
+        routing: None,
         max_attempts: 3,
     }
 }

@@ -8,6 +8,7 @@ use crate::{
     SemanticTouchpointInput, TaskSpecInput,
 };
 use loop_core::attention::{AttentionKind, AttentionResolution, AttentionState};
+use loop_core::event::GoalCriterion;
 use loop_core::event::{CheckReceipt, Event, EventKind};
 use loop_core::task::{Task, TaskId, TaskState};
 use rustra::prelude::*;
@@ -19,6 +20,71 @@ pub struct PrepareRunInput {
     pub intent: String,
     pub working_directory: String,
     pub tasks: Vec<TaskSpecInput>,
+}
+
+#[bridge_type]
+pub struct GoalCriterionInput {
+    pub id: String,
+    pub description: String,
+    pub task_id: String,
+    pub check_ids: Vec<String>,
+}
+
+#[bridge_type]
+pub struct PrepareGoalRunInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub intent: String,
+    pub working_directory: String,
+    pub tasks: Vec<TaskSpecInput>,
+    pub criteria: Vec<GoalCriterionInput>,
+}
+
+#[bridge_type]
+pub struct AppendGoalCriteriaInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub criteria: Vec<GoalCriterionInput>,
+}
+
+#[bridge_type]
+pub struct AddGoalTaskInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub task: TaskSpecInput,
+    pub criteria: Vec<GoalCriterionInput>,
+}
+
+fn goal_criteria(inputs: Vec<GoalCriterionInput>) -> Vec<GoalCriterion> {
+    inputs
+        .into_iter()
+        .map(|item| GoalCriterion {
+            id: item.id,
+            description: item.description,
+            task_id: TaskId::from(item.task_id),
+            check_ids: item.check_ids,
+        })
+        .collect()
+}
+
+fn ensure_goal_coverage(tasks: &[Task], criteria: &[GoalCriterionInput]) -> Result<()> {
+    for task in tasks {
+        if task.requirements.is_empty()
+            || task.requirements.iter().any(|requirement| {
+                requirement.trim().is_empty()
+                    || !criteria.iter().any(|criterion| {
+                        criterion.task_id == task.id.as_str()
+                            && criterion.description == *requirement
+                    })
+            })
+        {
+            return Err(bridge_error(
+                "invalid_goal",
+                format!("task {} has an unmapped requirement", task.id),
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[bridge_type]
@@ -116,6 +182,15 @@ pub struct RecordActivityInput {
 }
 
 #[bridge_type]
+pub struct RecordTaskOutputInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub task_id: String,
+    pub summary: String,
+    pub execution_owner: Option<String>,
+}
+
+#[bridge_type]
 pub struct ExecutionLeaseInput {
     pub database_path: String,
     pub run_id: String,
@@ -179,6 +254,94 @@ pub fn prepare_run(input: PrepareRunInput) -> Result<OperationOutput> {
         &mut store(&input.database_path)?,
         &events,
         "prepare_run_failed",
+    )?;
+    Ok(OperationOutput { accepted: true })
+}
+
+#[command]
+pub fn prepare_goal_run(input: PrepareGoalRunInput) -> Result<OperationOutput> {
+    if !std::path::Path::new(&input.working_directory).is_absolute() {
+        return Err(bridge_error(
+            "invalid_context",
+            "working directory must be absolute",
+        ));
+    }
+    if input.criteria.is_empty() {
+        return Err(bridge_error(
+            "invalid_goal",
+            "goal criteria must be non-empty",
+        ));
+    }
+    let tasks = input
+        .tasks
+        .into_iter()
+        .map(task_from_input)
+        .collect::<Result<Vec<_>>>()?;
+    if tasks.is_empty() {
+        return Err(bridge_error("invalid_graph", "plan must contain tasks"));
+    }
+    loop_core::graph::TaskGraph::new(tasks.clone())
+        .map_err(|error| bridge_error("invalid_graph", error))?;
+    ensure_goal_coverage(&tasks, &input.criteria)?;
+    let mut events = vec![
+        Event::new(&input.run_id, EventKind::RunCreated),
+        Event::new(
+            &input.run_id,
+            EventKind::RunConfigured {
+                intent: input.intent,
+                working_directory: input.working_directory,
+            },
+        ),
+    ];
+    events.extend(
+        tasks
+            .into_iter()
+            .map(|task| Event::new(&input.run_id, EventKind::TaskCreated(task))),
+    );
+    events.push(Event::new(
+        &input.run_id,
+        EventKind::GoalCriteriaDeclared(goal_criteria(input.criteria)),
+    ));
+    append_batch_and_notify(
+        &mut store(&input.database_path)?,
+        &events,
+        "prepare_goal_run_failed",
+    )?;
+    Ok(OperationOutput { accepted: true })
+}
+
+#[command]
+pub fn append_goal_criteria(input: AppendGoalCriteriaInput) -> Result<OperationOutput> {
+    append(
+        &input.database_path,
+        Event::new(
+            input.run_id,
+            EventKind::GoalCriteriaDeclared(goal_criteria(input.criteria)),
+        ),
+    )
+}
+
+#[command]
+pub fn add_goal_task(input: AddGoalTaskInput) -> Result<OperationOutput> {
+    if input.criteria.is_empty() {
+        return Err(bridge_error(
+            "invalid_goal",
+            "new task requires goal criteria",
+        ));
+    }
+    let task = task_from_input(input.task)?;
+    ensure_goal_coverage(std::slice::from_ref(&task), &input.criteria)?;
+    let events = [
+        Event::new(&input.run_id, EventKind::TaskCreated(task)),
+        Event::new(
+            &input.run_id,
+            EventKind::GoalCriteriaDeclared(goal_criteria(input.criteria)),
+        ),
+    ];
+    append_batch_and_notify(
+        &mut store(&input.database_path)?,
+        &events,
+        "add_goal_task_failed",
     )?;
     Ok(OperationOutput { accepted: true })
 }
@@ -327,12 +490,15 @@ pub fn record_check_receipts(input: RecordCheckReceiptsInput) -> Result<Operatio
         .projection(&input.run_id)
         .map_err(|error| bridge_error("snapshot_failed", error))?;
     let task_id = TaskId::from(input.task_id);
-    let task = projection.tasks.get(&task_id)
+    let task = projection
+        .tasks
+        .get(&task_id)
         .ok_or_else(|| bridge_error("task_not_found", &task_id))?;
     let mut checks = input.checks;
     for check in &mut checks {
         if let Some(source) = &mut check.source {
-            source.observed_outside_write_scope = task.ownership
+            source.observed_outside_write_scope = task
+                .ownership
                 .observed_outside_write_scope(&source.observed_changed_paths);
         }
     }
@@ -340,10 +506,7 @@ pub fn record_check_receipts(input: RecordCheckReceiptsInput) -> Result<Operatio
         &input.database_path,
         Event::new(
             input.run_id,
-            EventKind::CheckReceiptsRecorded {
-                task_id,
-                checks,
-            },
+            EventKind::CheckReceiptsRecorded { task_id, checks },
         ),
         input.execution_owner.as_deref(),
     )
@@ -372,6 +535,27 @@ pub fn record_activity(input: RecordActivityInput) -> Result<OperationOutput> {
             EventKind::TaskActivityRecorded {
                 task_id: TaskId::from(input.task_id),
                 activity: input.activity,
+            },
+        ),
+        input.execution_owner.as_deref(),
+    )
+}
+
+#[command]
+pub fn record_task_output(input: RecordTaskOutputInput) -> Result<OperationOutput> {
+    if input.summary.trim().is_empty() {
+        return Err(bridge_error(
+            "invalid_output",
+            "task output summary is required",
+        ));
+    }
+    append_owned(
+        &input.database_path,
+        Event::new(
+            input.run_id,
+            EventKind::TaskOutputRecorded {
+                task_id: TaskId::from(input.task_id),
+                summary: input.summary,
             },
         ),
         input.execution_owner.as_deref(),
@@ -552,6 +736,7 @@ pub(crate) fn task_spec(task: &Task) -> TaskSpecInput {
         preferred_compute: task.preferred_compute,
         minimum_compute: task.minimum_compute,
         maximum_compute: task.maximum_compute,
+        routing: Some(task.routing),
         max_attempts: task.max_attempts,
     }
 }
@@ -564,12 +749,16 @@ pub(crate) fn register_execution(builder: rustra::PackageBuilder) -> rustra::Pac
     register!(
         builder,
         prepare_run,
+        prepare_goal_run,
+        append_goal_criteria,
+        add_goal_task,
         configure_run,
         get_run_plan,
         get_task_context,
         record_check_receipts,
         stop_verification,
         record_activity,
+        record_task_output,
         steer_run,
         claim_execution,
         renew_execution,
@@ -609,6 +798,7 @@ mod preflight_bridge_tests {
             preferred_compute: ComputeClass::Fast,
             minimum_compute: ComputeClass::Tiny,
             maximum_compute: ComputeClass::Strong,
+            routing: None,
             max_attempts: 2,
         }
     }
@@ -638,6 +828,131 @@ mod preflight_bridge_tests {
             }],
             failure_policy: FailurePolicy::new([], OnExhaustion::FailTask),
         }
+    }
+
+    #[test]
+    fn tracked_prepare_rejects_unmapped_goal_without_writing_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let database_path = dir.path().join("goal-invalid.db").display().to_string();
+        let result = prepare_goal_run(PrepareGoalRunInput {
+            database_path: database_path.clone(),
+            run_id: "run".into(),
+            intent: "verify behavior".into(),
+            working_directory: "/project".into(),
+            tasks: vec![task("implementation")],
+            criteria: vec![GoalCriterionInput {
+                id: "goal".into(),
+                description: "behavior".into(),
+                task_id: "implementation".into(),
+                check_ids: vec!["missing".into()],
+            }],
+        });
+        assert!(result.is_err());
+        assert!(crate::commands::get_snapshot(RunInput {
+            database_path,
+            run_id: "run".into()
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn tracked_prepare_persists_goal_status_and_rejects_duplicate_correction() {
+        let dir = tempfile::tempdir().unwrap();
+        let database_path = dir.path().join("goal-valid.db").display().to_string();
+        let criterion = GoalCriterionInput {
+            id: "goal".into(),
+            description: "behavior".into(),
+            task_id: "implementation".into(),
+            check_ids: vec!["unit".into()],
+        };
+        prepare_goal_run(PrepareGoalRunInput {
+            database_path: database_path.clone(),
+            run_id: "run".into(),
+            intent: "verify behavior".into(),
+            working_directory: "/project".into(),
+            tasks: vec![task("implementation")],
+            criteria: vec![criterion],
+        })
+        .unwrap();
+        let snapshot = crate::commands::get_snapshot(RunInput {
+            database_path: database_path.clone(),
+            run_id: "run".into(),
+        })
+        .unwrap();
+        assert_eq!(snapshot.goal_criteria.len(), 1);
+        assert_eq!(
+            snapshot.goal_criteria[0].state,
+            loop_core::event::GoalCriterionState::Pending
+        );
+        let duplicate = append_goal_criteria(AppendGoalCriteriaInput {
+            database_path,
+            run_id: "run".into(),
+            criteria: vec![GoalCriterionInput {
+                id: "goal".into(),
+                description: "repeat".into(),
+                task_id: "implementation".into(),
+                check_ids: vec!["unit".into()],
+            }],
+        });
+        assert!(duplicate.is_err());
+    }
+
+    #[test]
+    fn corrected_goal_adds_task_and_criterion_atomically() {
+        let dir = tempfile::tempdir().unwrap();
+        let database_path = dir.path().join("goal-correction.db").display().to_string();
+        prepare_goal_run(PrepareGoalRunInput {
+            database_path: database_path.clone(),
+            run_id: "run".into(),
+            intent: "behavior".into(),
+            working_directory: "/project".into(),
+            tasks: vec![task("original")],
+            criteria: vec![GoalCriterionInput {
+                id: "original".into(),
+                description: "behavior".into(),
+                task_id: "original".into(),
+                check_ids: vec!["unit".into()],
+            }],
+        })
+        .unwrap();
+        let invalid = add_goal_task(AddGoalTaskInput {
+            database_path: database_path.clone(),
+            run_id: "run".into(),
+            task: task("correction"),
+            criteria: vec![GoalCriterionInput {
+                id: "correction".into(),
+                description: "behavior".into(),
+                task_id: "correction".into(),
+                check_ids: vec!["missing".into()],
+            }],
+        });
+        assert!(invalid.is_err());
+        let snapshot = crate::commands::get_snapshot(RunInput {
+            database_path: database_path.clone(),
+            run_id: "run".into(),
+        })
+        .unwrap();
+        assert_eq!(snapshot.tasks.len(), 1);
+        assert_eq!(snapshot.goal_criteria.len(), 1);
+        add_goal_task(AddGoalTaskInput {
+            database_path: database_path.clone(),
+            run_id: "run".into(),
+            task: task("correction"),
+            criteria: vec![GoalCriterionInput {
+                id: "correction".into(),
+                description: "behavior".into(),
+                task_id: "correction".into(),
+                check_ids: vec!["unit".into()],
+            }],
+        })
+        .unwrap();
+        let snapshot = crate::commands::get_snapshot(RunInput {
+            database_path,
+            run_id: "run".into(),
+        })
+        .unwrap();
+        assert_eq!(snapshot.tasks.len(), 2);
+        assert_eq!(snapshot.goal_criteria.len(), 2);
     }
 
     #[test]

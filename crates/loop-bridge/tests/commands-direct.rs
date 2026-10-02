@@ -1,8 +1,8 @@
 use loop_bridge::{
     AddTaskInput, ClaimRunnableTasksInput, CompletionCheckInput, CreateRunInput, DecisionInput,
-    RunInput, SubmitPlanInput, SubscribeEventsInput, TaskSpecInput, UpdateTaskInput, WorkerInput,
+    GraphOwnerHealth, RunGraphInput, RunInput, SubmitPlanInput, SubscribeEventsInput, TaskSpecInput, UpdateTaskInput, WorkerInput,
     add_task, claim_runnable_tasks, confirm_paused, create_run, get_run, pause_run,
-    record_decision, record_worker_started, record_worker_stopped, resume_run, submit_plan,
+    get_run_graph, record_decision, record_worker_started, record_worker_stopped, resume_run, submit_plan,
     subscribe_events, update_task,
 };
 use loop_core::policy::ComputeClass;
@@ -29,6 +29,7 @@ fn research(id: &str) -> TaskSpecInput {
         preferred_compute: ComputeClass::Fast,
         minimum_compute: ComputeClass::Tiny,
         maximum_compute: ComputeClass::Strong,
+        routing: None,
         max_attempts: 3,
     }
 }
@@ -46,6 +47,27 @@ fn task_state(snapshot: &loop_bridge::SnapshotOutput, task_id: &str) -> TaskStat
         .find(|task| task.id == task_id)
         .unwrap_or_else(|| panic!("task {task_id} missing from snapshot"))
         .state
+}
+
+#[test]
+fn graph_query_exposes_stage_dependencies_and_owner_health() {
+    let dir = tempfile::tempdir().unwrap();
+    let database_path = dir.path().join("graph.db").display().to_string();
+    create_run(CreateRunInput { database_path: database_path.clone(), run_id: "graph".into() }).unwrap();
+    submit_plan(SubmitPlanInput {
+        database_path: database_path.clone(),
+        run_id: "graph".into(),
+        tasks: vec![research("research"), research_with_dependencies("verify", vec!["research".into()])],
+    }).unwrap();
+
+    let graph = get_run_graph(RunGraphInput { database_path, run_id: "graph".into(), now_ms: 1_000 }).unwrap();
+    assert_eq!(graph.run_id, "graph");
+    assert!(matches!(graph.owner_health, GraphOwnerHealth::Missing));
+    assert_eq!(graph.nodes.len(), 2);
+    assert_eq!(graph.nodes[0].kind, TaskKind::Research);
+    assert_eq!(graph.nodes[0].state, TaskState::Pending);
+    assert_eq!(graph.nodes[1].dependencies, vec!["research"]);
+    assert_eq!(graph.nodes[1].state, TaskState::Pending);
 }
 
 #[test]

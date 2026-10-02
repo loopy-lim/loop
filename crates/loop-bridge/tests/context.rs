@@ -40,6 +40,7 @@ fn worker_result_and_dependency_context_are_durable_and_relevant() {
         preferred_compute: ComputeClass::Fast,
         minimum_compute: ComputeClass::Fast,
         maximum_compute: ComputeClass::Fast,
+        routing: None,
         max_attempts: 2,
     };
     submit_plan(SubmitPlanInput {

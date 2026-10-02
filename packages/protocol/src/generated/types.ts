@@ -22,6 +22,7 @@ export type TaskSpecInput = {
   preferredCompute: ComputeClass;
   minimumCompute: ComputeClass;
   maximumCompute: ComputeClass;
+  routing?: TaskRouting | null;
   maxAttempts: number;
 };
 
@@ -36,6 +37,28 @@ export type CompletionCheckInput = {
 };
 
 export type ComputeClass = 'deterministic' | 'typed_decision' | 'tiny' | 'fast' | 'balanced' | 'strong' | 'frontier';
+
+export type TaskRouting = {
+  risk: Risk;
+  required: ComputeCapabilities;
+};
+
+export type Risk = 'low' | 'medium' | 'high' | 'critical';
+
+export type ComputeCapabilities = {
+  coding: number;
+  reasoning: number;
+  tools: number;
+  vision: number;
+  long_context: number;
+};
+
+export type GoalCriterionInput = {
+  id: string;
+  description: string;
+  taskId: string;
+  checkIds: string[];
+};
 
 export type SkippedArtifactOutput = {
   artifact: string;
@@ -127,6 +150,16 @@ export type AttentionSnapshotOutput = {
 
 export type AttentionKind = 'question' | 'decision' | 'approval' | 'conflict' | 'failure';
 
+export type GoalCriterionStatusOutput = {
+  id: string;
+  description: string;
+  taskId: string;
+  checkIds: string[];
+  state: GoalCriterionState;
+};
+
+export type GoalCriterionState = 'pending' | 'verified';
+
 export type RefusalCode = 'run_not_terminal' | 'worktree_unmerged' | 'worktree_dirty' | 'path_is_project_root' | 'path_outside_project' | 'surface_not_owned' | 'external_session';
 
 export type CleanupDisposition = 'defer' | 'skip' | 'require_decision';
@@ -137,7 +170,7 @@ export type CleanupDisposition = 'defer' | 'skip' | 'require_decision';
 export type FailureClass = 'assertion' | 'timeout' | 'process_start' | 'invalid_contract' | 'interrupted' | 'environment';
 
 /**
- * Deterministic retry decision table. Missing classes fail closed.
+ * Deterministic retry decision table. Missing classes fail closed, and deterministic failure classes fail closed even when a budget exists: retry is only ever granted for nondeterministic verification failures ([`FailureClass::is_nondeterministic`]). The deterministic terminal policy — first assertion (or invalid-contract, process-start) failure is terminal — holds regardless of configuration.
  */
 export type FailurePolicy = {
   retryBudgets: RetryBudget[];
@@ -193,6 +226,23 @@ export type IndependentBranchAction = 'continue';
 export type FailurePolicyAction = 'retry' | 'failTask' | 'requireAttention';
 
 export type RunFailureAction = 'continue' | 'fail';
+
+export type GraphOwnerHealth = 'live' | 'missing' | 'expired' | 'inactive';
+
+export type GraphNodeOutput = {
+  id: string;
+  title: string;
+  kind: TaskKind;
+  state: TaskState;
+  dependencies: string[];
+  blockedBy: string[];
+  readScope: string[];
+  writeScope: string[];
+  workers: string[];
+  attempt: number;
+  resultSummary?: string | null;
+  lastFailure?: string | null;
+};
 
 export type DecompositionContractOutput = {
   defaults: string[];
@@ -321,6 +371,8 @@ export type CapabilityRequirementsInput = {
   minimumCompute: ComputeClass;
   maximumCompute: ComputeClass;
   risk: RoutingRisk;
+  highRiskFloor: ComputeClass;
+  criticalRiskFloor: ComputeClass;
 };
 
 /**
@@ -333,14 +385,27 @@ export type EventOutput = {
   payloadJson: string;
 };
 
+export type AddGoalTaskInput = {
+  databasePath: string;
+  runId: string;
+  task: TaskSpecInput;
+  criteria: GoalCriterionInput[];
+};
+
+export type OperationOutput = {
+  accepted: boolean;
+};
+
 export type AddTaskInput = {
   databasePath: string;
   runId: string;
   task: TaskSpecInput;
 };
 
-export type OperationOutput = {
-  accepted: boolean;
+export type AppendGoalCriteriaInput = {
+  databasePath: string;
+  runId: string;
+  criteria: GoalCriterionInput[];
 };
 
 export type RunInput = {
@@ -415,6 +480,7 @@ export type SnapshotOutput = {
   intent: string;
   workingDirectory: string;
   guidance: string[];
+  goalCriteria: GoalCriterionStatusOutput[];
   lastSequence: number | bigint;
   executionOwner?: string | null;
   executionExpiresAt?: number | bigint | null;
@@ -463,6 +529,21 @@ export type EvaluateWorktreeRemovalInput = {
   isClean: boolean;
 };
 
+export type RunGraphInput = {
+  databasePath: string;
+  runId: string;
+  nowMs: number | bigint;
+};
+
+export type RunGraphOutput = {
+  runId: string;
+  state: RunState;
+  lastSequence: string;
+  ownerHealth: GraphOwnerHealth;
+  openAttentionCount: number;
+  nodes: GraphNodeOutput[];
+};
+
 export type RunPlanOutput = {
   intent: string;
   workingDirectory: string;
@@ -504,6 +585,15 @@ export type ListRunsInput = {
 };
 
 export type Array_of_RunListOutput = RunListOutput[];
+
+export type PrepareGoalRunInput = {
+  databasePath: string;
+  runId: string;
+  intent: string;
+  workingDirectory: string;
+  tasks: TaskSpecInput[];
+  criteria: GoalCriterionInput[];
+};
 
 export type PrepareRunInput = {
   databasePath: string;
@@ -556,6 +646,14 @@ export type RecordGuidanceDeliveredInput = {
   databasePath: string;
   runId: string;
   guidance: GuidanceDeliveredEvent;
+  executionOwner?: string | null;
+};
+
+export type RecordTaskOutputInput = {
+  databasePath: string;
+  runId: string;
+  taskId: string;
+  summary: string;
   executionOwner?: string | null;
 };
 
