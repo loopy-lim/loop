@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::policy::ComputeClass;
+use crate::policy::{ComputeClass, TaskRouting};
 
 use super::{
     CompletionContract, DecompositionContract, TaskKind, TaskState, VerificationEvidence,
@@ -59,6 +59,8 @@ pub struct Task {
     pub preferred_compute: ComputeClass,
     pub minimum_compute: ComputeClass,
     pub maximum_compute: ComputeClass,
+    #[serde(default)]
+    pub routing: TaskRouting,
     pub attempt: u16,
     pub max_attempts: u16,
     pub state: TaskState,
@@ -135,6 +137,7 @@ impl TaskBuilder {
                 preferred_compute: ComputeClass::Balanced,
                 minimum_compute: ComputeClass::Tiny,
                 maximum_compute: ComputeClass::Frontier,
+                routing: TaskRouting::default(),
                 attempt: 0,
                 max_attempts: 3,
                 state: TaskState::Pending,
@@ -176,6 +179,11 @@ impl TaskBuilder {
         self.task.preferred_compute = preferred;
         self.task.minimum_compute = minimum;
         self.task.maximum_compute = maximum;
+        self
+    }
+
+    pub fn routing(mut self, routing: TaskRouting) -> Self {
+        self.task.routing = routing;
         self
     }
 

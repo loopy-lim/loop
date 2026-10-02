@@ -46,6 +46,7 @@ impl TraceSummary {
                 EventKind::AttentionResolved { .. } => summary.attention_resolved += 1,
                 EventKind::RunCreated
                 | EventKind::RunConfigured { .. }
+                | EventKind::GoalCriteriaDeclared(_)
                 | EventKind::GuidanceAdded { .. }
                 | EventKind::GuidanceDelivered { .. }
                 | EventKind::TaskOutputRecorded { .. }

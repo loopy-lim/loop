@@ -15,7 +15,7 @@ pub use failure::{
 };
 pub use routing::{
     select_candidate, CapabilityRequirements, ComputeCandidate, ComputeCapabilities, Risk,
-    RoutingError,
+    RoutingError, TaskRouting,
 };
 pub use terminalization::{
     DependencyTerminalization, IndependentBranchAction, RunFailureAction, TerminalizationOutcome,
@@ -63,11 +63,17 @@ mod minimal_intervention_tests {
             OnExhaustion::FailTask,
         );
 
-        assert_eq!(policy.evaluate(FailureClass::Timeout, 0), RetryOutcome::Retry {
-            scope: RetryScope::Worker,
-            delay_ms: 0,
-        });
-        assert_eq!(policy.evaluate(FailureClass::Timeout, 1), RetryOutcome::Exhausted(OnExhaustion::RequireAttention));
+        assert_eq!(
+            policy.evaluate(FailureClass::Timeout, 0),
+            RetryOutcome::Retry {
+                scope: RetryScope::Worker,
+                delay_ms: 0,
+            }
+        );
+        assert_eq!(
+            policy.evaluate(FailureClass::Timeout, 1),
+            RetryOutcome::Exhausted(OnExhaustion::RequireAttention)
+        );
     }
 
     #[test]
@@ -82,6 +88,121 @@ mod minimal_intervention_tests {
             policy.evaluate(FailureClass::InvalidContract, 0),
             RetryOutcome::Exhausted(OnExhaustion::FailTask)
         );
+    }
+
+    #[test]
+    fn only_nondeterministic_classes_are_retryable() {
+        for class in [
+            FailureClass::Timeout,
+            FailureClass::Interrupted,
+            FailureClass::Environment,
+        ] {
+            assert!(class.is_nondeterministic(), "{class:?} must be retryable");
+        }
+        for class in [
+            FailureClass::Assertion,
+            FailureClass::InvalidContract,
+            FailureClass::ProcessStart,
+        ] {
+            assert!(!class.is_nondeterministic(), "{class:?} must be terminal");
+        }
+    }
+
+    #[test]
+    fn nondeterministic_verification_failure_retries_within_budget() {
+        let policy = FailurePolicy::new(
+            [RetryBudget::new(
+                FailureClass::Environment,
+                RetryScope::Check,
+                1,
+                BackoffPolicy::fixed(25),
+                OnExhaustion::RequireAttention,
+            )],
+            OnExhaustion::FailTask,
+        );
+
+        assert_eq!(
+            policy.evaluate(FailureClass::Environment, 0),
+            RetryOutcome::Retry {
+                scope: RetryScope::Check,
+                delay_ms: 25,
+            }
+        );
+        assert_eq!(
+            policy.evaluate(FailureClass::Environment, 1),
+            RetryOutcome::Exhausted(OnExhaustion::RequireAttention)
+        );
+    }
+
+    #[test]
+    fn deterministic_assertion_failure_is_terminal_even_when_budgeted() {
+        let policy = FailurePolicy::new(
+            [RetryBudget::new(
+                FailureClass::Assertion,
+                RetryScope::Check,
+                5,
+                BackoffPolicy::fixed(50),
+                OnExhaustion::RequireAttention,
+            )],
+            OnExhaustion::RequireAttention,
+        );
+
+        // First deterministic assertion failure is terminal; the budget must
+        // not grant a retry and exhaustion must fail the task, not request
+        // attention.
+        assert_eq!(
+            policy.evaluate(FailureClass::Assertion, 0),
+            RetryOutcome::Exhausted(OnExhaustion::FailTask)
+        );
+        assert_eq!(
+            policy.evaluate(FailureClass::Assertion, 5),
+            RetryOutcome::Exhausted(OnExhaustion::FailTask)
+        );
+    }
+
+    #[test]
+    fn validation_rejects_budgets_on_deterministic_classes() {
+        let deterministic = FailurePolicy::new(
+            [RetryBudget::new(
+                FailureClass::ProcessStart,
+                RetryScope::Worker,
+                1,
+                BackoffPolicy::none(),
+                OnExhaustion::FailTask,
+            )],
+            OnExhaustion::FailTask,
+        );
+        assert!(deterministic.validate().is_err());
+
+        let assertion = FailurePolicy::new(
+            [RetryBudget::new(
+                FailureClass::Assertion,
+                RetryScope::Check,
+                1,
+                BackoffPolicy::none(),
+                OnExhaustion::FailTask,
+            )],
+            OnExhaustion::FailTask,
+        );
+        assert!(assertion
+            .validate()
+            .err()
+            .is_some_and(|message| message.contains("assertion")));
+
+        let nondeterministic = FailurePolicy::new(
+            [RetryBudget::new(
+                FailureClass::Interrupted,
+                RetryScope::Worker,
+                1,
+                BackoffPolicy::none(),
+                OnExhaustion::RequireAttention,
+            )],
+            OnExhaustion::FailTask,
+        );
+        assert!(nondeterministic.validate().is_ok());
+
+        let empty = FailurePolicy::default();
+        assert!(empty.validate().is_ok());
     }
 
     #[test]

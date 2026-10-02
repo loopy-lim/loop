@@ -55,8 +55,17 @@ impl SqliteStore {
 
     /// Commit verification and the terminal transition together, so a newly
     /// inserted task cannot appear between the completion decision and write.
-    pub fn append_verification_owned(&mut self, event: &Event, owner: Option<&str>) -> Result<i64, StoreError> {
-        if !matches!(event.kind, EventKind::VerificationPassed { .. } | EventKind::VerificationFailed { .. } | EventKind::VerificationClassifiedFailure { .. }) {
+    pub fn append_verification_owned(
+        &mut self,
+        event: &Event,
+        owner: Option<&str>,
+    ) -> Result<i64, StoreError> {
+        if !matches!(
+            event.kind,
+            EventKind::VerificationPassed { .. }
+                | EventKind::VerificationFailed { .. }
+                | EventKind::VerificationClassifiedFailure { .. }
+        ) {
             return Err(StoreError::ExpectedVerification);
         }
         self.append_batch_internal(std::slice::from_ref(event), owner, true, false, true)
@@ -109,7 +118,14 @@ impl SqliteStore {
             && projection.run_state == Some(RunState::Active)
             && !projection.has_open_attention()
             && !projection.tasks.is_empty()
-            && projection.tasks.values().all(|task| task.state == TaskState::Done)
+            && projection
+                .tasks
+                .values()
+                .all(|task| task.state == TaskState::Done)
+            && projection
+                .goal_criteria_status()
+                .iter()
+                .all(|criterion| criterion.state == loop_core::event::GoalCriterionState::Verified)
         {
             let completed = Event::new(run_id, EventKind::RunCompleted);
             projection.apply(&completed)?;
@@ -493,6 +509,7 @@ fn load_projection(connection: &Connection, run_id: &str) -> Result<RunProjectio
 fn apply_indexes(transaction: &Transaction<'_>, event: &Event) -> Result<(), StoreError> {
     match &event.kind {
         EventKind::RunConfigured { .. }
+        | EventKind::GoalCriteriaDeclared(_)
         | EventKind::GuidanceAdded { .. }
         | EventKind::GuidanceDelivered { .. }
         | EventKind::TaskOutputRecorded { .. }

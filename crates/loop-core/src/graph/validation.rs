@@ -175,15 +175,17 @@ fn validate_task_contract(task: &Task) -> Result<(), GraphError> {
     }
 
     let mut failure_classes = BTreeSet::new();
-    if contract.failure_policy.retry_budgets.iter().any(|budget| {
-        !failure_classes.insert(budget.failure_class)
-            || budget.backoff.multiplier == 0
-            || (budget.backoff.max_delay_ms > 0
-                && budget.backoff.initial_delay_ms > budget.backoff.max_delay_ms)
-    }) {
+    if contract.failure_policy.validate().is_err()
+        || contract.failure_policy.retry_budgets.iter().any(|budget| {
+            !failure_classes.insert(budget.failure_class)
+                || budget.backoff.multiplier == 0
+                || (budget.backoff.max_delay_ms > 0
+                    && budget.backoff.initial_delay_ms > budget.backoff.max_delay_ms)
+        })
+    {
         return Err(GraphError::WeakContract {
             task: task.id.clone(),
-            reason: "retry budgets must be unique and have bounded valid backoff".into(),
+            reason: "retry budgets must target only nondeterministic failure classes, be unique, and have bounded valid backoff".into(),
         });
     }
     Ok(())
@@ -385,5 +387,30 @@ mod preflight_tests {
             contract_task("b", &[], vec![touchpoint()]),
         ])
         .unwrap();
+    }
+
+    #[test]
+    fn preflight_rejects_retry_budget_on_deterministic_assertion_class() {
+        let mut deterministic_retry = contract_task("retry", &[], vec![]);
+        deterministic_retry
+            .decomposition_contract
+            .as_mut()
+            .unwrap()
+            .failure_policy = FailurePolicy::new(
+            [crate::policy::RetryBudget::new(
+                crate::policy::FailureClass::Assertion,
+                crate::policy::RetryScope::Check,
+                2,
+                crate::policy::BackoffPolicy::fixed(50),
+                OnExhaustion::FailTask,
+            )],
+            OnExhaustion::FailTask,
+        );
+
+        assert!(matches!(
+            crate::graph::TaskGraph::preflight([deterministic_retry]),
+            Err(GraphError::WeakContract { reason, .. })
+                if reason.contains("nondeterministic")
+        ));
     }
 }

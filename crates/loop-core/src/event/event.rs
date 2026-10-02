@@ -12,6 +12,14 @@ pub struct Artifact {
     pub target: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct GoalCriterion {
+    pub id: String,
+    pub description: String,
+    pub task_id: TaskId,
+    pub check_ids: Vec<String>,
+}
+
 impl Artifact {
     pub fn new(id: impl Into<String>, kind: ArtifactKind, target: impl Into<String>) -> Self {
         Self {
@@ -65,6 +73,7 @@ pub enum EventKind {
         intent: String,
         working_directory: String,
     },
+    GoalCriteriaDeclared(Vec<GoalCriterion>),
     GuidanceAdded {
         task_id: Option<TaskId>,
         message: String,

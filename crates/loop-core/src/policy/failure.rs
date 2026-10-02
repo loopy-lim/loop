@@ -44,6 +44,17 @@ pub enum FailureClass {
 }
 
 impl FailureClass {
+    /// Whether the failure outcome depends on nondeterministic factors
+    /// (scheduling, network, environment state) and may therefore pass on a
+    /// re-run of the identical inputs. This is the gate for the explicit
+    /// verification retry policy: only these classes may carry a retry
+    /// budget. Assertion, invalid-contract, and process-start failures are
+    /// deterministic — a re-run of the same inputs reproduces them — so the
+    /// first occurrence is terminal (inventory #9 policy, unchanged).
+    pub const fn is_nondeterministic(self) -> bool {
+        matches!(self, Self::Timeout | Self::Interrupted | Self::Environment)
+    }
+
     /// Deterministic transport-fault detection over a failure reason string.
     ///
     /// Returns `Some(FailureClass::Interrupted)` when the reason matches a
@@ -177,7 +188,12 @@ pub enum RetryOutcome {
     Exhausted(OnExhaustion),
 }
 
-/// Deterministic retry decision table. Missing classes fail closed.
+/// Deterministic retry decision table. Missing classes fail closed, and
+/// deterministic failure classes fail closed even when a budget exists:
+/// retry is only ever granted for nondeterministic verification failures
+/// ([`FailureClass::is_nondeterministic`]). The deterministic terminal
+/// policy — first assertion (or invalid-contract, process-start) failure is
+/// terminal — holds regardless of configuration.
 #[derive(Clone, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FailurePolicy {
@@ -197,6 +213,13 @@ impl FailurePolicy {
     }
 
     pub fn evaluate(&self, failure_class: FailureClass, retries_used: u16) -> RetryOutcome {
+        // Nondeterministic-only retry gate: a misconfigured budget on a
+        // deterministic class is ignored rather than honored, so the
+        // deterministic first-failure terminal policy cannot be bypassed by
+        // configuration.
+        if !failure_class.is_nondeterministic() {
+            return RetryOutcome::Exhausted(OnExhaustion::FailTask);
+        }
         self.retry_budgets
             .iter()
             .find(|budget| budget.failure_class == failure_class)
@@ -205,6 +228,35 @@ impl FailurePolicy {
                 RetryOutcome::Exhausted(self.on_unbudgeted_failure),
                 |budget| budget.outcome(retries_used),
             )
+    }
+
+    /// Configuration-level check complementing the [`FailurePolicy::evaluate"]
+    /// gate: rejects budgets that target deterministic failure classes so
+    /// misconfiguration is surfaced at contract validation instead of being
+    /// silently ignored at evaluation time.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if let Some(budget) = self
+            .retry_budgets
+            .iter()
+            .find(|budget| !budget.failure_class.is_nondeterministic())
+        {
+            return Err(match budget.failure_class {
+                FailureClass::Assertion => {
+                    "retry budgets cannot target assertion failures; the first \
+                     deterministic assertion failure is terminal"
+                }
+                FailureClass::InvalidContract => {
+                    "retry budgets cannot target invalid-contract failures; they are \
+                     deterministic and terminal on first occurrence"
+                }
+                FailureClass::ProcessStart => {
+                    "retry budgets cannot target process-start failures; they are \
+                     deterministic and terminal on first occurrence"
+                }
+                _ => unreachable!("only deterministic classes are rejected"),
+            });
+        }
+        Ok(())
     }
 }
 

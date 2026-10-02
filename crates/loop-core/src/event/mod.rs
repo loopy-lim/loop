@@ -3,6 +3,9 @@ mod reducer;
 
 pub use event::{
     verification_recovery_attention, worker_recovery_attention, Artifact, CheckReceipt, Event,
-    EventKind, Guidance, SourceReceipt,
+    EventKind, GoalCriterion, Guidance, SourceReceipt,
 };
-pub use reducer::{ArtifactRecord, ArtifactState, ProjectionError, RunProjection};
+pub use reducer::{
+    ArtifactRecord, ArtifactState, GoalCriterionState, GoalCriterionStatus, ProjectionError,
+    RunProjection,
+};

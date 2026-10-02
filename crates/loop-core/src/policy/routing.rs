@@ -1,26 +1,34 @@
 use std::collections::BTreeSet;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::ComputeClass;
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Risk {
+    #[default]
     Low,
     Medium,
     High,
     Critical,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub struct ComputeCapabilities {
     pub coding: u8,
     pub reasoning: u8,
     pub tools: u8,
     pub vision: u8,
     pub long_context: u8,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct TaskRouting {
+    pub risk: Risk,
+    pub required: ComputeCapabilities,
 }
 
 impl ComputeCapabilities {
@@ -78,6 +86,8 @@ pub struct CapabilityRequirements {
     minimum_compute: ComputeClass,
     maximum_compute: ComputeClass,
     risk: Risk,
+    high_risk_floor: ComputeClass,
+    critical_risk_floor: ComputeClass,
 }
 
 impl CapabilityRequirements {
@@ -87,6 +97,8 @@ impl CapabilityRequirements {
             minimum_compute: ComputeClass::Tiny,
             maximum_compute: ComputeClass::Frontier,
             risk: Risk::Low,
+            high_risk_floor: ComputeClass::Strong,
+            critical_risk_floor: ComputeClass::Frontier,
         }
     }
 
@@ -105,11 +117,17 @@ impl CapabilityRequirements {
         self
     }
 
+    pub const fn with_risk_floors(mut self, high: ComputeClass, critical: ComputeClass) -> Self {
+        self.high_risk_floor = high;
+        self.critical_risk_floor = critical;
+        self
+    }
+
     fn effective_minimum(self) -> ComputeClass {
         let risk_floor = match self.risk {
             Risk::Low | Risk::Medium => ComputeClass::Tiny,
-            Risk::High => ComputeClass::Strong,
-            Risk::Critical => ComputeClass::Frontier,
+            Risk::High => self.high_risk_floor,
+            Risk::Critical => self.critical_risk_floor,
         };
         self.minimum_compute.max(risk_floor)
     }

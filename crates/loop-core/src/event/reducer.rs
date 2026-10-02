@@ -11,8 +11,21 @@ use crate::task::{Task, TaskId, TaskState, TaskTransitionError};
 
 use super::{
     verification_recovery_attention, worker_recovery_attention, CheckReceipt, Event, EventKind,
-    Guidance,
+    GoalCriterion, Guidance,
 };
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalCriterionState {
+    Pending,
+    Verified,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+pub struct GoalCriterionStatus {
+    pub criterion: GoalCriterion,
+    pub state: GoalCriterionState,
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -56,6 +69,7 @@ pub struct RunProjection {
     pub artifacts: BTreeMap<String, ArtifactRecord>,
     pub intent: String,
     pub working_directory: String,
+    pub goal_criteria: Vec<GoalCriterion>,
     pub guidance: Vec<Guidance>,
     /// Delivery watermark per task: the highest `GuidanceAdded` log sequence
     /// that a live worker has provably received (recorded via
@@ -75,6 +89,39 @@ pub struct RunProjection {
 pub const ACTIVITY_HISTORY_LIMIT: usize = 8;
 
 impl RunProjection {
+    pub fn goal_criteria_status(&self) -> Vec<GoalCriterionStatus> {
+        self.goal_criteria
+            .iter()
+            .map(|criterion| {
+                let verified = self
+                    .tasks
+                    .get(&criterion.task_id)
+                    .is_some_and(|task| task.state == TaskState::Done)
+                    && self.checks.get(&criterion.task_id).is_some_and(|receipts| {
+                        criterion.check_ids.iter().all(|id| {
+                            receipts.iter().any(|receipt| {
+                                &receipt.id == id
+                                    && receipt.exit_code == 0
+                                    && !receipt.timed_out
+                                    && receipt.source.as_ref().is_some_and(|source| {
+                                        source.is_stable()
+                                            && source.observed_outside_write_scope.is_empty()
+                                    })
+                            })
+                        })
+                    });
+                GoalCriterionStatus {
+                    criterion: criterion.clone(),
+                    state: if verified {
+                        GoalCriterionState::Verified
+                    } else {
+                        GoalCriterionState::Pending
+                    },
+                }
+            })
+            .collect()
+    }
+
     pub fn apply(&mut self, event: &Event) -> Result<(), ProjectionError> {
         if self
             .run_id
@@ -96,6 +143,48 @@ impl RunProjection {
                 }
                 self.intent = intent.clone();
                 self.working_directory = working_directory.clone();
+            }
+            EventKind::GoalCriteriaDeclared(criteria) => {
+                self.require_controllable()?;
+                if criteria.is_empty() {
+                    return Err(ProjectionError::InvalidGoalCriterion(
+                        "criteria cannot be empty".into(),
+                    ));
+                }
+                let mut ids: std::collections::BTreeSet<String> = self
+                    .goal_criteria
+                    .iter()
+                    .map(|item| item.id.clone())
+                    .collect();
+                for criterion in criteria {
+                    let task = self
+                        .tasks
+                        .get(&criterion.task_id)
+                        .ok_or_else(|| ProjectionError::TaskNotFound(criterion.task_id.clone()))?;
+                    if criterion.id.trim().is_empty()
+                        || criterion.description.trim().is_empty()
+                        || !task.requirements.contains(&criterion.description)
+                        || criterion.check_ids.is_empty()
+                        || !ids.insert(criterion.id.clone())
+                    {
+                        return Err(ProjectionError::InvalidGoalCriterion(criterion.id.clone()));
+                    }
+                    let mut checks = std::collections::BTreeSet::new();
+                    for check_id in &criterion.check_ids {
+                        if !checks.insert(check_id)
+                            || !task
+                                .completion_contract
+                                .checks
+                                .iter()
+                                .any(|check| &check.id == check_id)
+                        {
+                            return Err(ProjectionError::InvalidGoalCriterion(
+                                criterion.id.clone(),
+                            ));
+                        }
+                    }
+                }
+                self.goal_criteria.extend(criteria.iter().cloned());
             }
             EventKind::GuidanceAdded { task_id, message } => {
                 self.require_controllable()?;
@@ -154,7 +243,10 @@ impl RunProjection {
             }
             EventKind::TaskCreated(task) => {
                 self.require_controllable()?;
-                if !matches!(self.run_state, Some(RunState::Active | RunState::Paused | RunState::Attention)) {
+                if !matches!(
+                    self.run_state,
+                    Some(RunState::Active | RunState::Paused | RunState::Attention)
+                ) {
                     return Err(ProjectionError::TaskInsertionState(self.run_state));
                 }
                 if self.tasks.insert(task.id.clone(), task.clone()).is_some() {
@@ -324,6 +416,26 @@ impl RunProjection {
                     .any(|task| task.state != TaskState::Done)
                 {
                     return Err(ProjectionError::IncompleteTasks);
+                }
+                if !self.goal_criteria.is_empty()
+                    && self
+                        .goal_criteria_status()
+                        .iter()
+                        .any(|item| item.state != GoalCriterionState::Verified)
+                {
+                    return Err(ProjectionError::IncompleteGoal);
+                }
+                if !self.goal_criteria.is_empty()
+                    && self.tasks.values().any(|task| {
+                        task.requirements.iter().any(|requirement| {
+                            !self.goal_criteria.iter().any(|criterion| {
+                                criterion.task_id == task.id
+                                    && criterion.description == *requirement
+                            })
+                        })
+                    })
+                {
+                    return Err(ProjectionError::IncompleteGoal);
                 }
                 self.run_state = Some(RunState::Completed);
             }
@@ -580,6 +692,10 @@ pub enum ProjectionError {
     TaskNotVerified(TaskId),
     #[error("run still contains incomplete tasks")]
     IncompleteTasks,
+    #[error("run still contains unverified goal criteria")]
+    IncompleteGoal,
+    #[error("invalid goal criterion: {0}")]
+    InvalidGoalCriterion(String),
     #[error("attention was not found: {0}")]
     AttentionNotFound(String),
     #[error("artifact has already been created: {0}")]
