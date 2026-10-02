@@ -1,16 +1,30 @@
-import { selectCandidate, type ComputeClass, type SelectCandidateInput } from "@loop/protocol";
+import { selectCandidate, type ComputeClass, type SelectCandidateInput, type TaskSpecInput } from "@loop/protocol";
 
 import type { AgentProvider, ProviderCapabilities } from "./types";
 
-type RoutingMetadata = Pick<SelectCandidateInput["candidates"][number], "costWeight" | "latency"> & { quotaGroup?: string };
+type RoutingMetadata = Pick<SelectCandidateInput["candidates"][number], "costWeight" | "latency"> & { quotaGroup?: string; capabilities?: SelectCandidateInput["candidates"][number]["capabilities"] };
+type RouteRequirements = Omit<SelectCandidateInput["requirements"], "highRiskFloor" | "criticalRiskFloor">;
+
+export interface RouteSelection {
+  provider: AgentProvider;
+  computeClass: ComputeClass;
+  reason: string;
+}
 
 export class ProviderRegistry {
   readonly #providers: AgentProvider[];
   readonly #capabilities = new Map<string, ProviderCapabilities>();
 
-  constructor(providers: AgentProvider[], private readonly routing: Readonly<Record<string, RoutingMetadata>> = {}) {
+  constructor(providers: AgentProvider[], private readonly routing: Readonly<Record<string, RoutingMetadata>> = {}, private readonly riskFloors?: { high: ComputeClass; critical: ComputeClass }) {
     if (providers.length === 0) throw new Error("at least one provider is required");
     this.#providers = [...providers];
+  }
+
+  /** Fix one execution lane for a controlled comparison trial. */
+  only(providerId: string): ProviderRegistry {
+    const provider = this.#providers.find(candidate => candidate.id === providerId);
+    if (!provider) throw new Error(`unknown provider for comparison: ${providerId}`);
+    return new ProviderRegistry([provider], this.routing, this.riskFloors);
   }
 
   /**
@@ -21,6 +35,29 @@ export class ProviderRegistry {
    * capabilities into candidates and executes the decision.
    */
   async select(computeClass: ComputeClass, excludedProviderIds: ReadonlySet<string> = new Set()): Promise<AgentProvider> {
+    return (await this.#select({ minimumCompute: computeClass, maximumCompute: computeClass, risk: "low", capabilities: { coding: 0, reasoning: 0, tools: 0, vision: 0, longContext: 0 } }, excludedProviderIds)).provider;
+  }
+
+  async selectForTask(task: Pick<TaskSpecInput, "preferredCompute" | "maximumCompute" | "routing">, excludedProviderIds: ReadonlySet<string> = new Set()): Promise<RouteSelection> {
+    const routing = task.routing;
+    const capabilities = routing?.required;
+    const requirements: RouteRequirements = {
+      minimumCompute: task.preferredCompute,
+      maximumCompute: task.maximumCompute,
+      risk: routing?.risk ?? "low",
+      capabilities: {
+        coding: capabilities?.coding ?? 0,
+        reasoning: capabilities?.reasoning ?? 0,
+        tools: capabilities?.tools ?? 0,
+        vision: capabilities?.vision ?? 0,
+        longContext: capabilities?.long_context ?? 0,
+      },
+    };
+    const selected = await this.#select(requirements, excludedProviderIds);
+    return { ...selected, reason: `risk ${requirements.risk}; required coding ${requirements.capabilities.coding}, reasoning ${requirements.capabilities.reasoning}, tools ${requirements.capabilities.tools}, vision ${requirements.capabilities.vision}, context ${requirements.capabilities.longContext}; selected ${selected.computeClass}` };
+  }
+
+  async #select(requirements: RouteRequirements, excludedProviderIds: ReadonlySet<string>): Promise<{ provider: AgentProvider; computeClass: ComputeClass }> {
     const providersByCandidate = new Map<string, AgentProvider>();
     const candidates: SelectCandidateInput["candidates"] = [];
     const excludedGroups = new Set([...excludedProviderIds].map(id => this.routing[id]?.quotaGroup ?? id));
@@ -38,11 +75,11 @@ export class ProviderRegistry {
           id,
           computeClass: candidateClass,
           capabilities: {
-            coding: 0,
-            reasoning: 0,
-            tools: capabilities.tools ? 1 : 0,
-            vision: capabilities.vision ? 1 : 0,
-            longContext: 0,
+            coding: this.routing[provider.id]?.capabilities?.coding ?? 0,
+            reasoning: this.routing[provider.id]?.capabilities?.reasoning ?? 0,
+            tools: capabilities.tools ? (this.routing[provider.id]?.capabilities?.tools ?? 1) : 0,
+            vision: capabilities.vision ? (this.routing[provider.id]?.capabilities?.vision ?? 1) : 0,
+            longContext: this.routing[provider.id]?.capabilities?.longContext ?? 0,
           },
           latency: this.routing[provider.id]?.latency ?? 0,
           costWeight: this.routing[provider.id]?.costWeight ?? 0,
@@ -53,16 +90,11 @@ export class ProviderRegistry {
     const selection = await selectCandidate({
       candidates,
       eligibleCandidateIds: candidates.map((candidate) => candidate.id),
-      requirements: {
-        capabilities: { coding: 0, reasoning: 0, tools: 0, vision: 0, longContext: 0 },
-        minimumCompute: computeClass,
-        maximumCompute: computeClass,
-        risk: "low",
-      },
+      requirements: { ...requirements, highRiskFloor: this.riskFloors?.high ?? "strong", criticalRiskFloor: this.riskFloors?.critical ?? "frontier" },
     });
     const provider = providersByCandidate.get(selection.candidateId);
-    if (!provider) throw new Error(`no provider supports compute class ${computeClass}`);
-    return provider;
+    if (!provider) throw new Error(`no provider supports compute class ${requirements.minimumCompute}`);
+    return { provider, computeClass: selection.computeClass };
   }
 
   async #capabilitiesFor(provider: AgentProvider): Promise<ProviderCapabilities> {

@@ -1,3 +1,5 @@
+import type { SandboxCapabilityDeclaration } from "@loop/protocol";
+
 import {
   BoundedPaneSender,
   encodeDisplayFrame,
@@ -6,6 +8,7 @@ import {
   type PaneRelaySpec,
 } from "@loop/herdr";
 
+import { noSandboxDeclaration } from "./sandbox";
 import { redactProviderText } from "./redact";
 import type {
   AgentProvider,
@@ -391,6 +394,7 @@ function hasHerdrContext(environment: Record<string, string | undefined>): boole
 }
 
 export class MirroringProvider implements AgentProvider {
+  readonly repair?: (workerId: string, feedback: string) => Promise<WorkerResult>;
   readonly #inner: AgentProvider;
   readonly #sink: MirrorSink;
   readonly #family: string;
@@ -405,10 +409,20 @@ export class MirroringProvider implements AgentProvider {
     this.#sink = toMirrorSink(sink);
     this.#family = options.family ?? deriveFamily(inner.id);
     this.#lineTextLimit = options.lineTextLimit ?? 160;
+    if (inner.repair) this.repair = async (workerId, feedback) => {
+      const result = await inner.repair!(workerId, feedback);
+      this.#publishLines(workerId, [`[repair] ${result.summary}`]);
+      return result;
+    };
   }
 
   get id(): string {
     return this.#inner.id;
+  }
+
+  /** G4a: declarations pass through the visibility wrapper unchanged (absence stays declared). */
+  sandboxDeclaration(): SandboxCapabilityDeclaration {
+    return this.#inner.sandboxDeclaration?.() ?? noSandboxDeclaration(this.id);
   }
 
   capabilities(): Promise<ProviderCapabilities> {
@@ -473,15 +487,17 @@ export class MirroringProvider implements AgentProvider {
   }
 
   async result(workerId: string): Promise<WorkerResult> {
+    let keepOpenForRepair = false;
     try {
       const res = await this.#inner.result(workerId);
+      keepOpenForRepair = res.success && this.repair !== undefined;
       this.#publishLines(workerId, [
         `[lifecycle] ${res.success ? "completed" : "failed"}`,
         `[result] ${res.summary}`,
       ]);
       return res;
     } finally {
-      await this.#sink.onWorkerFinish?.(workerId);
+      if (!keepOpenForRepair) await this.#sink.onWorkerFinish?.(workerId);
     }
   }
 

@@ -1,5 +1,6 @@
 import type { ComputeClass } from "@loop/protocol";
 
+import { noSandboxDeclaration } from "../sandbox";
 import { NodeProcessRunner, type ProcessRunner } from "../process";
 import { ProcessProvider } from "../process-provider";
 import { buildWorkerPrompt } from "../prompt";
@@ -53,6 +54,11 @@ export class PiProvider extends ProcessProvider {
       structuredOutput: false,
       resumableSession: true,
     };
+  }
+
+  /** G4a: headless pi runs with the caller's authority; write scope is advisory. */
+  sandboxDeclaration() {
+    return noSandboxDeclaration(this.id, "headless pi runs with the caller's authority; write scope is advisory only");
   }
 
   protected launch(input: StartWorkerInput) {

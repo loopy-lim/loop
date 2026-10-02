@@ -36,8 +36,8 @@ function zaiCatalog(models: string[]): { provider: string; id: string }[] {
   return models.map((id) => ({ provider: "zai", id }));
 }
 
-/** pi's built-in openai-codex catalog gpt-6 ids (pi 0.87.1; OK-LUNA-PI / OK-SOL-PI). */
-const BUILT_IN_OPENAI_CODEX_IDS = ["gpt-6-luna", "gpt-6-sol"];
+/** pi's built-in openai-codex catalog gpt-6 ids (pi 0.87.1 + updated store; gpt-6.1-sol ships with thinkingLevelMap off=null). */
+const BUILT_IN_OPENAI_CODEX_IDS = ["gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol"];
 
 function openaiCodexCatalog(models: string[]): { provider: string; id: string }[] {
   return models.map((id) => ({ provider: "openai-codex", id }));
@@ -259,9 +259,9 @@ test("regression: provisioned patterns resolve exactly instead of pi's custom-mo
     provider: "openai-codex",
     id: "gpt-6-luna",
   });
-  expect(findExactCatalogMatch("openai-codex/gpt-6-sol", codexBuiltInOnly)).toEqual({
+  expect(findExactCatalogMatch("openai-codex/gpt-6.1-sol", codexBuiltInOnly)).toEqual({
     provider: "openai-codex",
-    id: "gpt-6-sol",
+    id: "gpt-6.1-sol",
   });
 
   // Post-fix behavior: the synced fragment closes every Loop pattern.

@@ -372,6 +372,31 @@ test("provider selection skips an unavailable adapter", async () => {
   expect(selected.id).toBe("available");
 });
 
+test("task routing uses risk floor and declared capability scores", async () => {
+  const fast = new FakeProvider("fast", ["fast"]);
+  const strong = new FakeProvider("strong", ["strong"]);
+  const registry = new ProviderRegistry([fast, strong], {
+    fast: { costWeight: 1, latency: 1, capabilities: { coding: 2, reasoning: 1, tools: 1, vision: 0, longContext: 1 } },
+    strong: { costWeight: 10, latency: 10, capabilities: { coding: 4, reasoning: 4, tools: 2, vision: 0, longContext: 4 } },
+  });
+  const task = { preferredCompute: "fast" as const, maximumCompute: "strong" as const,
+    routing: { risk: "high" as const, required: { coding: 3, reasoning: 3, tools: 1, vision: 0, long_context: 2 } } };
+  const decision = await registry.selectForTask(task);
+  expect(decision.provider.id).toBe("strong");
+  expect(decision.computeClass).toBe("strong");
+  expect(decision.reason).toContain("risk high");
+  await expect(registry.selectForTask({ ...task, maximumCompute: "fast" })).rejects.toThrow();
+  await expect(registry.selectForTask({ ...task, routing: { ...task.routing, required: { ...task.routing.required, vision: 1 } } })).rejects.toThrow();
+});
+
+test("configured risk floor reaches the Rust routing decision", async () => {
+  const balanced = new FakeProvider("balanced", ["balanced"]);
+  const registry = new ProviderRegistry([balanced], {}, { high: "balanced", critical: "frontier" });
+  const decision = await registry.selectForTask({ preferredCompute: "fast", maximumCompute: "balanced",
+    routing: { risk: "high", required: { coding: 0, reasoning: 0, tools: 0, vision: 0, long_context: 0 } } });
+  expect(decision.computeClass).toBe("balanced");
+});
+
 test("interactive provider delegates agent lifecycle to Herdr", async () => {
   const calls: string[][] = [];
   const herdrRunner: HerdrRunner = {
@@ -519,6 +544,28 @@ test("Pi returning from working to idle completes the observed Herdr turn", asyn
   try {
     expect(await provider.result(handle.id)).toMatchObject({ success: true, summary: "Pi finished the requested work" });
   } finally { await provider.release(handle.id); }
+});
+
+test("Herdr repairs a failed check through a second turn on the same agent handle", async () => {
+  const calls: string[][] = [];
+  let turns = 0;
+  let polls = 0;
+  const runner: HerdrRunner = { async run(_command, args) {
+    calls.push(args);
+    if (args[0] === "workspace") return ok({ result: { workspace: { workspace_id: "ws" }, root_pane: { pane_id: "ws:p1" } } });
+    if (args[0] === "tab" && args[1] === "create") return ok({ result: { tab: { tab_id: "ws:t2" }, root_pane: { pane_id: "ws:p2" } } });
+    if (args[0] === "agent" && args[1] === "prompt") { turns++; polls = 0; return ok({ result: {} }); }
+    if (args[0] === "agent" && args[1] === "get") return ok({ result: { agent: { agent_status: polls++ === 0 ? "working" : "idle" } } });
+    if (args[0] === "agent" && args[1] === "read") return { exitCode: 0, stdout: `turn ${turns} complete`, stderr: "" };
+    return ok({ result: {} });
+  } };
+  const provider = new HerdrAgentProvider({ id: "repairable", runtime: new HerdrWorkerRuntime({ runner }), kind: "pi", projectRoot: "/project", computeClasses: ["fast"], pollIntervalMs: 0 });
+  const handle = await provider.start(input);
+  expect((await provider.result(handle.id)).summary).toBe("turn 1 complete");
+  expect(await provider.repair(handle.id, "Fix failing test")).toMatchObject({ success: true, summary: "turn 2 complete" });
+  expect(calls.filter(args => args[0] === "tab" && args[1] === "create")).toHaveLength(1);
+  expect(calls.filter(args => args[0] === "agent" && args[1] === "prompt")).toHaveLength(2);
+  await provider.release(handle.id);
 });
 
 test("Herdr cancellation waits for the active turn and release closes only the worker tab", async () => {

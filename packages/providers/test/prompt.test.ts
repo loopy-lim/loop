@@ -118,6 +118,26 @@ Previous check receipts:
   expect(prompt).not.toContain("stderr-secret");
 });
 
+test("large evidence cannot remove the worker's scope and completion contract", () => {
+  const input = contextualInput();
+  input.context!.dependencyResults = Array.from({ length: 30 }, (_, index) => ({ taskId: `dependency-${index}`, title: "Context", summary: "x".repeat(1200) }));
+  input.context!.previousChecks = Array.from({ length: 30 }, (_, index) => ({
+    ...input.context!.previousChecks[0]!, id: `check-${index}`, stdout: "y".repeat(1200),
+  }));
+  const prompt = buildWorkerPrompt(input);
+  expect(prompt.length).toBeLessThanOrEqual(16_000);
+  expect(prompt).toContain("Write scope:\n- packages/providers/src/prompt.ts");
+  expect(prompt).toContain("Completion checks:\n- providers: bun test packages/providers");
+  expect(prompt).toContain("- Report the result, changed files, checks run, and unresolved risks.");
+  expect(prompt).toContain("...[truncated]");
+});
+
+test("oversized required guidance fails before a worker receives an incomplete brief", () => {
+  const input = contextualInput();
+  input.context!.guidance = Array.from({ length: 30 }, (_, index) => `guidance-${index}: ${"z".repeat(1200)}`);
+  expect(() => buildWorkerPrompt(input)).toThrow(/essential contract (field )?exceeds/);
+});
+
 test("a read-only verification prompt keeps guidance from expanding its write scope", () => {
   const input = contextualInput();
   input.context!.task.kind = "verification";
@@ -153,18 +173,17 @@ Requirements:
 - Return evidence`);
 });
 
-test("buildWorkerPrompt redacts before enforcing a total output bound", () => {
+test("buildWorkerPrompt rejects oversized required context without exposing credentials", () => {
   const input = contextualInput();
   input.context!.intent = `password=do-not-leak Authorization: Basic basic-secret ${"x".repeat(50_000)}`;
   input.context!.guidance = [`--token also-secret ${"y".repeat(50_000)}`];
 
-  const prompt = buildWorkerPrompt(input);
-
-  expect(prompt.length).toBeLessThanOrEqual(16_000);
-  expect(prompt).toContain("[credential]=[redacted]");
-  expect(prompt).not.toContain("do-not-leak");
-  expect(prompt).not.toContain("also-secret");
-  expect(prompt).not.toContain("basic-secret");
+  let error = "";
+  try { buildWorkerPrompt(input); } catch (caught) { error = String(caught); }
+  expect(error).toContain("essential contract field exceeds");
+  expect(error).not.toContain("do-not-leak");
+  expect(error).not.toContain("also-secret");
+  expect(error).not.toContain("basic-secret");
 });
 
 test("buildWorkerPrompt preserves result, failure, and guidance ahead of oversized receipts", () => {

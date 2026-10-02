@@ -172,6 +172,28 @@ describe("MirroringProvider", () => {
     expect(lines).toContain("[result] t-1 complete");
   });
 
+  test("same-session repair keeps the mirror open until the handle is released", async () => {
+    class RepairableProvider extends StreamedProvider {
+      async repair(workerId: string): Promise<{ success: boolean; summary: string }> {
+        this.require(workerId);
+        return { success: true, summary: "fixed the check" };
+      }
+    }
+    const sink = new RecordingSink();
+    const provider = new MirroringProvider(new RepairableProvider("repairable", ["fast"]), sink);
+    const handle = await provider.start(startInput());
+
+    await provider.result(handle.id);
+    expect(sink.finishes).toEqual([]);
+    expect(await provider.repair?.(handle.id, "Fix the check")).toMatchObject({ success: true });
+    await sleep(0);
+    expect(sink.lines.map(entry => entry.line)).toContain("[repair] fixed the check");
+    expect(sink.finishes).toEqual([]);
+
+    await provider.release(handle.id);
+    expect(sink.finishes).toEqual([handle.id]);
+  });
+
   test("cancel and release notify the sink exactly once each", async () => {
     const inner = new StreamedProvider("codex:test", ["fast"]);
     const sink = new RecordingSink();

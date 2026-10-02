@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { ComputeClass } from "@loop/protocol";
 
+import { noSandboxDeclaration } from "./sandbox";
 import type {
   AgentProvider,
   ProviderCapabilities,
@@ -52,6 +53,11 @@ export class FakeProvider implements AgentProvider {
       structuredOutput: true,
       resumableSession: true,
     };
+  }
+
+  /** G4a: the fake executes nothing, so there is no isolation to declare. */
+  sandboxDeclaration() {
+    return noSandboxDeclaration(this.id, "fake provider executes no worker process; nothing to isolate");
   }
 
   async start(input: StartWorkerInput): Promise<WorkerHandle> {

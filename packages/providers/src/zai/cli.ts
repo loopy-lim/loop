@@ -1,5 +1,6 @@
 import type { ComputeClass } from "@loop/protocol";
 
+import { noSandboxDeclaration } from "../sandbox";
 import { NodeProcessRunner, type ProcessRunner } from "../process";
 import { ProcessProvider } from "../process-provider";
 import { buildWorkerPrompt } from "../prompt";
@@ -44,6 +45,11 @@ export class ZaiCliProvider extends ProcessProvider {
       structuredOutput: true,
       resumableSession: true,
     };
+  }
+
+  /** G4a: zai CLI runs with the caller's authority; write scope is advisory. */
+  sandboxDeclaration() {
+    return noSandboxDeclaration(this.id, "zai CLI runs with the caller's authority; write scope is advisory only");
   }
 
   protected launch(input: StartWorkerInput) {

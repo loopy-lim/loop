@@ -1,5 +1,6 @@
 import type { ComputeClass } from "@loop/protocol";
 
+import { sandboxDeclaration } from "../sandbox";
 import { NodeProcessRunner, type ProcessRunner } from "../process";
 import { ProcessProvider } from "../process-provider";
 import { buildWorkerPrompt } from "../prompt";
@@ -58,6 +59,35 @@ export class CodexProvider extends ProcessProvider {
       structuredOutput: true,
       resumableSession: true,
     };
+  }
+
+  /** G4a: codex's own sandbox mode, reported honestly (never a Loop security boundary). */
+  sandboxDeclaration() {
+    if (this.#approveForMe) {
+      return sandboxDeclaration({
+        adapterId: this.id,
+        isolation: "none",
+        filesystemScoped: false,
+        networkIsolated: false,
+        detail: "approve-for-me mode launches codex without --sandbox; commands run with the caller's authority",
+      });
+    }
+    if (this.#sandbox === "danger-full-access") {
+      return sandboxDeclaration({
+        adapterId: this.id,
+        isolation: "none",
+        filesystemScoped: false,
+        networkIsolated: false,
+        detail: "danger-full-access disables the codex sandbox",
+      });
+    }
+    return sandboxDeclaration({
+      adapterId: this.id,
+      isolation: "partial",
+      filesystemScoped: true,
+      networkIsolated: true,
+      detail: `codex --sandbox ${this.#sandbox} (Seatbelt/Landlock): best-effort containment, escapable in principle; not a security boundary`,
+    });
   }
 
   protected launch(input: StartWorkerInput) {

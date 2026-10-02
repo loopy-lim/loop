@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import type { ComputeClass } from "@loop/protocol";
+import type { ComputeClass, UsageMetadata } from "@loop/protocol";
 import { buildWorkerPrompt } from "../prompt";
+import { noSandboxDeclaration } from "../sandbox";
 import { redactProviderText } from "../redact";
 
 import type {
@@ -61,6 +62,14 @@ export class ZaiApiProvider implements AgentProvider {
       structuredOutput: true,
       resumableSession: false,
     };
+  }
+
+  /** G4a: remote API execution — isolation is the endpoint operator's concern. */
+  sandboxDeclaration() {
+    return noSandboxDeclaration(
+      this.id,
+      "remote API execution; OS isolation is the endpoint operator's concern, not the adapter's",
+    );
   }
 
   async start(input: StartWorkerInput): Promise<WorkerHandle> {
@@ -144,6 +153,13 @@ export class ZaiApiProvider implements AgentProvider {
     const payload = await response.json() as {
       choices?: Array<{ message?: { content?: string } }>;
       error?: { message?: string };
+      usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+        prompt_tokens_details?: { cached_tokens?: number };
+        cost?: number;
+      };
     };
     if (!response.ok) {
       return {
@@ -160,7 +176,8 @@ export class ZaiApiProvider implements AgentProvider {
       };
     }
     const summary = payload.choices?.[0]?.message?.content?.trim() || "Z.AI completed";
-    return { success: true, summary };
+    const usage = reportedUsage(payload.usage);
+    return { success: true, summary, ...(usage ? { usage } : {}) };
   }
 
   require(workerId: string): Session {
@@ -172,4 +189,31 @@ export class ZaiApiProvider implements AgentProvider {
 
 function redact(value: string): string {
   return redactProviderText(value);
+}
+
+/** G17: only upstream-reported axes are set; figures are observed, never estimated. */
+function reportedUsage(usage: {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number };
+  cost?: number;
+} | undefined): UsageMetadata | undefined {
+  if (!usage) return undefined;
+  const inputTokens = count(usage.prompt_tokens);
+  const outputTokens = count(usage.completion_tokens);
+  const cacheReadTokens = count(usage.prompt_tokens_details?.cached_tokens);
+  if (inputTokens === null && outputTokens === null && cacheReadTokens === null) return undefined;
+  return {
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    basis: "observed",
+    cost: typeof usage.cost === "number" && Number.isFinite(usage.cost) && usage.cost >= 0 ? usage.cost.toString() : null,
+    currency: null,
+  };
+}
+
+function count(value: number | undefined): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
 }

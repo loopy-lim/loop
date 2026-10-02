@@ -1,4 +1,6 @@
-import type { ComputeClass, TaskContextOutput } from "@loop/protocol";
+import type { ComputeClass, SandboxCapabilityDeclaration, TaskContextOutput, UsageMetadata } from "@loop/protocol";
+
+import type { WorkerOutputContract } from "./json-output";
 
 /**
  * Worker lifecycle vocabulary mirroring loop-core `WorkerState` (serde
@@ -49,6 +51,8 @@ export interface StartWorkerInput {
    * string only.
    */
   personaInstructions?: string;
+  /** Worker output contract (G16): request a machine-readable final JSON result. */
+  output?: WorkerOutputContract;
 }
 
 export interface ResumeWorkerInput extends StartWorkerInput {
@@ -64,6 +68,12 @@ export interface WorkerResult {
   success: boolean;
   summary: string;
   sessionId?: string;
+  /**
+   * Upstream-reported usage (G17). Present ONLY when the upstream reported
+   * it; adapters never invent figures. Collection/aggregation lives in
+   * `usage.ts` (UsageCollector).
+   */
+  usage?: UsageMetadata;
   failure?: {
     kind: ProviderFailureKind;
     retryable: boolean;
@@ -74,17 +84,28 @@ export type ProviderEvent =
   | { type: "output"; stream: "stdout" | "stderr"; text: string }
   | { type: "lifecycle"; status: WorkerState }
   | { type: "session"; sessionId: string }
-  | { type: "final"; summary: string };
+  | { type: "final"; summary: string }
+  /** Stream-level upstream usage report (G17); recorded by UsageTrackingProvider. */
+  | { type: "usage"; usage: UsageMetadata };
 
 export interface AgentProvider {
   readonly id: string;
   capabilities(): Promise<ProviderCapabilities>;
+  /**
+   * Honestly-declared OS isolation around worker execution (G4a). Absent
+   * means `isolation: none` — reporting surfaces declare absence explicitly
+   * via `collectSandboxCapabilities` (sandbox.ts); write scopes are never
+   * interpreted as isolation.
+   */
+  sandboxDeclaration?(): SandboxCapabilityDeclaration;
   start(input: StartWorkerInput): Promise<WorkerHandle>;
   resume?(sessionId: string, input: ResumeWorkerInput): Promise<WorkerHandle>;
   cancel(workerId: string): Promise<void>;
   release?(workerId: string): Promise<void>;
   status(workerId: string): Promise<WorkerState>;
   result(workerId: string): Promise<WorkerResult>;
+  /** Continue one completed interactive worker conversation to repair a failed external check. */
+  repair?(workerId: string, feedback: string): Promise<WorkerResult>;
   subscribe?(workerId: string, listener: (event: ProviderEvent) => void): () => void;
   /**
    * Optional live-conversation steering channel (live-tabs ADR §4,

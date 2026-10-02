@@ -10,6 +10,9 @@ import type {
   WorkerState,
 } from "./types";
 import type { ProcessResult, ProcessRunner, RunningProcess } from "./process";
+import type { WorkerOutputContract } from "./json-output";
+import { enforceOutputContract } from "./json-output";
+import { parseUsageMetadata } from "./usage";
 import { redactProviderText } from "./redact";
 
 interface Session {
@@ -21,6 +24,8 @@ interface Session {
 
 export abstract class ProcessProvider implements AgentProvider {
   readonly #sessions = new Map<string, Session>();
+  /** G16: adapter-level output contract applied to every process result. */
+  protected outputContract?: WorkerOutputContract;
 
   abstract readonly id: string;
   protected abstract runner: ProcessRunner;
@@ -70,6 +75,10 @@ export abstract class ProcessProvider implements AgentProvider {
       for (const line of text.split(/\r?\n/).filter(Boolean)) {
         const normalized = normalizeEventLine(line);
         if (normalized) listener(normalized);
+        // Upstream usage reports ride JSON lines (G17): forward observed
+        // figures; unrelated lines never fabricate records.
+        const usage = parseUsageMetadata(line);
+        if (usage) listener({ type: "usage", usage });
       }
     });
   }
@@ -95,7 +104,7 @@ export abstract class ProcessProvider implements AgentProvider {
     };
     session.result = process.result.then((result) => {
       session.status = result.exitCode === 0 ? "completed" : "lost";
-      return normalizeProcessResult(result);
+      return normalizeProcessResult(result, this.outputContract);
     });
     this.#sessions.set(process.id, session);
     return { id: process.id };
@@ -108,7 +117,7 @@ export abstract class ProcessProvider implements AgentProvider {
   }
 }
 
-export function normalizeProcessResult(result: ProcessResult): WorkerResult {
+export function normalizeProcessResult(result: ProcessResult, contract?: WorkerOutputContract): WorkerResult {
   const parsed = extractMachineResult(result.stdout);
   const summary = parsed.summary || redact(result.stderr) || "worker exited without a final response";
   if (result.exitCode === 0 && !parsed.summary) {
@@ -120,7 +129,7 @@ export function normalizeProcessResult(result: ProcessResult): WorkerResult {
     };
   }
   const success = result.exitCode === 0;
-  return {
+  const normalized: WorkerResult = {
     success,
     summary,
     sessionId: parsed.sessionId,
@@ -133,6 +142,10 @@ export function normalizeProcessResult(result: ProcessResult): WorkerResult {
         }
       : {}),
   };
+  // G16: a requested JSON output contract refines the report (or, when
+  // requireValid, fails an unparseable result). Contract-less calls keep the
+  // exact prior behavior.
+  return enforceOutputContract(normalized, contract, result.stdout);
 }
 
 function extractMachineResult(stdout: string): { summary?: string; sessionId?: string } {

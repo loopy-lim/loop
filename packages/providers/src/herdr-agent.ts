@@ -18,6 +18,7 @@ import type {
 } from "./types";
 import { buildWorkerPrompt } from "./prompt";
 import { classifyFailure } from "./process-provider";
+import { noSandboxDeclaration } from "./sandbox";
 import { redactProviderText } from "./redact";
 
 interface HerdrAgentProviderOptions {
@@ -84,6 +85,14 @@ export class HerdrAgentProvider implements AgentProvider {
       structuredOutput: false,
       resumableSession: true,
     };
+  }
+
+  /** G4a: herdr agent processes run with the caller's authority in a shared terminal host. */
+  sandboxDeclaration() {
+    return noSandboxDeclaration(
+      this.id,
+      `herdr ${this.#kind} agent runs with the caller's authority in a shared terminal host; write scope is advisory only`,
+    );
   }
 
   async start(input: StartWorkerInput): Promise<WorkerHandle> {
@@ -168,6 +177,28 @@ export class HerdrAgentProvider implements AgentProvider {
 
   result(workerId: string): Promise<WorkerResult> {
     return this.#require(workerId).result;
+  }
+
+  async repair(workerId: string, feedback: string): Promise<WorkerResult> {
+    const session = this.#require(workerId);
+    if (session.status !== "completed") throw new Error(`worker ${workerId} cannot repair from ${session.status}`);
+    if (!feedback.trim()) throw new Error("repair feedback is required");
+    session.status = "running";
+    try {
+      await this.#runtime.steer(session.handle, feedback);
+    } catch (error) {
+      session.status = "completed";
+      throw error;
+    }
+    let resolveCancellation!: (result: WorkerResult) => void;
+    const cancellation = new Promise<WorkerResult>(resolve => { resolveCancellation = resolve; });
+    session.resolveCancellation = resolveCancellation;
+    session.result = Promise.race([this.#wait(session), cancellation]).catch(error => {
+      session.status = session.cancelRequested ? "cancelled" : "lost";
+      return { success: false, summary: redact(error instanceof Error ? error.message : String(error)), sessionId: session.handle.agentName,
+        failure: { kind: "process_error" as const, retryable: true } };
+    });
+    return session.result;
   }
 
   /**

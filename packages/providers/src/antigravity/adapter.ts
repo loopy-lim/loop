@@ -1,5 +1,6 @@
 import type { ComputeClass } from "@loop/protocol";
 
+import { sandboxDeclaration } from "../sandbox";
 import { NodeProcessRunner, type ProcessRunner } from "../process";
 import { ProcessProvider } from "../process-provider";
 import { buildWorkerPrompt } from "../prompt";
@@ -55,6 +56,26 @@ export class AntigravityProvider extends ProcessProvider {
       structuredOutput: true,
       resumableSession: true,
     };
+  }
+
+  /** G4a: agy's --sandbox flag, reported as best-effort vendor policy. */
+  sandboxDeclaration() {
+    if (!this.#sandbox) {
+      return sandboxDeclaration({
+        adapterId: this.id,
+        isolation: "none",
+        filesystemScoped: false,
+        networkIsolated: false,
+        detail: "agy launched without --sandbox",
+      });
+    }
+    return sandboxDeclaration({
+      adapterId: this.id,
+      isolation: "partial",
+      filesystemScoped: true,
+      networkIsolated: false,
+      detail: "agy --sandbox (vendor CLI policy); escape properties unaudited, not a security boundary",
+    });
   }
 
   protected launch(input: StartWorkerInput) {
