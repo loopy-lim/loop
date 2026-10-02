@@ -1,12 +1,14 @@
 export type OrchestrationControl = Pick<
   typeof import("@loop/protocol"),
   | "prepareRun"
+  | "prepareGoalRun"
   | "stopVerification"
   | "configureRun"
   | "getRunPlan"
   | "getTaskContext"
   | "recordCheckReceipts"
   | "recordActivity"
+  | "recordTaskOutput"
   | "claimExecution"
   | "renewExecution"
   | "releaseExecution"

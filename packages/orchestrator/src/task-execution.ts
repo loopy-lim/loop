@@ -1,11 +1,14 @@
 import type { TaskContextOutput } from "@loop/protocol";
-import type { AgentProvider, StartWorkerInput, WorkerHandle, WorkerResult } from "@loop/providers";
+import type { AgentProvider, RouteSelection, StartWorkerInput, WorkerHandle, WorkerResult } from "@loop/providers";
+import type { ComputeClass } from "@loop/protocol";
 import type { CompletionVerifier } from "./completion";
 import type { OrchestrationControl } from "./control";
 import { resolvePersona, type PersonaKindDefaults, type PersonaRegistry } from "./persona";
 import { redact } from "./redact";
 import { storeCheckOutput } from "./evidence-artifact";
 import { captureSourceState, changedSourcePaths, scopedFingerprint } from "./source-state";
+import { summarizeTaskContext, DEFAULT_CONTEXT_LIFECYCLE_POLICY, type ContextLifecyclePolicy } from "./context-lifecycle";
+import { withCodeMapEntry, type CodeMapProvider } from "./code-map";
 
 export interface TaskExecution {
   done: Promise<void>;
@@ -26,8 +29,9 @@ interface Options {
   context: TaskContextOutput;
   workerId: string;
   provider: AgentProvider;
+  computeClass?: ComputeClass;
   /** Runs only after the failed handle is released; reservation stays owned. */
-  selectFallback?: (excludedProviderIds: ReadonlySet<string>) => Promise<AgentProvider | undefined>;
+  selectFallback?: (excludedProviderIds: ReadonlySet<string>) => Promise<RouteSelection | undefined>;
   control: OrchestrationControl;
   verifier: CompletionVerifier;
   personas?: PersonaRegistry;
@@ -39,6 +43,16 @@ interface Options {
    * (docs/decisions/2026-09-23-worker-visibility.md D1/D3).
    */
   recordRawActivity?: boolean;
+  /**
+   * G1 context-lifecycle thresholds; omitted = the compile-time defaults.
+   * `advisoryByteBudget: 0` disables automatic summarization.
+   */
+  contextPolicy?: ContextLifecyclePolicy;
+  /**
+   * G2 code map injection; omitted (or returning undefined) injects nothing.
+   * The map rides the start context as one bounded advisory entry.
+   */
+  codeMap?: CodeMapProvider;
 }
 export function executeTask(options: Options): TaskExecution {
   const controller = new AbortController();
@@ -46,7 +60,7 @@ export function executeTask(options: Options): TaskExecution {
   execution.done = run(options, controller.signal, execution).catch(error => { execution.error = error; }).finally(() => { execution.settled = true; });
   return execution;
 }
-async function run({ input, context, workerId, provider, selectFallback, control, verifier, personas, personaKindDefaults, recordRawActivity = true }: Options, signal: AbortSignal, execution: TaskExecution): Promise<void> {
+async function run({ input, context, workerId, provider, computeClass, selectFallback, control, verifier, personas, personaKindDefaults, recordRawActivity = true, contextPolicy, codeMap }: Options, signal: AbortSignal, execution: TaskExecution): Promise<void> {
   const taskId = context.task.id;
   const workerInput = { ...input, taskId, workerId };
   const persona = resolvePersona({ requested: context.task.persona, kind: context.task.kind, registry: personas ?? {}, defaults: personaKindDefaults });
@@ -71,8 +85,19 @@ async function run({ input, context, workerId, provider, selectFallback, control
   };
   try {
     if (signal.aborted) { await control.recordWorkerStopped(workerInput); return; }
+    // G1 context lifecycle: fold advisory history (passed-check bodies, retry
+    // summary) once per dispatch when over budget. Preserved sets — completion
+    // contract, guidance, failure evidence, dependency/decision results — pass
+    // through verbatim. Opt out with `advisoryByteBudget: 0`. G2: the optional
+    // code map rides the same start context as one bounded advisory entry.
+    const summarized = summarizeTaskContext(context, contextPolicy ?? DEFAULT_CONTEXT_LIFECYCLE_POLICY);
+    if (summarized.fold) {
+      const fold = summarized.fold;
+      await control.recordActivity({ ...input, taskId, activity: `[context] folded ${fold.summarizedEntryCount} advisory entries (${fold.advisoryBytesBefore} → ${fold.advisoryBytesAfter} bytes); preserved ${fold.preservedEntryCount} entries${fold.truncated ? "; summary truncated" : ""}` });
+    }
+    const startContext = withCodeMapEntry(summarized.context, codeMap?.({ task: context.task, workingDirectory: context.workingDirectory }));
     const sourceBeforeWorker = await captureSourceState(context.workingDirectory, [input.databasePath]);
-    const startInput: StartWorkerInput = { runId: input.runId, taskId, title: context.task.title, kind: context.task.kind, computeClass: context.task.preferredCompute, attempt: context.attempt, requirements: context.task.requirements, workingDirectory: context.workingDirectory, context, ...(persona.instructions ? { personaInstructions: persona.instructions } : {}) };
+    const startInput: StartWorkerInput = { runId: input.runId, taskId, title: context.task.title, kind: context.task.kind, computeClass: computeClass ?? context.task.preferredCompute, attempt: context.attempt, requirements: context.task.requirements, workingDirectory: context.workingDirectory, context: startContext, ...(persona.instructions ? { personaInstructions: persona.instructions } : {}) };
     const excludedProviderIds = new Set<string>();
     let result: WorkerResult;
     // One durable reservation spans these sequential handles. Never release
@@ -124,7 +149,7 @@ async function run({ input, context, workerId, provider, selectFallback, control
       unsubscribe = undefined;
       excludedProviderIds.add(provider.id);
       await control.recordActivity({ ...input, taskId, activity: redact(`Provider failure (${provider.id}, ${failureKind}); released worker and selecting an untried provider. ${result.summary}`, 500) });
-      let next: AgentProvider | undefined;
+      let next: RouteSelection | undefined;
       try { next = await selectFallback(excludedProviderIds); }
       catch (error) {
         result = { ...result, summary: `${result.summary}\nProvider fallback exhausted or unavailable: ${redact(error)}` };
@@ -134,7 +159,8 @@ async function run({ input, context, workerId, provider, selectFallback, control
         await control.recordWorkerStopped(workerInput);
         return;
       }
-      provider = next;
+      provider = next.provider;
+      startInput.computeClass = next.computeClass;
       handleId = undefined;
       execution.steer = undefined;
       releaseAttempted = false;
@@ -155,31 +181,49 @@ async function run({ input, context, workerId, provider, selectFallback, control
     }
     await control.recordWorkerResult({ ...workerInput, success: result.success, summary: withPersonaWarning(redact(result.summary)) });
     workerFinished = true;
-    await release();
-    if (!result.success) return;
-    const sourceBeforeChecks = await captureSourceState(context.workingDirectory, [input.databasePath]);
-    const observedChangedPaths = sourceBeforeWorker && sourceBeforeChecks
-      ? changedSourcePaths(sourceBeforeWorker, sourceBeforeChecks) : [];
-    const evidence = await verifier.verify(context.task.completionChecks, context.workingDirectory, signal);
-    if (signal.aborted) { await control.stopVerification({ ...input, taskId }); return; }
-    const sourceAfterChecks = await captureSourceState(context.workingDirectory, [input.databasePath], [...context.task.readScope, ...context.task.writeScope]);
-    const source = sourceBeforeChecks && sourceAfterChecks ? {
-      beforeFingerprint: scopedFingerprint(sourceBeforeChecks, [...context.task.readScope, ...context.task.writeScope]),
-      afterFingerprint: scopedFingerprint(sourceAfterChecks, [...context.task.readScope, ...context.task.writeScope]),
-      observedChangedPaths,
-      observedOutsideWriteScope: [],
-    } : undefined;
-    const receipts = await Promise.all(evidence.map(async check => {
-      const artifact = await storeCheckOutput(input.databasePath, input.runId, taskId, check.id, check.stdout, check.stderr);
-      return { id: check.id, command: check.command, args: check.args, workingDirectory: check.workingDirectory,
-        exitCode: check.exitCode, stdout: redact(check.stdout), stderr: redact(check.stderr), timedOut: check.timedOut,
-        durationMs: check.durationMs, ...(artifact ? { outputArtifact: artifact.path } : {}), ...(source ? { source } : {}) };
-    }));
-    await control.recordCheckReceipts({ ...input, taskId, checks: receipts });
-    const checks = evidence.map(({ id, passed }) => ({ id, passed }));
-    const passed = checks.every(check => check.passed);
-    const reason = evidence.filter(check => !check.passed).map(check => `${check.id}: exit ${check.exitCode}${check.timedOut ? " (timeout)" : ""}\n${check.stderr || check.stdout}`).join("\n");
-    await control.recordVerification({ ...input, taskId, checks, passed, reason: redact(reason) });
+    if (!result.success) { await release(); return; }
+    for (let focusedRepair = 0; focusedRepair <= 1; focusedRepair++) {
+      const sourceBeforeChecks = await captureSourceState(context.workingDirectory, [input.databasePath]);
+      const observedChangedPaths = sourceBeforeWorker && sourceBeforeChecks
+        ? changedSourcePaths(sourceBeforeWorker, sourceBeforeChecks) : [];
+      const evidence = await verifier.verify(context.task.completionChecks, context.workingDirectory, signal);
+      if (signal.aborted) { await control.stopVerification({ ...input, taskId }); return; }
+      const sourceAfterChecks = await captureSourceState(context.workingDirectory, [input.databasePath], [...context.task.readScope, ...context.task.writeScope]);
+      const source = sourceBeforeChecks && sourceAfterChecks ? {
+        beforeFingerprint: scopedFingerprint(sourceBeforeChecks, [...context.task.readScope, ...context.task.writeScope]),
+        afterFingerprint: scopedFingerprint(sourceAfterChecks, [...context.task.readScope, ...context.task.writeScope]),
+        observedChangedPaths,
+        observedOutsideWriteScope: [],
+      } : undefined;
+      const receipts = await Promise.all(evidence.map(async check => {
+        const artifact = await storeCheckOutput(input.databasePath, input.runId, taskId, check.id, check.stdout, check.stderr);
+        return { id: check.id, command: check.command, args: check.args, workingDirectory: check.workingDirectory,
+          exitCode: check.exitCode, stdout: redact(check.stdout), stderr: redact(check.stderr), timedOut: check.timedOut,
+          durationMs: check.durationMs, ...(artifact ? { outputArtifact: artifact.path } : {}), ...(source ? { source } : {}) };
+      }));
+      await control.recordCheckReceipts({ ...input, taskId, checks: receipts });
+      const checks = evidence.map(({ id, passed }) => ({ id, passed }));
+      const passed = checks.every(check => check.passed);
+      let reason = evidence.filter(check => !check.passed).map(check => `${check.id}: exit ${check.exitCode}${check.timedOut ? " (timeout)" : ""}\n${check.stderr || check.stdout}`).join("\n");
+      if (!passed && focusedRepair === 0 && provider.repair && handleId && !signal.aborted) {
+        try {
+          await control.recordActivity({ ...input, taskId, activity: "Focused checks failed; returning evidence to the same worker session once." });
+          const repaired = await untilAborted(provider.repair(handleId, `Fix the failed completion checks, then report the change. Loop will rerun them independently.\n${redact(reason, 4_000)}`), signal);
+          if (signal.aborted || !repaired) { await provider.cancel(handleId); await control.stopVerification({ ...input, taskId }); return; }
+          if (repaired.success) {
+            await control.recordTaskOutput({ ...input, taskId, summary: withPersonaWarning(redact(repaired.summary)) });
+            await control.recordActivity({ ...input, taskId, activity: `Same-session repair returned: ${redact(repaired.summary, 300)}` });
+            continue;
+          }
+          reason += `\nSame-session repair failed: ${redact(repaired.summary)}`;
+        } catch (error) {
+          reason += `\nSame-session repair unavailable: ${redact(error)}`;
+        }
+      }
+      await release();
+      await control.recordVerification({ ...input, taskId, checks, passed, reason: redact(reason) });
+      break;
+    }
   } catch (error) {
     if (error instanceof CleanupFailed) return;
     if (error instanceof StartupUncertain) {

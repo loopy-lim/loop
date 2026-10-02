@@ -1,5 +1,6 @@
 import { HerdrWorkerRuntime } from "@loop/herdr";
 import type { RecordActivityInput } from "@loop/protocol";
+import { TurnLoopProvider, type ModelClient, type ToolDeclaration, type ToolRunner } from "@loop/turnloop";
 import {
   AntigravityProvider,
   CodexProvider,
@@ -23,6 +24,25 @@ export interface ActivityRecorder {
   recordActivity(input: RecordActivityInput): Promise<unknown>;
 }
 
+/**
+ * Model + tuning boundary for one turnloop-lane worker profile (M-TL3). The
+ * embedding application (gateway/app path) constructs this in adapter
+ * construction: model ids, endpoints, and credentials never leave this
+ * closure and are never logged or persisted here (decision TL1 금지 목록).
+ */
+export interface TurnLoopWorkerBinding {
+  readonly modelClient: ModelClient;
+  readonly toolRunner?: ToolRunner;
+  readonly tools?: readonly ToolDeclaration[];
+  /**
+   * Two-item pattern capability (decision 공급자 다양성): false → final-only
+   * recording for this profile. Adapter-construction setting only.
+   */
+  readonly inProgressToolResults?: boolean;
+  readonly laneCap?: number;
+  readonly maxTurns?: number;
+}
+
 export interface ProviderCompositionOptions {
   config: LoopConfig;
   projectRoot: string;
@@ -38,6 +58,16 @@ export interface ProviderCompositionOptions {
   relayCommand?: (worker: { runId: string; taskId: string; paneId: string; tabId: string }) =>
     | { command: string; args: string[] }
     | undefined;
+  /**
+   * M-TL3 turnloop-lane support: supplies the model boundary for worker
+   * profiles that select `lane = "turnloop"` in models.toml. Omitting the
+   * hook (or returning undefined for a profile) refuses that profile
+   * deterministically — the pi lane is the default everywhere and the CLI
+   * ships without a turnloop model client, so CLI configurations selecting
+   * the turnloop lane fail fast with a stable error instead of silently
+   * changing worker behavior.
+   */
+  turnloopWorker?: (model: ModelProfile) => TurnLoopWorkerBinding | undefined;
 }
 
 /**
@@ -94,6 +124,13 @@ export function buildProviderRegistry(options: ProviderCompositionOptions): Prov
     const models = options.config.models.filter((model) => model.provider === providerId);
     for (const model of models) {
       const id = `${providerId}:${model.id}`;
+      // M-TL3 lane selection: the profile's lane swaps only the execution
+      // adapter — provider identity, routing metadata, and quota grouping
+      // stay exactly as configured for the pi lane.
+      if (model.lane === "turnloop") {
+        providers.push(turnloopProfileWorker(id, model, options));
+        continue;
+      }
       if (providerId === "codex") {
         providers.push(providerConfig.mode === "interactive"
           ? visibleAgent(id, "codex", model, providerConfig, options.projectRoot, herdr)
@@ -164,12 +201,16 @@ export function buildProviderRegistry(options: ProviderCompositionOptions): Prov
     {
       costWeight: model.costWeight,
       latency: model.latency,
+      capabilities: model.capabilities,
       quotaGroup: model.provider === "pi" && model.id.includes("/")
         ? model.id.split("/")[0]
         : model.provider === "zai_cli" ? "zai" : model.provider,
     },
   ]));
-  return new ProviderRegistry(wrapForVisibility(providers, options, herdr), routing);
+  return new ProviderRegistry(wrapForVisibility(providers, options, herdr), routing, {
+    high: options.config.routing.highRiskFloor,
+    critical: options.config.routing.criticalRiskFloor,
+  });
 }
 
 /**
@@ -238,4 +279,34 @@ function visibleAgent(
 function required(value: string | undefined, field: string): string {
   if (!value) throw new Error(`provider configuration requires ${field}`);
   return value;
+}
+
+/**
+ * M-TL3 deterministic capability gate: a profile that selects the turnloop
+ * lane without a configured turnloop model client is refused here, at
+ * composition time, with a stable error — never with a runtime surprise
+ * mid-run. Same input, same refusal, every time.
+ */
+function turnloopProfileWorker(
+  id: string,
+  model: ModelProfile,
+  options: ProviderCompositionOptions,
+): AgentProvider {
+  const binding = options.turnloopWorker?.(model);
+  if (!binding) {
+    throw new Error(
+      `config.turnloop_lane_unavailable: worker profile ${id} selects the turnloop lane but no turnloop model client is available; remove lane = "turnloop" from models.toml or supply a turnloopWorker binding (pi lane is the default)`,
+    );
+  }
+  return new TurnLoopProvider({
+    id,
+    modelClient: binding.modelClient,
+    toolRunner: binding.toolRunner,
+    tools: binding.tools,
+    computeClasses: [model.computeClass],
+    modelId: model.id,
+    inProgressToolResults: binding.inProgressToolResults,
+    laneCap: binding.laneCap,
+    maxTurns: binding.maxTurns,
+  });
 }

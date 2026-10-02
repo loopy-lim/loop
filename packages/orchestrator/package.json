@@ -12,6 +12,7 @@
     "@loop/herdr": "workspace:*",
     "@loop/protocol": "workspace:*",
     "@loop/providers": "workspace:*",
+    "@loop/turnloop": "workspace:*",
     "smol-toml": "1.8.0"
   }
 }

@@ -33,11 +33,12 @@ test("loads the repository configuration into typed runtime data", () => {
     workerVisibility: "off",
     workerActivityLines: 5,
     workerPaneLimit: 4,
+    codeMapInjection: "off",
   });
   expect(config.lead).toEqual({
     command: "pi",
     provider: "openai-codex",
-    model: "gpt-6-sol",
+    model: "gpt-6.1-sol",
   });
   expect(config.providers.codex?.command).toBe("codex");
 
@@ -53,18 +54,24 @@ test("loads the repository configuration into typed runtime data", () => {
   expect(registry.get("openai-codex/gpt-6-luna").computeClass).toBe("typed_decision");
   expect(registry.get("openai-codex/gpt-6-luna:low").computeClass).toBe("fast");
   expect(registry.get("openai-codex/gpt-6-luna:high").computeClass).toBe("balanced");
-  expect(registry.get("openai-codex/gpt-6-sol:low").computeClass).toBe("strong");
-  expect(registry.get("openai-codex/gpt-6-sol").computeClass).toBe("frontier");
-  // Every class keeps a zai primary followed by the unified openai-codex
-  // fallback; registry orders by cost_weight + latency, so higher openai
-  // weights place them after the zai primaries (antigravity gemini profiles
-  // are no longer fallback candidates).
+  expect(registry.get("openai-codex/gpt-6.1-sol:minimal").computeClass).toBe("fast");
+  expect(registry.get("openai-codex/gpt-6.1-sol:low").computeClass).toBe("balanced");
+  expect(registry.get("openai-codex/gpt-6.1-sol:high").computeClass).toBe("strong");
+  expect(registry.get("openai-codex/gpt-6.1-sol").computeClass).toBe("frontier");
+  // 2026-09-30 final routing decision: balanced/strong primaries are the
+  // openai-codex gpt-6.1-sol lane (fast thinking profile :low/:high) with the
+  // zai volume lane demoted to fallback; fast/tiny keep their zai primaries
+  // (fast's gpt entry is the low-effort "fast option" sol:minimal fallback).
+  // routing.default_compute_class stays "balanced". Registry orders by
+  // cost_weight + latency, so demoted lanes carry higher sums than the class
+  // primaries (antigravity gemini profiles are no longer fallback candidates).
   expect(registry.forComputeClass("tiny").map((model) => model.id)).toEqual([
     "zai/glm-5.3-flashx:off",
     "openai-codex/gpt-6-luna:off",
   ]);
   expect(registry.forComputeClass("fast").map((model) => model.id)).toEqual([
     "zai/glm-5.3-flashx",
+    "openai-codex/gpt-6.1-sol:minimal",
     "openai-codex/gpt-6-luna:low",
   ]);
   expect(registry.forComputeClass("typed_decision").map((model) => model.id)).toEqual([
@@ -72,16 +79,17 @@ test("loads the repository configuration into typed runtime data", () => {
     "openai-codex/gpt-6-luna",
   ]);
   expect(registry.forComputeClass("balanced").map((model) => model.id)).toEqual([
+    "openai-codex/gpt-6.1-sol:low",
     "zai/glm-5.3-flashx:high",
     "zai/glm-5.3-flash",
     "openai-codex/gpt-6-luna:high",
   ]);
   expect(registry.forComputeClass("strong").map((model) => model.id)).toEqual([
+    "openai-codex/gpt-6.1-sol:high",
     "zai/glm-5.3-flash:high",
-    "openai-codex/gpt-6-sol:low",
   ]);
   expect(registry.forComputeClass("frontier").map((model) => model.id)).toEqual([
-    "openai-codex/gpt-6-sol",
+    "openai-codex/gpt-6.1-sol",
   ]);
 });
 
@@ -161,13 +169,15 @@ test("preserves custom output limits", () => {
     workerVisibility: "panes",
     workerActivityLines: 3,
     workerPaneLimit: 2,
+    codeMapInjection: "off",
   });
 });
 
-test("worker visibility defaults to off and clamps the activity budget to the stored cap", () => {
+test("worker visibility defaults to watch and clamps the activity budget to the stored cap", () => {
   const directory = configurationDirectory(policy(2, 1));
   const output = loadLoopConfig({ configDirectory: directory }).output;
-  expect(output.workerVisibility).toBe("off");
+  // G18 기본값 개선: watch가 기본 (구성이 명시적으로 off를 지정하면 존중됨).
+  expect(output.workerVisibility).toBe("watch");
   expect(output.workerActivityLines).toBe(5);
   expect(output.workerPaneLimit).toBe(4);
 

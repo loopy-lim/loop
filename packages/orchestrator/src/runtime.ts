@@ -1,12 +1,15 @@
 import type { HerdrWorkerRuntime } from "@loop/herdr";
-import type { SnapshotOutput, TaskSpecInput } from "@loop/protocol";
+import type { GoalCriterionInput, SnapshotOutput, TaskSpecInput } from "@loop/protocol";
 import type { ProviderRegistry } from "@loop/providers";
 
 import type { CompletionVerifier } from "./completion";
 import type { WorkerVisibility } from "./config";
 import type { OrchestrationControl } from "./control";
+import type { ContextLifecyclePolicy } from "./context-lifecycle";
 import type { GuidanceMailboxOptions } from "./mailbox";
 import type { PersonaKindDefaults, PersonaRegistry } from "./persona";
+import type { CodeMapProvider } from "./code-map";
+import type { UsageLedger } from "./usage";
 import { Orchestrator, type CleanupRunReport, type CleanupRunRequest, type RunSummary } from "./coordinator";
 
 export type ObservedWorkerState = "running" | "completed" | "lost" | "unknown";
@@ -28,12 +31,21 @@ export interface LoopRuntimeOptions {
   workerVisibility?: WorkerVisibility;
   /** Async human-input mailbox (docs/research/async-human-input.md §6); enabled by default. */
   guidanceMailbox?: GuidanceMailboxOptions;
+  /** G1 context-lifecycle thresholds; omitted = compile-time defaults. */
+  contextPolicy?: ContextLifecyclePolicy;
+  /** G2 explicit code map provider; wins over the built-in scope map. */
+  codeMap?: CodeMapProvider;
+  /** G2 built-in scope-derived code map switch (explicit provider wins). */
+  codeMapInjection?: "off" | "scopes";
+  /** G17 usage recorder for reported usage observations. */
+  usageLedger?: UsageLedger;
 }
 
 export interface StartRunInput {
   runId: string;
   intent?: string;
   tasks: TaskSpecInput[];
+  criteria?: GoalCriterionInput[];
   workingDirectory: string;
   signal?: AbortSignal;
 }
@@ -57,6 +69,10 @@ export class LoopRuntime {
       personaKindDefaults: options.personaKindDefaults,
       workerVisibility: options.workerVisibility,
       guidanceMailbox: options.guidanceMailbox,
+      contextPolicy: options.contextPolicy,
+      codeMap: options.codeMap,
+      codeMapInjection: options.codeMapInjection,
+      usageLedger: options.usageLedger,
     });
   }
 

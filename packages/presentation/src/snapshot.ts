@@ -81,8 +81,22 @@ function renderGraph(snapshot: SnapshotOutput, limits: OutputLimits): string {
 
 function renderWorkers(snapshot: SnapshotOutput, limits: OutputLimits): string {
   if (snapshot.activeWorkers.length === 0) return emptyState.noActiveWorkers;
+  // G18 요약 고도화: worker 식별자에 실행 상태와 최근 활동 한 줄을 붙여
+  // 다중 worker 상태 파악이 `loop watch` 없이도 가능하다.
+  const taskById = new Map(snapshot.tasks.map((task) => [task.id, task]));
   return compactLines(
-    snapshot.activeWorkers.map((worker) => `${worker.id} ${separator.list} ${worker.taskId}`),
+    snapshot.activeWorkers.map((worker) => {
+      const task = taskById.get(worker.taskId);
+      const latestActivity = task?.activities.at(-1);
+      return singleLine(
+        [
+          `${worker.id} ${separator.list} ${worker.taskId}`,
+          ...(task ? [task.state] : []),
+          ...(latestActivity ? [latestActivity] : []),
+        ].join(` ${separator.list} `),
+        limits.lineTextLimit,
+      );
+    }),
     {
       lineLimit: limits.listLineLimit,
       lineTextLimit: limits.lineTextLimit,

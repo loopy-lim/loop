@@ -5,6 +5,8 @@ import { join } from "node:path";
 import * as protocol from "@loop/protocol";
 import type { ComputeClass, TaskSpecInput } from "@loop/protocol";
 import { ProviderRegistry, type AgentProvider, type ProviderCapabilities, type StartWorkerInput, type WorkerResult } from "@loop/providers";
+import { FakeModelClient, TurnLoopProvider } from "@loop/turnloop";
+import type { ModelTurnRequest } from "@loop/turnloop";
 import { Orchestrator } from "../src/coordinator";
 import { CompletionVerifier } from "../src/completion";
 import type { OrchestrationControl } from "../src/control";
@@ -273,4 +275,83 @@ test("a delivered-then-recorded guidance does not repeat in a retry attempt's st
   // Attempt 1 saw the guidance live; the watermark keeps attempt 2 clean.
   expect(provider.started[0]?.context?.guidance ?? []).toEqual([]);
   expect(provider.started[1]?.context?.guidance ?? []).toEqual([]);
+});
+
+test("end-to-end: mid-run guidance reaches a turn-loop worker at the very next fake-model turn and is recorded", async () => {
+  const { directory, input } = workspace("turnloop-e2e");
+  let parked: string | undefined;
+  let releaseTurn1Tool!: () => void;
+  const turn1Tool = new Promise<void>(resolve => { releaseTurn1Tool = resolve; });
+  let releaseTurn2Tool!: () => void;
+  const turn2Tool = new Promise<void>(resolve => { releaseTurn2Tool = resolve; });
+  const requests: ModelTurnRequest["messages"][] = [];
+  const modelClient = new FakeModelClient([
+    { kind: "tool_calls", calls: [{ id: "gate-1", name: "park_until_steered", argumentsJson: "{}" }] },
+    (request) => {
+      requests.push(request.messages);
+      return { kind: "tool_calls", calls: [{ id: "gate-2", name: "park_until_steered", argumentsJson: "{}" }] };
+    },
+    (request) => {
+      requests.push(request.messages);
+      return { kind: "message", text: "steered completion" };
+    },
+  ]);
+  const provider = new TurnLoopProvider({
+    modelClient,
+    toolRunner: {
+      async run(call) {
+        parked = call.id;
+        await (call.id === "gate-1" ? turn1Tool : turn2Tool);
+        parked = undefined;
+        return { output: "unblocked", isError: false };
+      },
+    },
+    tools: [{ name: "park_until_steered", description: "parks until the test releases it" }],
+    computeClasses: ["fast"],
+  });
+  // A 10 s coalescing window on purpose: a turn-boundary worker's inbox is
+  // the coalescer (the provider declares it), so neither steer may wait out
+  // the window — the operator acceptance core is reflection at the very next
+  // turn boundary, with no tool-completion wait and no re-claim.
+  const orchestrator = new Orchestrator({ control: protocol, providers: new ProviderRegistry([provider]), maxWorkers: 1, completionVerifier: verifier, guidanceMailbox: { coalescingWindowMs: 10_000, pollIntervalMs: 5 } });
+  const pending = orchestrator.run({ ...input, tasks: [fixture("a")], workingDirectory: directory });
+  const steerTexts = (messages: ModelTurnRequest["messages"], needle: string) =>
+    messages.filter(entry => entry.role === "user" && entry.text.includes(needle));
+
+  await until(() => parked === "gate-1"); // turn 1 served; its tool parks the loop mid-run
+  await addGuidance(input, "a", "steer: follow the recorded evidence");
+  const firstSequence = await guidanceSequenceOf(input, "steer: follow the recorded evidence");
+  // The mailbox hands off to the running worker and records the delivery
+  // while the tool is still in flight — no tool-completion wait, no re-claim.
+  await until(async () => {
+    const delivered = await readEvents(input, "guidance_delivered");
+    return delivered.some(event => event.data.task_id === "a" && Number(event.data.through_sequence) === firstSequence);
+  });
+  releaseTurn1Tool(); // the tool completes; the next turn boundary must carry the steer
+
+  await until(() => requests.length === 1 && parked === "gate-2"); // turn 2 served and parked again
+  // Turn 2 carried the first steer exactly once and not the second one.
+  expect(steerTexts(requests[0], "steer: follow the recorded evidence")).toHaveLength(1);
+  expect(steerTexts(requests[0], "steer: double-check the evidence")).toHaveLength(0);
+
+  // A second steer inside the same 10 s window: the boundary inbox takes it
+  // on the next tick — waiting out the window would need 10 s here.
+  await addGuidance(input, "a", "steer: double-check the evidence");
+  const secondSequence = await guidanceSequenceOf(input, "steer: double-check the evidence");
+  await until(async () => {
+    const delivered = await readEvents(input, "guidance_delivered");
+    return delivered.some(event => Number(event.data.through_sequence) === secondSequence);
+  }, 2000);
+  releaseTurn2Tool();
+
+  const summary = await pending;
+  expect(summary.status).toBe("completed");
+  expect(requests).toHaveLength(2);
+  expect(steerTexts(requests[1], "steer: follow the recorded evidence")).toHaveLength(1); // still exactly once
+  expect(steerTexts(requests[1], "steer: double-check the evidence")).toHaveLength(1); // first boundary after its arrival
+  // Every delivery is on the durable log, watermarks ascending.
+  const delivered = await readEvents(input, "guidance_delivered");
+  expect(delivered).toHaveLength(2);
+  expect(delivered.map(event => Number(event.data.through_sequence))).toEqual([firstSequence, secondSequence]);
+  expect(delivered.every(event => String(event.data.worker_id).includes(":a:"))).toBe(true);
 });

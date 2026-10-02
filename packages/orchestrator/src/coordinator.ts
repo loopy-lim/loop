@@ -2,7 +2,7 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { HerdrWorkerRuntime } from "@loop/herdr";
-import type { TaskSpecInput } from "@loop/protocol";
+import type { GoalCriterionInput, TaskSpecInput } from "@loop/protocol";
 import type { AgentProvider, ProviderRegistry } from "@loop/providers";
 import { CompletionVerifier, NodeCompletionRunner } from "./completion";
 import { cleanupRun, type CleanupRunReport, type CleanupRunRequest } from "./cleanup";
@@ -12,6 +12,9 @@ import type { PersonaKindDefaults, PersonaRegistry } from "./persona";
 import { GuidanceMailbox, resolveMailboxOptions, steerCoalescingOf, type GuidanceMailboxOptions } from "./mailbox";
 import { executeTask, type TaskExecution } from "./task-execution";
 import { redact } from "./redact";
+import { buildScopeCodeMap, type CodeMapProvider } from "./code-map";
+import type { ContextLifecyclePolicy } from "./context-lifecycle";
+import type { UsageLedger, UsageSummary } from "./usage";
 
 export type { CleanupRunReport, CleanupRunRequest } from "./cleanup";
 interface OrchestratorOptions {
@@ -26,11 +29,30 @@ interface OrchestratorOptions {
   workerVisibility?: WorkerVisibility;
   /** Async human-input mailbox (docs/research/async-human-input.md §6); enabled by default. */
   guidanceMailbox?: GuidanceMailboxOptions;
+  /**
+   * G1 context-lifecycle thresholds; omitted = compile-time defaults.
+   * `advisoryByteBudget: 0` disables automatic summarization.
+   */
+  contextPolicy?: ContextLifecyclePolicy;
+  /**
+   * G2 code map provider; omitted = the built-in scope-derived map when
+   * `codeMapInjection` is "scopes", nothing otherwise. An explicit provider
+   * always wins (embedding apps can reuse the Lead `loop_code_map` tool).
+   */
+  codeMap?: CodeMapProvider;
+  /** Enables the built-in scope-derived code map when no explicit provider is supplied. */
+  codeMapInjection?: "off" | "scopes";
+  /**
+   * G17 usage recorder; the collecting surface (adapter) pushes reported
+   * usage, the ledger aggregates basis-separated totals for the run summary.
+   */
+  usageLedger?: UsageLedger;
 }
 export interface RunRequest {
   databasePath: string;
   runId: string;
   tasks: TaskSpecInput[];
+  criteria?: GoalCriterionInput[];
   intent?: string;
   workingDirectory?: string;
   signal?: AbortSignal;
@@ -43,6 +65,11 @@ export interface RunSummary {
   providersByTask: Record<string, string[]>;
   startedAt: Record<string, number>;
   finishedAt: Record<string, number>;
+  /**
+   * G17: present only when usage was actually reported during the run; a run
+   * without records carries no usage field (never zero-filled guesses).
+   */
+  usage?: UsageSummary;
 }
 
 export class Orchestrator {
@@ -56,6 +83,9 @@ export class Orchestrator {
   readonly #personaKindDefaults?: PersonaKindDefaults;
   readonly #workerVisibility: WorkerVisibility;
   readonly #guidanceMailbox: Required<GuidanceMailboxOptions>;
+  readonly #contextPolicy?: ContextLifecyclePolicy;
+  readonly #codeMap?: CodeMapProvider;
+  readonly #usageLedger?: UsageLedger;
   constructor(options: OrchestratorOptions) {
     this.#control = options.control;
     this.#providers = options.providers;
@@ -67,13 +97,25 @@ export class Orchestrator {
     this.#personaKindDefaults = options.personaKindDefaults;
     this.#workerVisibility = options.workerVisibility ?? "off";
     this.#guidanceMailbox = resolveMailboxOptions(options.guidanceMailbox);
+    this.#contextPolicy = options.contextPolicy;
+    this.#codeMap = options.codeMap ?? (options.codeMapInjection === "scopes" ? buildScopeCodeMap : undefined);
+    this.#usageLedger = options.usageLedger;
   }
   cleanupRun(request: CleanupRunRequest): Promise<CleanupRunReport> {
     return cleanupRun(this.#control, { ...request, herdr: request.herdr ?? this.#herdr });
   }
+  /** G17: basis-separated usage totals for a run; undefined when never reported. */
+  usage(runId: string): UsageSummary | undefined {
+    const ledger = this.#usageLedger;
+    if (!ledger) return undefined;
+    const summary = ledger.summary(runId);
+    return summary.recordCount === 0 ? undefined : summary;
+  }
   async prepare(request: RunRequest): Promise<void> {
     const input = runInput(request);
-    await this.#control.prepareRun({ ...input, intent: redact(request.intent ?? ""), workingDirectory: realpathSync(resolve(request.workingDirectory ?? process.cwd())), tasks: request.tasks });
+    const prepared = { ...input, intent: redact(request.intent ?? ""), workingDirectory: realpathSync(resolve(request.workingDirectory ?? process.cwd())), tasks: request.tasks };
+    if (request.criteria) await this.#control.prepareGoalRun({ ...prepared, criteria: request.criteria });
+    else await this.#control.prepareRun(prepared);
   }
   async run(request: RunRequest): Promise<RunSummary> {
     await this.prepare(request);
@@ -84,6 +126,12 @@ export class Orchestrator {
     return this.execute(request);
   }
   async execute(request: ExistingRunRequest): Promise<RunSummary> {
+    const summary = await this.#execute(request);
+    // G17: attach usage totals only when something was actually reported.
+    const usage = this.usage(request.runId);
+    return usage ? { ...summary, usage } : summary;
+  }
+  async #execute(request: ExistingRunRequest): Promise<RunSummary> {
     const input = runInput(request);
     const plan = await this.#control.getRunPlan(input);
     const summary: RunSummary = { status: "running", tasks: plan.tasks.length, escalations: [], providersByTask: {}, startedAt: {}, finishedAt: {} };
@@ -115,6 +163,8 @@ export class Orchestrator {
       personas: this.#personas,
       personaKindDefaults: this.#personaKindDefaults,
       recordRawActivity: this.#workerVisibility === "off",
+      ...(this.#contextPolicy ? { contextPolicy: this.#contextPolicy } : {}),
+      ...(this.#codeMap ? { codeMap: this.#codeMap } : {}),
     };
     const active = new Map<string, TaskExecution>();
     let leaseLost = false;
@@ -196,18 +246,24 @@ export class Orchestrator {
           const claimGuidance = await mailbox?.claimContext(taskId, context.guidance);
           const startContext = claimGuidance ? { ...context, guidance: claimGuidance.guidance } : context;
           let provider: AgentProvider | undefined;
+          let selectedComputeClass: TaskSpecInput["preferredCompute"] | undefined;
+          let routeReason = "";
           try {
-            const selection = this.#providers.select(context.task.preferredCompute);
-            provider = await selectWhileActive(selection, async () => {
+            const selection = this.#providers.selectForTask(context.task);
+            const selected = await selectWhileActive(selection, async () => {
               if (request.signal?.aborted) await this.#control.cancelRun(input);
               return !leaseLost && (await this.#control.getSnapshot(input)).state === "active";
             });
-            if (!provider) break;
+            if (!selected) break;
+            provider = selected.provider;
+            selectedComputeClass = selected.computeClass;
+            routeReason = selected.reason;
           }
           catch (error) {
             await this.#control.requestAttention({ ...executionInput, attentionId: `provider-${request.runId}-${taskId}-${context.attempt}`, kind: "failure", taskId, summary: redact(error) });
             break;
           }
+          if (!provider) break;
           const history = summary.providersByTask[taskId] ??= [];
           const previousProvider = history.at(-1);
           if (previousProvider && previousProvider !== provider.id) summary.escalations.push({ taskId, from: previousProvider, to: provider.id });
@@ -219,19 +275,21 @@ export class Orchestrator {
             if ((await this.#control.getSnapshot(input)).state !== "active") break;
             throw error;
           }
+          await this.#control.recordActivity({ ...executionInput, taskId, activity: `Route: ${routeReason}` });
           summary.startedAt[taskId] = Date.now();
           const execution = executeTask({
-            ...taskExecutionOptions, context: startContext, workerId, provider,
+            ...taskExecutionOptions, context: startContext, workerId, provider, computeClass: selectedComputeClass!,
             selectFallback: async excluded => {
-              const next = await selectWhileActive(this.#providers.select(context.task.preferredCompute, excluded), async () => {
+              const next = await selectWhileActive(this.#providers.selectForTask(context.task, excluded), async () => {
                 if (request.signal?.aborted) await this.#control.cancelRun(input);
                 // Pause drains this already-reserved task; cancellation does not.
                 return !leaseLost && ["active", "pausing"].includes((await this.#control.getSnapshot(input)).state);
               });
               if (next) {
                 const previous = history.at(-1)!;
-                summary.escalations.push({ taskId, from: previous, to: next.id });
-                history.push(next.id);
+                summary.escalations.push({ taskId, from: previous, to: next.provider.id });
+                history.push(next.provider.id);
+                await this.#control.recordActivity({ ...executionInput, taskId, activity: `Fallback route: ${next.reason}` });
               }
               return next;
             },
@@ -260,7 +318,11 @@ export class Orchestrator {
         if (active.size === 0) {
           snapshot = await this.#control.getSnapshot(input);
           if (snapshot.state !== "active") continue;
-          await this.#control.requestAttention({ ...executionInput, attentionId: `blocked-${request.runId}-${snapshot.lastSequence}`, kind: "failure", taskId: null, summary: "No runnable task remains. Inspect dependencies and reconcile interrupted verification before retrying." });
+          const pendingCriteria = snapshot.goalCriteria.filter(item => item.state !== "verified");
+          const blockedSummary = pendingCriteria.length > 0 && snapshot.tasks.every(task => task.state === "done")
+            ? `Tasks passed, but goal criteria remain unverified: ${pendingCriteria.map(item => item.id).join(", ")}. Inspect check receipts and source-state evidence before closing the goal.`
+            : "No runnable task remains. Inspect dependencies and reconcile interrupted verification before retrying.";
+          await this.#control.requestAttention({ ...executionInput, attentionId: `blocked-${request.runId}-${snapshot.lastSequence}`, kind: "failure", taskId: null, summary: blockedSummary });
           continue;
         }
         // Poll the durable control channel even when no worker has finished.
@@ -286,7 +348,7 @@ export class Orchestrator {
 function runInput(request: ExistingRunRequest) { return { databasePath: request.databasePath, runId: request.runId }; }
 function delay(milliseconds: number) { return new Promise<void>(resolve => setTimeout(resolve, milliseconds)); }
 
-async function selectWhileActive(selection: Promise<AgentProvider>, stillActive: () => Promise<boolean>): Promise<AgentProvider | undefined> {
+async function selectWhileActive<T>(selection: Promise<T>, stillActive: () => Promise<boolean>): Promise<T | undefined> {
   const pending = selection.then(provider => ({ provider }), error => ({ error }));
   const deadline = Date.now() + 30000;
   while (await stillActive()) {

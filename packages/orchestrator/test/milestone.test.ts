@@ -2,6 +2,7 @@ import { beforeAll, expect, test } from "bun:test";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 
 import * as protocol from "@loop/protocol";
 import type { TaskSpecInput } from "@loop/protocol";
@@ -63,14 +64,24 @@ test("composition preserves model ranking and groups shared upstream quota witho
   await expect(registry.select("fast", new Set(["zai:z-cheap"]))).rejects.toThrow();
 });
 
-test("configured volume classes have non-ZAI fallback without widening compute constraints", async () => {
+test("volume classes keep their primary lane and fall back across lanes without widening compute constraints", async () => {
   const config = loadLoopConfig({ configDirectory: join(import.meta.dir, "../../../config") });
   const models = config.models.filter(model => model.provider !== "local");
   const registry = new ProviderRegistry(models.map(model => new FakeProvider(`${model.provider}:${model.id}`, [model.computeClass])), Object.fromEntries(models.map(model => [`${model.provider}:${model.id}`, { costWeight: model.costWeight, latency: model.latency }])));
   const zaiIds = new Set(models.filter(model => model.id.includes("glm-")).map(model => `${model.provider}:${model.id}`));
-  for (const compute of ["tiny", "fast", "balanced"] as const) {
+  const codexIds = new Set(models.filter(model => model.id.includes("gpt-")).map(model => `${model.provider}:${model.id}`));
+  // 2026-09-30 gpt-primary promotion: tiny and fast keep the zai primary; the
+  // fast gpt fallback is the low-effort sol:minimal "fast option". balanced
+  // and strong select the openai-codex primary and fall back into the zai
+  // volume lane.
+  for (const compute of ["tiny", "fast"] as const) {
     expect(zaiIds.has((await registry.select(compute)).id)).toBe(true);
     expect(zaiIds.has((await registry.select(compute, zaiIds)).id)).toBe(false);
+  }
+  for (const compute of ["balanced", "strong"] as const) {
+    expect(codexIds.has((await registry.select(compute)).id)).toBe(true);
+    expect(codexIds.has((await registry.select(compute, codexIds)).id)).toBe(false);
+    expect(zaiIds.has((await registry.select(compute, codexIds)).id)).toBe(true);
   }
 });
 
@@ -118,7 +129,7 @@ test("transient worker failure retries within budget and then completes", async 
     databasePath: join(directory, "loop.db"),
     runId: "milestone",
   });
-  expect(snapshot.tasks.find(item => item.id === "impl-b")).toMatchObject({ state: "done", attempt: 1 });
+  expect(snapshot.tasks.find(item => item.id === "impl-b")).toMatchObject({ state: "done", attempt: 0 });
 });
 
 test("cancellation stops active providers and persists a cancelled run", async () => {
@@ -175,6 +186,56 @@ test("missing provider capability becomes human attention before workers start",
     tasks: [task("research", "research")],
   });
   expect(result.status).toBe("attention");
+});
+
+test("failed focused check is repaired once in the same worker session", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "loop-repair-"));
+  const readyFile = join(directory, "ready.txt");
+  let starts = 0;
+  const repairHandles: string[] = [];
+  class RepairProvider extends FakeProvider {
+    override async start(input: Parameters<FakeProvider["start"]>[0]) {
+      starts++;
+      return super.start(input);
+    }
+    async repair(workerId: string, feedback: string) {
+      repairHandles.push(workerId);
+      expect(feedback).toContain("focused");
+      await writeFile(readyFile, "ready");
+      return { success: true, summary: "fixed in the same session" };
+    }
+  }
+  const provider = new RepairProvider("repair", ["fast"]);
+  const spec = task("impl", "implementation", [], ["ready.txt"]);
+  spec.completionChecks = [{ id: "focused", command: process.execPath,
+    args: ["--eval", "const fs=require('fs'); process.exit(fs.existsSync(process.argv[1]) ? 0 : 1)", readyFile],
+    workingDirectory: null, timeoutMs: 5_000 }];
+  const orchestrator = new Orchestrator({ control: protocol, providers: new ProviderRegistry([provider]), maxWorkers: 1 });
+  const runId = "same-session-repair";
+  const databasePath = join(directory, "loop.db");
+  const outcome = await orchestrator.run({ databasePath, runId, tasks: [spec], workingDirectory: directory });
+  expect(outcome.status).toBe("completed");
+  expect(starts).toBe(1);
+  expect(repairHandles).toHaveLength(1);
+  const snapshot = await protocol.getSnapshot({ databasePath, runId });
+  expect(snapshot.tasks[0]?.attempt).toBe(0);
+  expect(snapshot.tasks[0]?.resultSummary).toBe("fixed in the same session");
+});
+
+test("tracked run completes only after its declared criterion has a stable check receipt", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "loop-goal-"));
+  execFileSync("git", ["init", "-q", directory]);
+  const databasePath = join(directory, "loop.db");
+  const runId = "tracked-goal";
+  const spec = task("impl", "implementation", [], ["src/**"]);
+  spec.requirements = ["focused check passes"];
+  spec.routing = { risk: "low", required: { coding: 0, reasoning: 0, tools: 0, vision: 0, long_context: 0 } };
+  const orchestrator = new Orchestrator({ control: protocol, providers: new ProviderRegistry([new FakeProvider("fast", ["fast"])]), maxWorkers: 1 });
+  const result = await orchestrator.run({ databasePath, runId, workingDirectory: directory, tasks: [spec],
+    criteria: [{ id: "acceptance", description: "focused check passes", taskId: "impl", checkIds: ["worker-result"] }] });
+  const snapshot = await protocol.getSnapshot({ databasePath, runId });
+  expect(result.status).toBe("completed");
+  expect(snapshot.goalCriteria).toMatchObject([{ id: "acceptance", state: "verified" }]);
 });
 
 test("failed completion check is returned to a new worker attempt with its failure evidence", async () => {

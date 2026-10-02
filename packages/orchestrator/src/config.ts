@@ -5,12 +5,25 @@ import { join } from "node:path";
 import type { ComputeClass, TaskKind } from "@loop/protocol";
 import { parse as parseToml } from "smol-toml";
 
-import { KIND_DEFAULT_PERSONAS, type PersonaKindDefaults, type PersonaRegistry } from "./persona";
+import { DEFAULT_CONTEXT_LIFECYCLE_POLICY, type ContextLifecyclePolicy } from "./context-lifecycle";
+import {
+  KIND_DEFAULT_PERSONAS,
+  LEAD_PERSONA_IDS,
+  type PersonaKindDefaults,
+  type PersonaRegistry,
+} from "./persona";
 
 export interface ModelProfile {
   id: string;
   provider: string;
   computeClass: ComputeClass;
+  /**
+   * Execution lane selection (M-TL3): "pi" (default) keeps the existing CLI
+   * harness worker; "turnloop" runs the profile through the own-turn-loop
+   * adapter. Absent means "pi" — the default lane never changes existing
+   * behavior. Routing/quota identity stays with `provider`, not the lane.
+   */
+  lane?: WorkerLane;
   capabilities: {
     coding: number;
     reasoning: number;
@@ -21,6 +34,14 @@ export interface ModelProfile {
   latency: number;
   costWeight: number;
 }
+
+/**
+ * Execution lane of a worker profile (M-TL3, decision TL1). Closed set: the
+ * default is always the pi lane; "turnloop" is explicit opt-in that is
+ * refused deterministically when the embedding application supplies no
+ * turnloop model client.
+ */
+export type WorkerLane = "pi" | "turnloop";
 
 export interface ProviderConfig {
   enabled: boolean;
@@ -53,7 +74,18 @@ export interface LoopConfig {
     workerVisibility: WorkerVisibility;
     workerActivityLines: number;
     workerPaneLimit: number;
+    /**
+     * G2 code map worker-context injection (docs/research/loop-gap-analysis.md).
+     * "off" (default) never injects; "scopes" derives a bounded map summary
+     * from the task's declared read/write scopes.
+     */
+    codeMapInjection?: "off" | "scopes";
   };
+  /**
+   * G1 context-lifecycle thresholds (policy.toml `[context]`); absent section
+   * resolves to DEFAULT_CONTEXT_LIFECYCLE_POLICY via resolveContextPolicy.
+   */
+  context?: ContextLifecyclePolicy;
   lead: {
     command: string;
     provider: string;
@@ -182,7 +214,9 @@ export function loadLoopConfig(options: LoadLoopConfigOptions = {}): LoopConfig 
       workerVisibility: workerVisibility(output.worker_visibility),
       workerActivityLines: clampWorkerActivityLines(output.worker_activity_lines),
       workerPaneLimit: positiveInteger(output.worker_pane_limit ?? 4, "output.worker_pane_limit"),
+      codeMapInjection: codeMapInjection(output.code_map_injection),
     },
+    context: resolveContextPolicy(policyDocument.context),
     lead: {
       command: text(lead.command, "lead.command"),
       provider: text(lead.provider, "lead.provider"),
@@ -202,9 +236,12 @@ export function loadLoopConfig(options: LoadLoopConfigOptions = {}): LoopConfig 
  * Persona registry per D1/D4 of the worker persona contract
  * (docs/decisions/2026-09-22-worker-persona-contract.md): every
  * `personas/*.md` file stem is a persona id and its trimmed body is the
- * instruction text injected into worker prompts. A missing directory, a
- * non-markdown file, or an empty body simply omits that id — resolution
- * then degrades silently (or with a warning) instead of failing a run.
+ * instruction text injected into worker prompts. Lead-owned ids
+ * (LEAD_PERSONA_IDS) are skipped: the directory is shared with Lead
+ * standing rules, which workers must not be able to request. A missing
+ * directory, a non-markdown file, or an empty body simply omits that id —
+ * resolution then degrades silently (or with a warning) instead of failing
+ * a run.
  */
 export function loadPersonaRegistry(configDirectory: string): PersonaRegistry {
   const directory = join(configDirectory, "personas");
@@ -212,9 +249,11 @@ export function loadPersonaRegistry(configDirectory: string): PersonaRegistry {
   const registry: PersonaRegistry = {};
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+    const id = entry.name.slice(0, -".md".length);
+    if ((LEAD_PERSONA_IDS as readonly string[]).includes(id)) continue;
     const instructions = readFileSync(join(directory, entry.name), "utf8").trim();
     if (!instructions) continue;
-    registry[entry.name.slice(0, -".md".length)] = instructions;
+    registry[id] = instructions;
   }
   return registry;
 }
@@ -264,6 +303,20 @@ const computeClasses = new Set<ComputeClass>([
   "frontier",
 ]);
 
+/** Closed worker-lane set (M-TL3); the default lane stays off this set's error path. */
+const workerLanes = new Set<WorkerLane>(["pi", "turnloop"]);
+
+function workerLane(value: unknown, path: string): WorkerLane {
+  const parsed = text(value, path) as WorkerLane;
+  if (!workerLanes.has(parsed)) {
+    throw new ConfigError(
+      "config.unknown_worker_lane",
+      `unknown worker lane at ${path}: ${parsed} (expected "pi" or "turnloop")`,
+    );
+  }
+  return parsed;
+}
+
 /**
  * Closed TaskKind set — the generated protocol exports the union type, not a
  * runtime set, so config.ts keeps this validation table exactly like
@@ -301,10 +354,12 @@ function parseModels(document: Record<string, unknown>): ModelProfile[] {
     }
     seen.add(id);
     const capabilities = record(entry.capabilities, `models[${index}].capabilities`);
+    const lane = entry.lane === undefined ? undefined : workerLane(entry.lane, `models[${index}].lane`);
     return {
       id,
       provider: text(entry.provider, `models[${index}].provider`),
       computeClass: computeClass(entry.compute_class, `models[${index}].compute_class`),
+      ...(lane ? { lane } : {}),
       capabilities: {
         coding: score(capabilities.coding, `${id}.capabilities.coding`),
         reasoning: score(capabilities.reasoning, `${id}.capabilities.reasoning`),
@@ -421,9 +476,42 @@ function positiveInteger(value: unknown, path: string): number {
 }
 
 function workerVisibility(value: unknown): WorkerVisibility {
-  if (value === undefined) return "off";
+  // G18 기본값 개선: watch가 기본이다. activityRecorder가 없는 조립 경로는
+  // sink 없이 동작을 바꾸지 않으므로 기본값 변경은 안전하다 (구성 파일이
+  // 명시적으로 "off"를 지정하면 그대로 존중된다).
+  if (value === undefined) return "watch";
   if (value === "off" || value === "watch" || value === "panes") return value;
   throw new ConfigError("config.invalid", `output.worker_visibility must be "off", "watch", or "panes"`);
+}
+
+function codeMapInjection(value: unknown): "off" | "scopes" {
+  if (value === undefined) return "off";
+  if (value === "off" || value === "scopes") return value;
+  throw new ConfigError("config.invalid", `output.code_map_injection must be "off" or "scopes"`);
+}
+
+/**
+ * G1 context-lifecycle thresholds. The whole `[context]` section is optional;
+ * individual knobs fall back to the compile-time defaults. `advisory_byte_budget = 0`
+ * is the explicit opt-out that keeps the context byte-identical to pre-G1.
+ */
+export function resolveContextPolicy(section: unknown): ContextLifecyclePolicy {
+  if (section === undefined || section === null) return DEFAULT_CONTEXT_LIFECYCLE_POLICY;
+  if (typeof section !== "object" || Array.isArray(section)) {
+    throw new ConfigError("config.invalid", "context must be a table");
+  }
+  const value = section as Record<string, unknown>;
+  return {
+    advisoryByteBudget: value.advisory_byte_budget === undefined
+      ? DEFAULT_CONTEXT_LIFECYCLE_POLICY.advisoryByteBudget
+      : nonNegativeInteger(value.advisory_byte_budget, "context.advisory_byte_budget"),
+    summaryEntryBytes: value.summary_entry_bytes === undefined
+      ? DEFAULT_CONTEXT_LIFECYCLE_POLICY.summaryEntryBytes
+      : positiveInteger(value.summary_entry_bytes, "context.summary_entry_bytes"),
+    summaryByteCap: value.summary_byte_cap === undefined
+      ? DEFAULT_CONTEXT_LIFECYCLE_POLICY.summaryByteCap
+      : positiveInteger(value.summary_byte_cap, "context.summary_byte_cap"),
+  };
 }
 
 function clampWorkerActivityLines(value: unknown): number {
@@ -436,6 +524,12 @@ function nonNegativeNumber(value: unknown, path: string): number {
     throw new ConfigError("config.invalid", `${path} must be a non-negative number`);
   }
   return value;
+}
+
+function nonNegativeInteger(value: unknown, path: string): number {
+  const parsed = nonNegativeNumber(value, path);
+  if (!Number.isInteger(parsed)) throw new ConfigError("config.invalid", `${path} must be an integer`);
+  return parsed;
 }
 
 function score(value: unknown, path: string): number {

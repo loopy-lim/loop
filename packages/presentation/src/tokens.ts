@@ -49,6 +49,8 @@ export const emptyState = {
   noModels: "No models configured",
   /** Placeholder for an empty scope or dependency list in task-context lines. */
   list: "-",
+  /** G17: shown instead of zero-filled usage figures when nothing was reported. */
+  noUsage: "no usage reported",
 } as const;
 
 /**

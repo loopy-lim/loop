@@ -41,6 +41,14 @@ export const KIND_DEFAULT_PERSONAS: PersonaKindDefaults = {
 export const EXPLICIT_ONLY_PERSONA_IDS: readonly string[] = ["designer"];
 
 /**
+ * Persona ids owned by the Lead, not worker-selectable. `config/personas/`
+ * is shared with Lead standing rules ([lead.persona.files] in providers
+ * config); the worker registry skips those files so Lead-only instruction
+ * layers never grow the worker submission vocabulary.
+ */
+export const LEAD_PERSONA_IDS: readonly string[] = ["lead-default"];
+
+/**
  * Every persona id accepted at submission when the feature is not installed.
  * Derived from the compile-time floor above; a configured registry derives
  * its own vocabulary (see derivePersonaVocabulary).
