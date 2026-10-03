@@ -1,0 +1,18 @@
+[scheduler]
+max_parallel = 1
+max_frontier_workers = 1
+
+[routing]
+default_compute_class = "fast"
+high_risk_floor = "fast"
+critical_risk_floor = "fast"
+escalation = ["fast"]
+
+[output]
+status_line_limit = 8
+attention_line_limit = 6
+findings_line_limit = 5
+list_line_limit = 8
+line_text_limit = 500
+worker_visibility = "off"
+worker_activity_lines = 5

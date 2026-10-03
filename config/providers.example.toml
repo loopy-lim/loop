@@ -4,7 +4,7 @@
 [lead]
 command = "pi"
 provider = "openai-codex"
-model = "gpt-6-sol"
+model = "gpt-6.1-sol"
 
 # Lead uses pi's built-in openai-codex catalog entry and native ChatGPT login.
 # Custom worker model registration (2026-09-22 decision): every worker pattern
@@ -25,6 +25,7 @@ model = "gpt-6-sol"
 active = "plan-first"
 
 [lead.persona.files]
+lead-default = "personas/lead-default.md"
 plan-first = "personas/plan-first.md"
 spike-first = "personas/spike-first.md"
 tdd-first = "personas/tdd-first.md"
@@ -37,6 +38,7 @@ command = "pi"
 enabled = true
 auth = "native"
 mode = "interactive"
+
 
 # Mixed routing (2026-09, updated after codex lane drop): pi runs the zai
 # volume classes plus the gpt-6 luna/sol lane (openai-codex, ChatGPT native
@@ -81,3 +83,11 @@ mode = "interactive"
 # 'loop doctor' verifies that each set variable resolves to an existing,
 # readable directory. Dotfile both directories and every machine reproduces
 # the same Lead and worker behavior. See docs/environment-generalization.md.
+
+# MCP passthrough (G8, docs/worker-mcp-config.md): Loop does not implement an
+# MCP client or server and adds no [mcp] section here — that is a boundary
+# rule, not a missing feature. Workers are full CLI harnesses (pi, codex, agy)
+# that already speak MCP, and Loop passes the child environment through
+# untouched. Declare MCP servers in each CLI's own native config (codex:
+# ~/.codex/config.toml [mcp_servers]; pi: its own settings) and keep server
+# credentials out of every Loop config file.

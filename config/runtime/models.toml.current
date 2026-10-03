@@ -122,7 +122,15 @@ latency = 2
 cost_weight = 2
 
 [[models]]
-id = "openai-codex/gpt-6-sol:low"
+id = "openai-codex/gpt-6.1-sol:minimal"
+provider = "pi"
+compute_class = "fast"
+capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 0, long_context = 4 }
+latency = 3
+cost_weight = 3
+
+[[models]]
+id = "openai-codex/gpt-6.1-sol:low"
 provider = "pi"
 compute_class = "strong"
 capabilities = { coding = 5, reasoning = 5, tools = 3, vision = 0, long_context = 5 }
@@ -130,7 +138,7 @@ latency = 3
 cost_weight = 3
 
 [[models]]
-id = "openai-codex/gpt-6-sol"
+id = "openai-codex/gpt-6.1-sol"
 provider = "pi"
 compute_class = "frontier"
 capabilities = { coding = 5, reasoning = 5, tools = 3, vision = 0, long_context = 5 }

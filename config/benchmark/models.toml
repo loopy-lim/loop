@@ -1,0 +1,17 @@
+# Isolated offline agent-comparison profiles. Registry IDs are
+# `fake:baseline` and `fake:alternative`.
+[[models]]
+id = "baseline"
+provider = "fake"
+compute_class = "fast"
+capabilities = { coding = 1, reasoning = 1, tools = 1, vision = 0, long_context = 1 }
+latency = 1
+cost_weight = 1
+
+[[models]]
+id = "alternative"
+provider = "fake"
+compute_class = "fast"
+capabilities = { coding = 1, reasoning = 1, tools = 1, vision = 0, long_context = 1 }
+latency = 1
+cost_weight = 1

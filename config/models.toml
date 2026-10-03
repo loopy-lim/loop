@@ -1,12 +1,19 @@
 # Business logic selects compute classes. Concrete provider/model identifiers live here.
-# Routing policy (2026-09, openai-fallback unification): every compute class
-# lists the zai volume lane first (pi pattern syntax "zai/glm-5.3-flashx",
-# ":<thinking>") followed by an openai-codex gpt-6 lane fallback (pi lane,
-# ChatGPT native login; smoke evidence OK-LUNA-PI / OK-SOL-PI on pi 0.87.1).
-# Antigravity profiles are no longer fallback candidates; the
-# antigravity provider configuration itself is retained. The codex-exec
-# provider lane was removed (2026-09): gpt-6 traffic runs solely on the pi
-# openai-codex lane.
+# Routing policy (2026-09-30, final decision): the balanced/strong compute
+# classes list the pi openai-codex gpt-6.1-sol lane first (pi pattern syntax
+# "openai-codex/gpt-6.1-sol:<thinking>", ChatGPT native login; smoke evidence
+# OK-SOL-PI on pi 0.87.1) and the zai volume lane ("zai/glm-5.3-flashx",
+# ":<thinking>") is demoted to fallback. The gpt lane runs the fast thinking
+# profile (:minimal/:low) for these classes. fast/tiny keep their zai/glm
+# primaries — fast's gpt entry is only the low-effort "fast option"
+# (gpt-6.1-sol:minimal) fallback and tiny keeps the gpt-6-luna fallback — and
+# frontier stays on bare gpt-6.1-sol. routing.default_compute_class stays
+# "balanced" (an earlier "fast" switch was reverted the same day). Quota
+# headroom on the gpt lane (2026-09-30, user decision) motivated the
+# gpt-primary promotion. Antigravity profiles are no longer fallback
+# candidates; the antigravity provider configuration itself is retained. The
+# codex-exec provider lane was removed (2026-09): gpt-6 traffic runs solely on
+# the pi openai-codex lane.
 
 # pi catalog provisioning (2026-09-22 model-environment decision): ids below
 # that are missing from pi's built-in catalogs are synced into pi's
@@ -70,15 +77,52 @@ capabilities = { coding = 3, reasoning = 3, tools = 2, vision = 0, long_context 
 latency = 1
 cost_weight = 1
 
+# Fast-class gpt fallback: the explicit :minimal thinking pattern is the
+# low-effort "fast option" on the gpt lane (2026-09-30; fast stays zai/glm
+# primary). Its cost/latency keep registry ordering behind the zai primary and
+# ahead of the deeper luna fallback.
+[[models]]
+id = "openai-codex/gpt-6.1-sol:minimal"
+provider = "pi"
+compute_class = "fast"
+capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 0, long_context = 4 }
+latency = 1
+cost_weight = 2
+
+# balanced primary (2026-09-30 gpt-primary promotion): the explicit :low
+# thinking pattern keeps this profile distinct from the fast/strong/frontier
+# sol entries while the lowest cost_weight/latency pair puts it first in
+# registry ordering.
+[[models]]
+id = "openai-codex/gpt-6.1-sol:low"
+provider = "pi"
+compute_class = "balanced"
+capabilities = { coding = 5, reasoning = 5, tools = 3, vision = 0, long_context = 5 }
+latency = 1
+cost_weight = 1
+
+# strong primary (2026-09-30 gpt-primary promotion): the explicit :high
+# thinking pattern keeps this profile distinct from the fast/balanced sol
+# entries and from the frontier bare id while staying first in registry
+# ordering.
+[[models]]
+id = "openai-codex/gpt-6.1-sol:high"
+provider = "pi"
+compute_class = "strong"
+capabilities = { coding = 5, reasoning = 5, tools = 3, vision = 0, long_context = 5 }
+latency = 1
+cost_weight = 1
+
 # flashx consumes 2.5x the quota of regular flash per call; this pattern was
-# smoke-verified. Preferred balanced primary so escalation absorbs surplus
-# quota while zai/glm-5.3-flash and the openai-codex lane remain fallbacks.
+# smoke-verified. Demoted to the balanced fallback (2026-09-30 gpt-primary
+# promotion); the extra latency keeps registry ordering behind the
+# gpt-6.1-sol:low primary while still absorbing zai-side overflow first.
 [[models]]
 id = "zai/glm-5.3-flashx:high"
 provider = "pi"
 compute_class = "balanced"
 capabilities = { coding = 4, reasoning = 3, tools = 2, vision = 0, long_context = 5 }
-latency = 1
+latency = 2
 cost_weight = 1
 
 [[models]]
@@ -86,25 +130,26 @@ id = "zai/glm-5.3-flash"
 provider = "pi"
 compute_class = "balanced"
 capabilities = { coding = 3, reasoning = 3, tools = 2, vision = 0, long_context = 3 }
-latency = 1
+latency = 2
 cost_weight = 2
 
-# zai strong lane (2026-09-25): keeps compute escalation inside the zai
-# volume classes so verification-failure escalation does not drain the
-# openai-codex quota. Same id as the balanced entry with an explicit higher
-# thinking pattern, mirroring the flashx balanced/high split above.
+# zai strong lane: demoted to the strong fallback (2026-09-30 gpt-primary
+# promotion). Same id as the balanced entry with an explicit higher thinking
+# pattern, mirroring the flashx balanced/high split above; the higher
+# cost_weight/latency keep registry ordering behind the gpt-6.1-sol:high
+# primary.
 [[models]]
 id = "zai/glm-5.3-flash:high"
 provider = "pi"
 compute_class = "strong"
 capabilities = { coding = 4, reasoning = 4, tools = 2, vision = 0, long_context = 5 }
-latency = 1
-cost_weight = 1
+latency = 2
+cost_weight = 2
 
-# Quota fallback for volume workers stays inside the requested compute class.
-# Explicit thinking patterns keep these profiles distinct from each other and
-# from the zai primaries; openai entries carry higher cost_weight/latency so
-# registry ordering reproduces the intended fallback order.
+# Deep gpt-lane quota fallback for volume workers. Explicit thinking patterns
+# keep these profiles distinct from each other and from the primaries; the
+# luna entries carry higher cost_weight/latency so registry ordering places
+# them behind the class primaries.
 [[models]]
 id = "openai-codex/gpt-6-luna:off"
 provider = "pi"
@@ -134,24 +179,16 @@ id = "openai-codex/gpt-6-luna:high"
 provider = "pi"
 compute_class = "balanced"
 capabilities = { coding = 4, reasoning = 4, tools = 3, vision = 0, long_context = 4 }
-latency = 2
+latency = 3
 cost_weight = 2
 
-[[models]]
-id = "openai-codex/gpt-6-sol:low"
-provider = "pi"
-compute_class = "strong"
-capabilities = { coding = 5, reasoning = 5, tools = 3, vision = 0, long_context = 5 }
-latency = 3
-cost_weight = 3
-
 # gpt-6 frontier lane: pi's openai-codex provider with ChatGPT native login
-# (smoke evidence OK-SOL-PI, pi 0.87.1). Both luna/sol base ids ship in
-# pi 0.87.1's built-in catalog, so per the 2026-09-22 model-environment
-# decision no [pi.models] metadata is declared (figures copied from the
-# removed codex-lane fallback entries).
+# (prior smoke evidence OK-SOL-PI on pi 0.87.1; gpt-6.1-sol now ships in pi's
+# updated built-in catalog with thinkingLevelMap off=null, so the off suffix
+# is never used). Per the 2026-09-22 model-environment decision no [pi.models]
+# metadata is declared for ids the built-in catalog provides.
 [[models]]
-id = "openai-codex/gpt-6-sol"
+id = "openai-codex/gpt-6.1-sol"
 provider = "pi"
 compute_class = "frontier"
 capabilities = { coding = 5, reasoning = 5, tools = 3, vision = 0, long_context = 5 }

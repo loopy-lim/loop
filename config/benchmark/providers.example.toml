@@ -1,0 +1,9 @@
+[lead]
+command = "pi"
+provider = "unused-for-benchmark"
+model = "unused"
+
+[providers.fake]
+enabled = true
+auth = "none"
+mode = "cli"
