@@ -11,6 +11,9 @@
   "scripts": {
     "test": "cargo test --workspace && cargo build -p loop-bridge && bun test packages tests plugins scripts/rustra-codegen.test.ts",
     "typecheck": "tsc -p tsconfig.json",
+    "lint": "oxlint packages plugins apps/loop-mobile/src apps/loop-mobile/test apps/loop-mobile/scripts",
+    "fmt": "oxfmt --write 'packages/**/*.ts' '!packages/protocol/src/generated/**' 'plugins/**/*.ts' 'apps/loop-mobile/src/**/*.ts' 'apps/loop-mobile/src/**/*.tsx' 'apps/loop-mobile/test/**/*.ts'",
+    "fmt:check": "oxfmt --check 'packages/**/*.ts' '!packages/protocol/src/generated/**' 'plugins/**/*.ts' 'apps/loop-mobile/src/**/*.ts' 'apps/loop-mobile/src/**/*.tsx' 'apps/loop-mobile/test/**/*.ts'",
     "codegen": "bun scripts/rustra-codegen.ts",
     "codegen:check": "bun scripts/rustra-codegen.ts --check",
     "test:architecture": "bun test tests/architecture-boundaries.test.ts",
@@ -19,11 +22,13 @@
     "build:cli": "cargo build -p loop-bridge && bun run build:pi && bun build --compile packages/cli/src/main.ts --outfile dist/loop && bun scripts/stage-native.ts",
     "test:packaged": "bun run build:cli && ./dist/loop verify-install --json",
     "build": "cargo build --workspace && bun run build:cli",
-    "check": "bun run codegen:check && bun run typecheck && bun run test:architecture && bun run test"
+    "check": "bun run codegen:check && bun run lint && bun run typecheck && bun run test:architecture && bun run test"
   },
   "devDependencies": {
     "@rustra/cli": "0.11.3",
     "@types/bun": "^1.4.2",
+    "oxfmt": "0.71.0",
+    "oxlint": "1.86.0",
     "typescript": "^7.0.2"
   },
   "dependencies": {
