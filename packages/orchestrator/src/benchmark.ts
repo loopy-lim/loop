@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 
 import type {
   CompareTracesOutput,
@@ -87,9 +86,10 @@ export function parseBenchmarkConfig(text: string, source = "benchmark config"):
   const name = requireText(document.name, "name", source);
   const intent = requireText(document.intent, "intent", source);
   const profiles = parseProfiles(document.profiles, source);
-  const iterations = document.iterations === undefined
-    ? 1
-    : requirePositiveInteger(document.iterations, "iterations", source);
+  const iterations =
+    document.iterations === undefined
+      ? 1
+      : requirePositiveInteger(document.iterations, "iterations", source);
   return { name, intent, profiles, iterations };
 }
 
@@ -110,22 +110,64 @@ export function benchmarkScenario(profile: WorkflowProfileName, intent: string):
     switch (profile) {
       case "plan-first":
         return [
-          { id: "design", title: "Design decomposition", kind: "research" as const, requirement: `Write the design for: ${intent}`, writeScope: "docs/design/**" },
-          { id: "implement", title: "Implement to the design", kind: "implementation" as const, requirement: "Implement exactly the designed decomposition", writeScope: "src/**" },
+          {
+            id: "design",
+            title: "Design decomposition",
+            kind: "research" as const,
+            requirement: `Write the design for: ${intent}`,
+            writeScope: "docs/design/**",
+          },
+          {
+            id: "implement",
+            title: "Implement to the design",
+            kind: "implementation" as const,
+            requirement: "Implement exactly the designed decomposition",
+            writeScope: "src/**",
+          },
         ];
       case "spike-first":
         return [
-          { id: "spike", title: "Exploratory spike", kind: "research" as const, requirement: `Spike the riskiest unknown of: ${intent}`, writeScope: "spikes/**" },
-          { id: "refactor", title: "Refactor spike into shape", kind: "implementation" as const, requirement: "Reduce the spike to the minimal clean implementation", writeScope: "src/**" },
+          {
+            id: "spike",
+            title: "Exploratory spike",
+            kind: "research" as const,
+            requirement: `Spike the riskiest unknown of: ${intent}`,
+            writeScope: "spikes/**",
+          },
+          {
+            id: "refactor",
+            title: "Refactor spike into shape",
+            kind: "implementation" as const,
+            requirement: "Reduce the spike to the minimal clean implementation",
+            writeScope: "src/**",
+          },
         ];
       case "tdd-first":
         return [
-          { id: "write-tests", title: "Write failing tests first", kind: "research" as const, requirement: `Encode acceptance tests for: ${intent}`, writeScope: "tests/**" },
-          { id: "implement", title: "Implement until tests pass", kind: "implementation" as const, requirement: "Implement the minimum that passes the tests", writeScope: "src/**" },
+          {
+            id: "write-tests",
+            title: "Write failing tests first",
+            kind: "research" as const,
+            requirement: `Encode acceptance tests for: ${intent}`,
+            writeScope: "tests/**",
+          },
+          {
+            id: "implement",
+            title: "Implement until tests pass",
+            kind: "implementation" as const,
+            requirement: "Implement the minimum that passes the tests",
+            writeScope: "src/**",
+          },
         ];
     }
   })();
-  stages.push({ id: "verify", title: "Verify the result", kind: "verification", requirement: "Confirm the completion contract holds for the whole result", writeScope: "" });
+  stages.push({
+    id: "verify",
+    title: "Verify the result",
+    kind: "verification",
+    requirement: "Confirm the completion contract holds for the whole result",
+    writeScope: "",
+  });
   const tasks: TaskSpecInput[] = [];
   let previous: string | undefined;
   for (const stage of stages) {
@@ -137,13 +179,15 @@ export function benchmarkScenario(profile: WorkflowProfileName, intent: string):
       readScope: [],
       writeScope: stage.writeScope ? [stage.writeScope] : [],
       requirements: [stage.requirement],
-      completionChecks: [{
-        id: `${stage.id}-check`,
-        command: process.execPath,
-        args: ["--eval", "process.exit(0)"],
-        workingDirectory: null,
-        timeoutMs: 5_000,
-      }],
+      completionChecks: [
+        {
+          id: `${stage.id}-check`,
+          command: process.execPath,
+          args: ["--eval", "process.exit(0)"],
+          workingDirectory: null,
+          timeoutMs: 5_000,
+        },
+      ],
       preferredCompute: "fast",
       minimumCompute: "tiny",
       maximumCompute: "strong",
@@ -191,12 +235,15 @@ export async function runBenchmark(request: BenchmarkRunRequest): Promise<Benchm
       });
     }
   }
-  const comparison: TraceComparison = runs.length === 0
-    ? { rankings: [] }
-    : (await request.control.compareTraces({
-      databasePath: request.databasePath,
-      runIds: runs.map((run) => run.runId),
-    }) as CompareTracesOutput).comparison;
+  const comparison: TraceComparison =
+    runs.length === 0
+      ? { rankings: [] }
+      : (
+          (await request.control.compareTraces({
+            databasePath: request.databasePath,
+            runIds: runs.map((run) => run.runId),
+          })) as CompareTracesOutput
+        ).comparison;
   return { benchmark: request.benchmark, runs, comparison };
 }
 
@@ -207,16 +254,28 @@ function benchmarkRunId(name: string, profile: WorkflowProfileName, iteration: n
 
 function parseProfiles(value: unknown, source: string): WorkflowProfileName[] {
   if (!Array.isArray(value) || value.length === 0) {
-    throw new ConfigError("benchmark.invalid", `${source}: profiles must list at least one of ${WORKFLOW_PROFILE_NAMES.join(", ")}`);
+    throw new ConfigError(
+      "benchmark.invalid",
+      `${source}: profiles must list at least one of ${WORKFLOW_PROFILE_NAMES.join(", ")}`,
+    );
   }
   const seen = new Set<string>();
   const profiles: WorkflowProfileName[] = [];
   for (const [index, entry] of value.entries()) {
-    if (typeof entry !== "string" || !WORKFLOW_PROFILE_NAMES.includes(entry as WorkflowProfileName)) {
-      throw new ConfigError("benchmark.invalid", `${source}: unknown workflow profile at profiles[${index}]; expected one of ${WORKFLOW_PROFILE_NAMES.join(", ")}`);
+    if (
+      typeof entry !== "string" ||
+      !WORKFLOW_PROFILE_NAMES.includes(entry as WorkflowProfileName)
+    ) {
+      throw new ConfigError(
+        "benchmark.invalid",
+        `${source}: unknown workflow profile at profiles[${index}]; expected one of ${WORKFLOW_PROFILE_NAMES.join(", ")}`,
+      );
     }
     if (seen.has(entry)) {
-      throw new ConfigError("benchmark.invalid", `${source}: duplicate workflow profile ${entry}; raise iterations instead`);
+      throw new ConfigError(
+        "benchmark.invalid",
+        `${source}: duplicate workflow profile ${entry}; raise iterations instead`,
+      );
     }
     seen.add(entry);
     profiles.push(entry as WorkflowProfileName);

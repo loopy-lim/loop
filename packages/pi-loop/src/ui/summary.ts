@@ -17,8 +17,8 @@ export function renderRunSummary(view: RunSummaryView, limits: OutputLimits): st
     `✓ ${view.implementationBranches} parallel implementation branches`,
     view.checksPassed ? "✓ checks passed" : "! checks need attention",
   ];
-  if (view.escalations.length > 0) {
-    const first = view.escalations[0];
+  const [first] = view.escalations;
+  if (first !== undefined) {
     lines.push(
       `↗ ${view.escalations.length} task${view.escalations.length === 1 ? "" : "s"} escalated from ${first.from} → ${first.to}`,
     );
@@ -39,21 +39,21 @@ export function renderLoopRunSummary(
   const completed = summary.status === "completed";
   const lines = completed
     ? [
-      `Run ${runId}`,
-      `State: ${summary.status}`,
-      "Goal: complete",
-      `Tasks: ${summary.tasks}`,
-      `Escalations: ${summary.escalations.length}`,
-      "Verification: passed",
-    ]
+        `Run ${runId}`,
+        `State: ${summary.status}`,
+        "Goal: complete",
+        `Tasks: ${summary.tasks}`,
+        `Escalations: ${summary.escalations.length}`,
+        "Verification: passed",
+      ]
     : [
-      `Run ${runId}`,
-      `State: ${summary.status}`,
-      "Goal: incomplete",
-      `Tasks: ${summary.tasks}`,
-      "Remaining: original acceptance criteria are not fully verified.",
-      continuationLine(runId, summary.status),
-    ];
+        `Run ${runId}`,
+        `State: ${summary.status}`,
+        "Goal: incomplete",
+        `Tasks: ${summary.tasks}`,
+        "Remaining: original acceptance criteria are not fully verified.",
+        continuationLine(runId, summary.status),
+      ];
   return compactLines(lines, {
     lineLimit: completed ? limits.statusLineLimit : limits.attentionLineLimit,
     lineTextLimit: limits.lineTextLimit,

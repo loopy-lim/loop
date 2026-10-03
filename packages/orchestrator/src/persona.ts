@@ -138,7 +138,9 @@ export function resolvePersona({
   // missing this kind's default is a config regression — warn.
   if (Object.keys(registry).length === 0) return {};
   if (defaultId) {
-    return { warning: `[persona] default persona '${defaultId}' missing for kind=${kind}; section omitted` };
+    return {
+      warning: `[persona] default persona '${defaultId}' missing for kind=${kind}; section omitted`,
+    };
   }
   return {};
 }

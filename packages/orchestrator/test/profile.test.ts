@@ -70,7 +70,9 @@ test("a profile selects the turnloop lane explicitly and keeps its provider iden
   expect(provider.id).toBe("pi:m1");
   // Quota-group routing metadata still resolves through the pi provider key:
   // excluding the profile's quota group leaves no eligible candidate.
-  await expect(registry.select("fast", new Set(["pi:m1"]))).rejects.toThrow(/no eligible compute candidate|no provider supports/);
+  await expect(registry.select("fast", new Set(["pi:m1"]))).rejects.toThrow(
+    /no eligible compute candidate|no provider supports/,
+  );
 });
 
 test("a turnloop-lane profile without a model client is refused deterministically", () => {
@@ -174,7 +176,9 @@ test("mixed-mode runs share one event-log contract (WorkerStarted/WorkerResult/G
     readScope: [],
     writeScope: [],
     requirements: [],
-    completionChecks: [{ id: "check", command: "true", args: [], workingDirectory: null, timeoutMs: 1000 }],
+    completionChecks: [
+      { id: "check", command: "true", args: [], workingDirectory: null, timeoutMs: 1000 },
+    ],
     preferredCompute: computeClass,
     minimumCompute: computeClass,
     maximumCompute: computeClass,
@@ -183,7 +187,9 @@ test("mixed-mode runs share one event-log contract (WorkerStarted/WorkerResult/G
   const readEvents = async () => {
     const events = await protocol.subscribeEvents({ ...input, afterSequence: 0, limit: 1000 });
     return events.map((event) => {
-      const payload = JSON.parse(event.payloadJson) as { kind?: { type?: string; data?: Record<string, unknown> } };
+      const payload = JSON.parse(event.payloadJson) as {
+        kind?: { type?: string; data?: Record<string, unknown> };
+      };
       return { type: payload.kind?.type ?? "", data: payload.kind?.data ?? {} };
     });
   };
@@ -202,7 +208,11 @@ test("mixed-mode runs share one event-log contract (WorkerStarted/WorkerResult/G
     providers: new ProviderRegistry([piLane, loopLane]),
     maxWorkers: 2,
   });
-  await orchestrator.prepare({ ...input, tasks: [task("pi-task", "tiny"), task("loop-task", "fast")], workingDirectory: directory });
+  await orchestrator.prepare({
+    ...input,
+    tasks: [task("pi-task", "tiny"), task("loop-task", "fast")],
+    workingDirectory: directory,
+  });
   // Run-wide guidance exists before any claim, so both lanes start with an
   // injected claim context and both must watermark it the same way.
   await protocol.steerRun({ ...input, taskId: null, message: "run-wide note" });
@@ -229,7 +239,12 @@ test("mixed-mode runs share one event-log contract (WorkerStarted/WorkerResult/G
     const deadline = Date.now() + 4000;
     while (Date.now() < deadline) {
       const delivered = (await readEvents()).filter((event) => event.type === "guidance_delivered");
-      if (delivered.map((event) => event.data.task_id).sort().join(",") === "loop-task,pi-task") {
+      if (
+        delivered
+          .map((event) => event.data.task_id)
+          .sort()
+          .join(",") === "loop-task,pi-task"
+      ) {
         expect(keysOf("loop-task", delivered)).toEqual(keysOf("pi-task", delivered));
         return;
       }

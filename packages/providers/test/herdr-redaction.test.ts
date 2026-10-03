@@ -57,7 +57,9 @@ function leakyRunner(agentStatus: string, paneText: string): HerdrRunner {
         });
       }
       if (args[0] === "tab" && args[1] === "create") {
-        return ok({ result: { tab: { tab_id: "workspace-1:t2" }, root_pane: { pane_id: "workspace-1:p2" } } });
+        return ok({
+          result: { tab: { tab_id: "workspace-1:t2" }, root_pane: { pane_id: "workspace-1:p2" } },
+        });
       }
       if (args[0] === "agent" && args[1] === "get") {
         return ok({ result: { agent: { agent_status: agentStatus } } });

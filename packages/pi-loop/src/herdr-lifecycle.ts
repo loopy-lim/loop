@@ -1,10 +1,6 @@
 import { spawn } from "node:child_process";
 
-export type PiLifecycleEvent =
-  | "session_start"
-  | "agent_start"
-  | "agent_end"
-  | "session_shutdown";
+export type PiLifecycleEvent = "session_start" | "agent_start" | "agent_end" | "session_shutdown";
 
 export type HerdrLifecycleState = "idle" | "working";
 
@@ -118,14 +114,22 @@ export class HerdrLifecycleReporter implements HerdrLifecycleSink {
 
   private static spawn(args: string[], timeoutMs: number): Promise<void> {
     return new Promise((resolve) => {
+      const command = args[0];
       // argv-only spawn: never a shell, failures are non-fatal to the Lead UI.
-      const child = spawn(args[0], args.slice(1), {
+      if (command === undefined) {
+        resolve();
+        return;
+      }
+      const child = spawn(command, args.slice(1), {
         stdio: "ignore",
         shell: false,
       });
       // Status reporting is optional telemetry, not a gate on Pi's next turn.
       const deadline = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
-      const finish = () => { clearTimeout(deadline); resolve(); };
+      const finish = () => {
+        clearTimeout(deadline);
+        resolve();
+      };
       child.on("error", finish);
       child.on("close", finish);
     });

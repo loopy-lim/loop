@@ -27,7 +27,17 @@ test("starts a recognized agent in its own tab and submits its task", async () =
   expect(runner.calls).toEqual([
     ["workspace", "create", "--cwd", "/project", "--label", "loop-run-1", "--no-focus"],
     // One no-focus tab per worker — the live-tabs placement rule.
-    ["tab", "create", "--workspace", "w1", "--cwd", "/project/.worktrees/task-1", "--label", "loop-task-1", "--no-focus"],
+    [
+      "tab",
+      "create",
+      "--workspace",
+      "w1",
+      "--cwd",
+      "/project/.worktrees/task-1",
+      "--label",
+      "loop-task-1",
+      "--no-focus",
+    ],
     ["pane", "rename", "w1:p2", "loop-task-1"],
     [
       "agent",
@@ -65,10 +75,26 @@ test("labels the worker tab with taskId·kind·attempt while the identifier keep
   expect(worker.agentName).toBe("loop-run-1-impl-protocol-unify");
   // Display surfaces carry the taskId vocabulary instead.
   expect(runner.calls).toContainEqual([
-    "tab", "create", "--workspace", "w1", "--cwd", "/project", "--label", "impl-protocol-unify·impl·a0", "--no-focus",
+    "tab",
+    "create",
+    "--workspace",
+    "w1",
+    "--cwd",
+    "/project",
+    "--label",
+    "impl-protocol-unify·impl·a0",
+    "--no-focus",
   ]);
   expect(runner.calls).toContainEqual(["pane", "rename", "w1:p2", "impl-protocol-unify·impl·a0"]);
-  expect(runner.calls).toContainEqual(["agent", "start", "loop-run-1-impl-protocol-unify", "--kind", "pi", "--pane", "w1:p2"]);
+  expect(runner.calls).toContainEqual([
+    "agent",
+    "start",
+    "loop-run-1-impl-protocol-unify",
+    "--kind",
+    "pi",
+    "--pane",
+    "w1:p2",
+  ]);
 });
 
 test("propagates prompt delivery failures and closes only the new worker tab", async () => {
@@ -77,28 +103,36 @@ test("propagates prompt delivery failures and closes only the new worker tab", a
     async run(_command, args) {
       calls.push(args);
       if (args[0] === "workspace") {
-        return result({ result: { workspace: { workspace_id: "w1" }, root_pane: { pane_id: "w1:p1" } } });
+        return result({
+          result: { workspace: { workspace_id: "w1" }, root_pane: { pane_id: "w1:p1" } },
+        });
       }
       if (args[0] === "tab" && args[1] === "create") {
         return result({ result: { tab: { tab_id: "w1:t2" }, root_pane: { pane_id: "w1:p2" } } });
       }
       if (args[0] === "agent" && args[1] === "prompt") {
-        return { exitCode: 1, stdout: "", stderr: JSON.stringify({ error: { code: "agent_blocked", message: "prompt rejected" } }) };
+        return {
+          exitCode: 1,
+          stdout: "",
+          stderr: JSON.stringify({ error: { code: "agent_blocked", message: "prompt rejected" } }),
+        };
       }
       return result({ result: {} });
     },
   };
   const runtime = new HerdrWorkerRuntime({ runner });
 
-  await expect(runtime.start({
-    projectRoot: "/project",
-    runId: "run-prompt-failure",
-    taskId: "task",
-    worktree: "/project",
-    execution: { type: "agent", kind: "codex", args: [] },
-    prompt: "do work",
-    waitForPrompt: true,
-  })).rejects.toThrow("agent_blocked");
+  await expect(
+    runtime.start({
+      projectRoot: "/project",
+      runId: "run-prompt-failure",
+      taskId: "task",
+      worktree: "/project",
+      execution: { type: "agent", kind: "codex", args: [] },
+      prompt: "do work",
+      waitForPrompt: true,
+    }),
+  ).rejects.toThrow("agent_blocked");
 
   expect(calls).toContainEqual(["agent", "prompt", "loop-task", "do work"]);
   expect(calls).toContainEqual(["tab", "close", "w1:t2"]);
@@ -167,14 +201,10 @@ test("anchors mirror tabs to the caller workspace without creating a Loop worksp
   const runner = scriptedRunner();
   const runtime = new HerdrWorkerRuntime({ runner });
 
-  const pane = await runtime.createPane(
-    "run-3",
-    "task-3",
-    "/project",
-    "/project",
-    "task-3",
-    { workspaceId: "w7", paneId: "w7:p4" },
-  );
+  const pane = await runtime.createPane("run-3", "task-3", "/project", "/project", "task-3", {
+    workspaceId: "w7",
+    paneId: "w7:p4",
+  });
 
   expect(pane).toEqual({
     workerId: "mirror·task-3",
@@ -216,7 +246,15 @@ test("falls back to a dedicated loop-<runId> workspace when no caller is given",
   ]);
   // Without a caller the mirror opens as a tab of the loop-<runId> workspace.
   expect(runner.calls[1]).toEqual([
-    "tab", "create", "--workspace", "w1", "--cwd", "/project", "--label", "mirror·task-4", "--no-focus",
+    "tab",
+    "create",
+    "--workspace",
+    "w1",
+    "--cwd",
+    "/project",
+    "--label",
+    "mirror·task-4",
+    "--no-focus",
   ]);
   expect(runner.calls[2]).toEqual(["pane", "rename", "w1:p2", "mirror·task-4"]);
 });
@@ -254,7 +292,9 @@ test("surfaces redacted structured Herdr errors", async () => {
       run: async () => ({
         exitCode: 1,
         stdout: "",
-        stderr: JSON.stringify({ error: { code: "agent_blocked", message: "Authorization: Basic secret" } }),
+        stderr: JSON.stringify({
+          error: { code: "agent_blocked", message: "Authorization: Basic secret" },
+        }),
       }),
     },
   });
@@ -288,13 +328,23 @@ test("cancel force-closes only a worker tab after grace and confirms it stopped"
     async run(_command, args) {
       calls.push(args);
       if (args[0] === "agent" && args[1] === "get") {
-        if (closed) return { exitCode: 1, stdout: "", stderr: JSON.stringify({ error: { code: "agent_not_found", message: "gone" } }) };
+        if (closed)
+          return {
+            exitCode: 1,
+            stdout: "",
+            stderr: JSON.stringify({ error: { code: "agent_not_found", message: "gone" } }),
+          };
         return result({ result: { agent: { agent_status: "working" } } });
       }
       if (args[0] === "pane" && args[1] === "get") {
         // Status fallback (live-tabs ADR §5): with the agent record gone the
         // pane is observed instead — and after the tab close it is gone too.
-        if (closed) return { exitCode: 1, stdout: "", stderr: JSON.stringify({ error: { code: "pane_not_found", message: "pane gone" } }) };
+        if (closed)
+          return {
+            exitCode: 1,
+            stdout: "",
+            stderr: JSON.stringify({ error: { code: "pane_not_found", message: "pane gone" } }),
+          };
         return result({ result: { pane: { agent_status: "working" } } });
       }
       if (args[0] === "tab" && args[1] === "close") {
@@ -305,7 +355,14 @@ test("cancel force-closes only a worker tab after grace and confirms it stopped"
     },
   };
   const runtime = new HerdrWorkerRuntime({ runner, cancelGraceMs: 10, cancelPollMs: 0 });
-  const handle = { workerId: "worker", workspaceId: "caller-workspace", tabId: "worker-tab", paneId: "worker-pane", taskId: "task", agentName: "worker" };
+  const handle = {
+    workerId: "worker",
+    workspaceId: "caller-workspace",
+    tabId: "worker-tab",
+    paneId: "worker-pane",
+    taskId: "task",
+    agentName: "worker",
+  };
 
   await runtime.cancel(handle);
 
@@ -332,7 +389,14 @@ test("cancel rejects when the worker tab cannot be force-closed", async () => {
     },
   };
   const runtime = new HerdrWorkerRuntime({ runner, cancelGraceMs: 0, cancelPollMs: 0 });
-  const handle = { workerId: "worker", workspaceId: "caller-workspace", tabId: "worker-tab", paneId: "worker-pane", taskId: "task", agentName: "worker" };
+  const handle = {
+    workerId: "worker",
+    workspaceId: "caller-workspace",
+    tabId: "worker-tab",
+    paneId: "worker-pane",
+    taskId: "task",
+    agentName: "worker",
+  };
 
   await expect(runtime.cancel(handle)).rejects.toThrow("tab_close_failed");
 
@@ -378,7 +442,9 @@ test("falls back to tab-close when workspace close fails", async () => {
         return {
           exitCode: 2,
           stdout: "",
-          stderr: JSON.stringify({ error: { code: "unknown_command", message: "unknown command: workspace close" } }),
+          stderr: JSON.stringify({
+            error: { code: "unknown_command", message: "unknown command: workspace close" },
+          }),
         };
       }
       if (args[0] === "tab" && args[1] === "list") {
@@ -434,7 +500,9 @@ test("treats already-gone workspace as success-with-reason", async () => {
         return {
           exitCode: 1,
           stdout: "",
-          stderr: JSON.stringify({ error: { code: "workspace_not_found", message: "workspace w30 not found" } }),
+          stderr: JSON.stringify({
+            error: { code: "workspace_not_found", message: "workspace w30 not found" },
+          }),
         };
       }
       return result({ result: {} });
@@ -531,9 +599,7 @@ test("rejects a malformed fallback tab list for a rediscovered workspace", async
       if (args[0] === "workspace" && args[1] === "list") {
         return result({
           result: {
-            workspaces: [
-              { label: "loop-run-malformed-tabs", workspace_id: "w-malformed-tabs" },
-            ],
+            workspaces: [{ label: "loop-run-malformed-tabs", workspace_id: "w-malformed-tabs" }],
           },
         });
       }
@@ -649,20 +715,22 @@ test("purgeLeakedWorkspaces lists workspaces and closes ones prefixed with loop-
               { label: "loop-loop-leak1", workspace_id: "w2" },
               { label: "loop-loop-leak2", workspace_id: "w3" },
               { label: "my-workspace", workspace_id: "w4" },
-            ]
-          }
+            ],
+          },
         });
       }
       return result({ result: {} });
-    }
+    },
   };
-  
+
   const runtime = new HerdrWorkerRuntime({ runner });
   const removed = await runtime.purgeLeakedWorkspaces(false);
   expect(removed).toEqual(["w2", "w3"]);
   expect(calls).toContainEqual(["workspace", "close", "w2"]);
   expect(calls).toContainEqual(["workspace", "close", "w3"]);
-  expect(calls.some(c => c[0] === "workspace" && c[1] === "close" && (c[2] === "w1" || c[2] === "w4"))).toBe(false);
+  expect(
+    calls.some((c) => c[0] === "workspace" && c[1] === "close" && (c[2] === "w1" || c[2] === "w4")),
+  ).toBe(false);
 });
 
 test("purgeLeakedWorkspaces scans workspace labels only and never inspects caller-anchored tabs", async () => {
@@ -700,20 +768,18 @@ test("purgeLeakedWorkspaces skips deletion on dry run", async () => {
       if (args[0] === "workspace" && args[1] === "list") {
         return result({
           result: {
-            workspaces: [
-              { label: "loop-loop-leak1", workspace_id: "w2" },
-            ]
-          }
+            workspaces: [{ label: "loop-loop-leak1", workspace_id: "w2" }],
+          },
         });
       }
       return result({ result: {} });
-    }
+    },
   };
-  
+
   const runtime = new HerdrWorkerRuntime({ runner });
   const removed = await runtime.purgeLeakedWorkspaces(true);
   expect(removed).toEqual(["w2"]);
-  expect(calls.some(c => c[0] === "workspace" && c[1] === "close")).toBe(false);
+  expect(calls.some((c) => c[0] === "workspace" && c[1] === "close")).toBe(false);
 });
 
 test("runInPane hosts the steer relay process via pane run", async () => {
@@ -726,10 +792,28 @@ test("runInPane hosts the steer relay process via pane run", async () => {
   };
   const runtime = new HerdrWorkerRuntime({ runner });
 
-  await runtime.runInPane("w1:p9", "bun", ["/repo/packages/cli/src/main.ts", "__steer-relay", "run-9", "t-1", "--database", "/tmp/loop.sqlite"]);
+  await runtime.runInPane("w1:p9", "bun", [
+    "/repo/packages/cli/src/main.ts",
+    "__steer-relay",
+    "run-9",
+    "t-1",
+    "--database",
+    "/tmp/loop.sqlite",
+  ]);
 
   expect(calls).toEqual([
-    ["pane", "run", "w1:p9", "bun", "/repo/packages/cli/src/main.ts", "__steer-relay", "run-9", "t-1", "--database", "/tmp/loop.sqlite"],
+    [
+      "pane",
+      "run",
+      "w1:p9",
+      "bun",
+      "/repo/packages/cli/src/main.ts",
+      "__steer-relay",
+      "run-9",
+      "t-1",
+      "--database",
+      "/tmp/loop.sqlite",
+    ],
   ]);
 });
 
@@ -760,7 +844,9 @@ test("retries agent_pane_busy rejections during pane initialization before promp
     async run(_cmd, args) {
       calls.push(args);
       if (args[0] === "workspace") {
-        return result({ result: { workspace: { workspace_id: "w1" }, root_pane: { pane_id: "w1:p1" } } });
+        return result({
+          result: { workspace: { workspace_id: "w1" }, root_pane: { pane_id: "w1:p1" } },
+        });
       }
       if (args[0] === "tab" && args[1] === "create") {
         return result({ result: { tab: { tab_id: "w1:t2" }, root_pane: { pane_id: "w1:p2" } } });
@@ -801,7 +887,9 @@ test("an agent start that acknowledges interactive_ready: false fails the launch
     async run(_cmd, args) {
       calls.push(args);
       if (args[0] === "workspace") {
-        return result({ result: { workspace: { workspace_id: "w1" }, root_pane: { pane_id: "w1:p1" } } });
+        return result({
+          result: { workspace: { workspace_id: "w1" }, root_pane: { pane_id: "w1:p1" } },
+        });
       }
       if (args[0] === "tab" && args[1] === "create") {
         return result({ result: { tab: { tab_id: "w1:t2" }, root_pane: { pane_id: "w1:p2" } } });
@@ -816,15 +904,17 @@ test("an agent start that acknowledges interactive_ready: false fails the launch
   };
   const runtime = new HerdrWorkerRuntime({ runner });
 
-  await expect(runtime.start({
-    projectRoot: "/project",
-    runId: "run-unready",
-    taskId: "task-1",
-    worktree: "/project",
-    execution: { type: "agent", kind: "pi", args: [] },
-    prompt: "do work",
-    waitForPrompt: true,
-  })).rejects.toThrow(/agent_not_interactive/);
+  await expect(
+    runtime.start({
+      projectRoot: "/project",
+      runId: "run-unready",
+      taskId: "task-1",
+      worktree: "/project",
+      execution: { type: "agent", kind: "pi", args: [] },
+      prompt: "do work",
+      waitForPrompt: true,
+    }),
+  ).rejects.toThrow(/agent_not_interactive/);
 
   expect(calls).toContainEqual(["tab", "close", "w1:t2"]);
   expect(calls.some((args) => args[0] === "agent" && args[1] === "prompt")).toBe(false);
@@ -985,7 +1075,9 @@ test("steer rejects command workers without an interactive conversation", async 
   const runtime = new HerdrWorkerRuntime({ runner: scriptedRunner() });
   const { agentName: _commandWorkersHaveNoAgent, ...commandHandle } = liveTabHandle;
 
-  await expect(runtime.steer(commandHandle, "hello")).rejects.toThrow(/no interactive agent conversation/);
+  await expect(runtime.steer(commandHandle, "hello")).rejects.toThrow(
+    /no interactive agent conversation/,
+  );
 });
 
 test("steer propagates agent_blocked rejections for the recorded-steer fallback", async () => {
@@ -1036,7 +1128,9 @@ function paneFallbackRunner(script: {
  * them — so placement, cleanup, and sweep behavior are exercised against a
  * moving world. No split verbs exist here: the placement never uses them.
  */
-function tabWorldRunner(options: { workspaceId?: string; rootPaneId?: string } = {}): HerdrRunner & { calls: string[][] } {
+function tabWorldRunner(
+  options: { workspaceId?: string; rootPaneId?: string } = {},
+): HerdrRunner & { calls: string[][] } {
   const workspaceId = options.workspaceId ?? "w1";
   const rootPaneId = options.rootPaneId ?? `${workspaceId}:p1`;
   const rootTabId = `${workspaceId}:t1`;
@@ -1094,13 +1188,37 @@ test("opens one no-focus tab per worker and never splits the anchor pane", async
   // Every worker gets its own no-focus tab of the same workspace — no
   // capacity limit, no demotion, no split-screen placement.
   expect(runner.calls).toContainEqual([
-    "tab", "create", "--workspace", "w1", "--cwd", "/project", "--label", "loop-task-1", "--no-focus",
+    "tab",
+    "create",
+    "--workspace",
+    "w1",
+    "--cwd",
+    "/project",
+    "--label",
+    "loop-task-1",
+    "--no-focus",
   ]);
   expect(runner.calls).toContainEqual([
-    "tab", "create", "--workspace", "w1", "--cwd", "/project", "--label", "loop-task-2", "--no-focus",
+    "tab",
+    "create",
+    "--workspace",
+    "w1",
+    "--cwd",
+    "/project",
+    "--label",
+    "loop-task-2",
+    "--no-focus",
   ]);
   expect(runner.calls).toContainEqual([
-    "tab", "create", "--workspace", "w1", "--cwd", "/project", "--label", "loop-task-3", "--no-focus",
+    "tab",
+    "create",
+    "--workspace",
+    "w1",
+    "--cwd",
+    "/project",
+    "--label",
+    "loop-task-3",
+    "--no-focus",
   ]);
 
   expect(first).toEqual({
@@ -1115,12 +1233,18 @@ test("opens one no-focus tab per worker and never splits the anchor pane", async
 
   // Focus 비강탈 and no split/layout verbs anywhere.
   expect(runner.calls.some((args) => args.includes("--focus"))).toBe(false);
-  expect(runner.calls.some((args) => args[0] === "pane" && (args[1] === "split" || args[1] === "layout"))).toBe(false);
+  expect(
+    runner.calls.some(
+      (args) => args[0] === "pane" && (args[1] === "split" || args[1] === "layout"),
+    ),
+  ).toBe(false);
 
   // Cleanup closes each worker's own tab; the workspace root tab survives.
   await runtime.cleanup(second);
   expect(runner.calls).toContainEqual(["tab", "close", "w1:t3"]);
-  expect(runner.calls.some((args) => args[0] === "tab" && args[1] === "close" && args[2] === "w1:t1")).toBe(false);
+  expect(
+    runner.calls.some((args) => args[0] === "tab" && args[1] === "close" && args[2] === "w1:t1"),
+  ).toBe(false);
 });
 
 test("cleanup closes a caller-anchored worker's tab without touching the Lead's workspace", async () => {
@@ -1141,7 +1265,9 @@ test("cleanup closes a caller-anchored worker's tab without touching the Lead's 
   expect(runner.calls).toContainEqual(["tab", "close", "w7:t2"]);
   // The caller's workspace, its tabs, and the anchor pane are untouchable.
   expect(runner.calls.some((args) => args[0] === "workspace" && args[1] === "close")).toBe(false);
-  expect(runner.calls.some((args) => args[0] === "tab" && args[1] === "close" && args[2] === "w7:t1")).toBe(false);
+  expect(
+    runner.calls.some((args) => args[0] === "tab" && args[1] === "close" && args[2] === "w7:t1"),
+  ).toBe(false);
   expect(runner.calls.some((args) => args[0] === "pane" && args[1] === "close")).toBe(false);
 });
 
@@ -1167,7 +1293,9 @@ test("closeWorkspace sweeps a caller-anchored run's leftover worker tabs without
   expect(runner.calls).toContainEqual(["tab", "close", "w7:t3"]);
   // The caller's workspace, its own tabs, and the anchor pane are untouchable.
   expect(runner.calls.some((args) => args[0] === "workspace" && args[1] === "close")).toBe(false);
-  expect(runner.calls.some((args) => args[0] === "tab" && args[1] === "close" && args[2] === "w7:t1")).toBe(false);
+  expect(
+    runner.calls.some((args) => args[0] === "tab" && args[1] === "close" && args[2] === "w7:t1"),
+  ).toBe(false);
   expect(runner.calls.some((args) => args[0] === "pane" && args[1] === "close")).toBe(false);
 });
 

@@ -56,7 +56,9 @@ export function jsonOutputSection(contract: WorkerOutputContract): string {
 export function extractWorkerJsonResult(text: string): WorkerJsonResult | undefined {
   const lines = text.split(/\r?\n/);
   for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const line = lines[index].trim();
+    const raw = lines[index];
+    if (raw === undefined) continue; // index < lines.length 가 범위를 보장한다
+    const line = raw.trim();
     if (!line.startsWith("{")) continue;
     let value: unknown;
     try {
@@ -126,6 +128,8 @@ function readString(value: unknown): string | undefined {
 
 function readStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const items = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  const items = value.filter(
+    (item): item is string => typeof item === "string" && item.trim().length > 0,
+  );
   return items.length > 0 ? items : undefined;
 }

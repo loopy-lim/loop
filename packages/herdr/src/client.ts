@@ -105,8 +105,13 @@ export class NodeHerdrRunner implements HerdrRunner {
         finish({ exitCode: 1, stdout, stderr: stderr || error.message });
       });
       child.on("close", (code) => {
-        finish({ exitCode: timedOut ? 124 : code ?? 1, stdout,
-          stderr: timedOut ? `Herdr command timed out after ${this.#timeoutMs}ms${stderr ? `: ${stderr}` : ""}` : stderr });
+        finish({
+          exitCode: timedOut ? 124 : (code ?? 1),
+          stdout,
+          stderr: timedOut
+            ? `Herdr command timed out after ${this.#timeoutMs}ms${stderr ? `: ${stderr}` : ""}`
+            : stderr,
+        });
       });
     });
   }
@@ -151,8 +156,12 @@ export class HerdrWorkerRuntime {
     // Identity and display stay separate: the tab/pane label follows the
     // taskId vocabulary while workerId/agentName keep the stable worker name.
     const label = input.label
-      ? workerLabel({ taskId: input.taskId, kind: input.label.kind, attempt: input.label.attempt,
-          ...(input.label.includeRunMarker ? { runId: input.runId } : {}) })
+      ? workerLabel({
+          taskId: input.taskId,
+          kind: input.label.kind,
+          attempt: input.label.attempt,
+          ...(input.label.includeRunMarker ? { runId: input.runId } : {}),
+        })
       : workerId;
     // One tab per worker (live-tabs ADR placement rule, reinstated
     // 2026-09-25): the worker's interactive conversation TUI runs inside its
@@ -201,25 +210,38 @@ export class HerdrWorkerRuntime {
    * vocabulary; the caller-provided label is accepted for PaneMirrorHost
    * compatibility only.
    */
-  async createPane(runId: string, taskId: string, projectRoot: string, worktree: string, _label?: string, caller?: HerdrCaller): Promise<HerdrWorkerHandle> {
+  async createPane(
+    runId: string,
+    taskId: string,
+    projectRoot: string,
+    worktree: string,
+    _label?: string,
+    caller?: HerdrCaller,
+  ): Promise<HerdrWorkerHandle> {
     assertWorktreeInsideProject(projectRoot, worktree);
     const label = mirrorPaneLabel(taskId);
     // Same placement rule as start(): with a caller the mirror is a sibling
     // tab of the caller's workspace and no Loop-owned workspace is created or
     // tracked; without one, the per-run loop-<runId> workspace is the fallback.
-    const parent = caller ?? await this.#ensureWorkspace({
-      runId,
-      taskId,
-      projectRoot,
-      worktree,
-      execution: { type: "command", command: "echo", args: [] },
-      prompt: "",
-    });
+    const parent =
+      caller ??
+      (await this.#ensureWorkspace({
+        runId,
+        taskId,
+        projectRoot,
+        worktree,
+        execution: { type: "command", command: "echo", args: [] },
+        prompt: "",
+      }));
     const tab = await this.#run([
-      "tab", "create",
-      "--workspace", parent.workspaceId,
-      "--cwd", worktree,
-      "--label", label,
+      "tab",
+      "create",
+      "--workspace",
+      parent.workspaceId,
+      "--cwd",
+      worktree,
+      "--label",
+      label,
       "--no-focus",
     ]);
     const paneId = requiredString(tab, ["result", "root_pane", "pane_id"]);
@@ -275,16 +297,16 @@ export class HerdrWorkerRuntime {
       return await this.#paneStatus(handle.paneId);
     }
     const state = mapState(
-      optionalString(payload, ["result", "agent", "agent_status"])
-        ?? optionalString(payload, ["result", "agent", "state"]),
+      optionalString(payload, ["result", "agent", "agent_status"]) ??
+        optionalString(payload, ["result", "agent", "state"]),
     );
     // Live-tab health signal (ADR §6): a live agent herdr does not consider
     // input-ready is the only observable form of the silent non-interactive
     // fallback (pi falls back to print mode with exit 0). Never judge by exit
     // codes or stdout — surface it as a failure instead.
     if (
-      (state === "running" || state === "blocked" || state === "idle")
-      && optionalBoolean(payload, ["result", "agent", "interactive_ready"]) === false
+      (state === "running" || state === "blocked" || state === "idle") &&
+      optionalBoolean(payload, ["result", "agent", "interactive_ready"]) === false
     ) {
       return "failed";
     }
@@ -305,8 +327,8 @@ export class HerdrWorkerRuntime {
       throw error;
     }
     return mapState(
-      optionalString(payload, ["result", "pane", "agent_status"])
-        ?? optionalString(payload, ["result", "pane", "state"]),
+      optionalString(payload, ["result", "pane", "agent_status"]) ??
+        optionalString(payload, ["result", "pane", "state"]),
     );
   }
 
@@ -354,7 +376,9 @@ export class HerdrWorkerRuntime {
   async steer(handle: HerdrWorkerHandle, message: string): Promise<void> {
     validateHandle(handle);
     if (!handle.agentName) {
-      throw new Error(`Herdr worker ${handle.workerId} has no interactive agent conversation to steer`);
+      throw new Error(
+        `Herdr worker ${handle.workerId} has no interactive agent conversation to steer`,
+      );
     }
     if (message.length === 0) return;
     await this.#run(["agent", "prompt", handle.agentName, message]);
@@ -445,8 +469,12 @@ export class HerdrWorkerRuntime {
       if (!workspaces) {
         throw new Error("Herdr workspace list response is missing workspaces");
       }
-      const found = workspaces.find((w) =>
-        typeof w === "object" && w !== null && "label" in w && (w as { label: unknown }).label === `loop-${runId}`
+      const found = workspaces.find(
+        (w) =>
+          typeof w === "object" &&
+          w !== null &&
+          "label" in w &&
+          (w as { label: unknown }).label === `loop-${runId}`,
       );
       if (found) {
         const wsId = optionalString(found, ["workspace_id"]);
@@ -460,7 +488,12 @@ export class HerdrWorkerRuntime {
     if (!workspace.owned) {
       return await this.#sweepRunSurfaces(runId, workspace);
     }
-    return await this.#teardownWorkspace(runId, workspace.workspaceId, workspace.rootPaneId, workspace.tabIds);
+    return await this.#teardownWorkspace(
+      runId,
+      workspace.workspaceId,
+      workspace.rootPaneId,
+      workspace.tabIds,
+    );
   }
 
   /**
@@ -597,14 +630,16 @@ export class HerdrWorkerRuntime {
     await this.#run(["pane", "run", handle.paneId, execution.command, ...execution.args]);
   }
 
-  async #ensureWorkspace(input: HerdrWorkerInput): Promise<{ workspaceId: string; paneId: string }> {
+  async #ensureWorkspace(
+    input: HerdrWorkerInput,
+  ): Promise<{ workspaceId: string; paneId: string }> {
     const cached = this.#workspaces.get(input.runId);
     if (cached) {
       return { workspaceId: cached.workspaceId, paneId: cached.rootPaneId };
     }
     const pending = this.#pendingWorkspaces.get(input.runId);
     if (pending) return pending;
-    
+
     const promise = (async () => {
       try {
         const payload = await this.#run([
@@ -679,7 +714,10 @@ export class HerdrWorkerRuntime {
 }
 
 function workerName(taskId: string): string {
-  const safe = taskId.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  const safe = taskId
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
   if (!safe) throw new Error("task id cannot produce a Herdr worker name");
   const name = `loop-${safe}`;
   if (name.length <= 32) return name;
@@ -707,7 +745,11 @@ export interface WorkerLabelInput {
 
 /** Short display discriminator for concurrent worker tabs from separate runs. */
 export function workerRunMarker(runId: string): string {
-  const readable = runId.replace(/^loop-/, "").replace(/[^a-z0-9]/gi, "").slice(0, 6).toLowerCase();
+  const readable = runId
+    .replace(/^loop-/, "")
+    .replace(/[^a-z0-9]/gi, "")
+    .slice(0, 6)
+    .toLowerCase();
   return readable || createHash("sha256").update(runId).digest("hex").slice(0, 6);
 }
 
@@ -721,9 +763,10 @@ export function workerRunMarker(runId: string): string {
 export function workerLabel(input: WorkerLabelInput): string {
   const taskId = input.taskId.trim() || "task";
   const suffix = `·${kindAlias(input.kind)}·a${Math.max(0, input.attempt)}${input.runId ? `·${workerRunMarker(input.runId)}` : ""}`;
-  const head = taskId.length + suffix.length <= LABEL_LIMIT
-    ? taskId
-    : taskId.slice(0, Math.max(1, LABEL_LIMIT - suffix.length));
+  const head =
+    taskId.length + suffix.length <= LABEL_LIMIT
+      ? taskId
+      : taskId.slice(0, Math.max(1, LABEL_LIMIT - suffix.length));
   return `${head}${suffix}`;
 }
 
@@ -734,9 +777,10 @@ export function workerLabel(input: WorkerLabelInput): string {
 export function mirrorPaneLabel(taskId: string): string {
   const head = taskId.trim() || "task";
   const prefix = "mirror·";
-  const trimmed = head.length + prefix.length <= LABEL_LIMIT
-    ? head
-    : head.slice(0, Math.max(1, LABEL_LIMIT - prefix.length));
+  const trimmed =
+    head.length + prefix.length <= LABEL_LIMIT
+      ? head
+      : head.slice(0, Math.max(1, LABEL_LIMIT - prefix.length));
   return `${prefix}${trimmed}`;
 }
 

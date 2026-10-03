@@ -14,7 +14,9 @@ export interface SourceState {
 }
 
 export async function captureSourceState(
-  directory: string, excludedAbsolutePaths: readonly string[] = [], scopes?: readonly string[],
+  directory: string,
+  excludedAbsolutePaths: readonly string[] = [],
+  scopes?: readonly string[],
 ): Promise<SourceState | undefined> {
   let root: string;
   try {
@@ -22,10 +24,14 @@ export async function captureSourceState(
     // Only exact repository roots are audited. This avoids launching Git for
     // temporary non-repository fixtures and prevents ambiguous subdir scopes.
     await lstat(join(root, ".git"));
-  } catch { return undefined; }
+  } catch {
+    return undefined;
+  }
   let top: string;
   try {
-    const result = await execFileAsync("git", ["-C", root, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
+    const result = await execFileAsync("git", ["-C", root, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+    });
     top = await realpath(result.stdout.trim());
   } catch {
     return undefined;
@@ -33,22 +39,38 @@ export async function captureSourceState(
   // A run rooted in a subdirectory has ambiguous scope paths. Do not label
   // the parent repository's paths as if they were relative to this run.
   if (top !== root) return undefined;
-  const { stdout } = await execFileAsync("git", ["-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
-    encoding: "buffer",
-    maxBuffer: 32 * 1024 * 1024,
-  });
-  const excluded = await Promise.all(excludedAbsolutePaths.map(async path => {
-    const absolute = resolve(root, path);
-    try { return await realpath(absolute); }
-    catch { return join(await realpath(dirname(absolute)), basename(absolute)); }
-  }));
-  const paths = [...new Set(Buffer.from(stdout).toString("utf8").split("\0").filter(Boolean))]
-    .filter(path => !excluded.some(base => {
+  const { stdout } = await execFileAsync(
+    "git",
+    ["-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+    {
+      encoding: "buffer",
+      maxBuffer: 32 * 1024 * 1024,
+    },
+  );
+  const excluded = await Promise.all(
+    excludedAbsolutePaths.map(async (path) => {
       const absolute = resolve(root, path);
-      return absolute === base || absolute === `${base}-wal` || absolute === `${base}-shm`
-        || absolute.startsWith(`${base}.artifacts${sep}`);
-    }))
-    .filter(path => !scopes || scopes.length === 0 || scopeContainsPath(scopes, path))
+      try {
+        return await realpath(absolute);
+      } catch {
+        return join(await realpath(dirname(absolute)), basename(absolute));
+      }
+    }),
+  );
+  const paths = [...new Set(Buffer.from(stdout).toString("utf8").split("\0").filter(Boolean))]
+    .filter(
+      (path) =>
+        !excluded.some((base) => {
+          const absolute = resolve(root, path);
+          return (
+            absolute === base ||
+            absolute === `${base}-wal` ||
+            absolute === `${base}-shm` ||
+            absolute.startsWith(`${base}.artifacts${sep}`)
+          );
+        }),
+    )
+    .filter((path) => !scopes || scopes.length === 0 || scopeContainsPath(scopes, path))
     .sort();
   const files = new Map<string, string>();
   const total = createHash("sha256");
@@ -58,8 +80,11 @@ export async function captureSourceState(
     try {
       const stat = await lstat(`${root}/${path}`);
       mode = stat.isSymbolicLink() ? "link" : stat.isFile() ? "file" : "other";
-      bytes = stat.isSymbolicLink() ? Buffer.from(await readlink(`${root}/${path}`))
-        : stat.isFile() ? await readFile(`${root}/${path}`) : Buffer.alloc(0);
+      bytes = stat.isSymbolicLink()
+        ? Buffer.from(await readlink(`${root}/${path}`))
+        : stat.isFile()
+          ? await readFile(`${root}/${path}`)
+          : Buffer.alloc(0);
     } catch (error) {
       // A tracked deletion is part of the source state. Other I/O failures
       // should stop verification rather than silently produce a stable hash.
@@ -75,22 +100,27 @@ export async function captureSourceState(
 }
 
 export function changedSourcePaths(before: SourceState, after: SourceState): string[] {
-  if (before.root !== after.root) throw new Error("source snapshots belong to different repositories");
+  if (before.root !== after.root)
+    throw new Error("source snapshots belong to different repositories");
   return [...new Set([...before.files.keys(), ...after.files.keys()])]
-    .filter(path => before.files.get(path) !== after.files.get(path))
+    .filter((path) => before.files.get(path) !== after.files.get(path))
     .sort();
 }
 
 export function scopeContainsPath(scopes: readonly string[], path: string): boolean {
-  return scopes.some(scope => {
+  return scopes.some((scope) => {
     if (scope === "." || scope === "./") return true;
     const normalized = scope.replace(/^\.\//, "");
-    if (!normalized || normalized.startsWith("/") || normalized.split("/").includes("..")) return false;
+    if (!normalized || normalized.startsWith("/") || normalized.split("/").includes(".."))
+      return false;
     let pattern = "^";
     for (let index = 0; index < normalized.length; index++) {
-      const char = normalized[index]!;
-      if (char === "*" && normalized[index + 1] === "*") { pattern += ".*"; index++; }
-      else if (char === "*") pattern += "[^/]*";
+      const char = normalized[index];
+      if (char === undefined) break; // index < length 가 범위를 보장한다
+      if (char === "*" && normalized[index + 1] === "*") {
+        pattern += ".*";
+        index++;
+      } else if (char === "*") pattern += "[^/]*";
       else if (char === "?") pattern += "[^/]";
       else pattern += char.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     }

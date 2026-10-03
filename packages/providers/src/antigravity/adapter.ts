@@ -74,16 +74,14 @@ export class AntigravityProvider extends ProcessProvider {
       isolation: "partial",
       filesystemScoped: true,
       networkIsolated: false,
-      detail: "agy --sandbox (vendor CLI policy); escape properties unaudited, not a security boundary",
+      detail:
+        "agy --sandbox (vendor CLI policy); escape properties unaudited, not a security boundary",
     });
   }
 
   protected launch(input: StartWorkerInput) {
     const cwd = input.workingDirectory ?? this.#cwd;
-    const args = [
-      "--output-format",
-      "stream-json",
-    ];
+    const args = ["--output-format", "stream-json"];
     if (this.#sandbox) args.push("--sandbox");
     if (this.#model) args.push("--model", this.#model);
     args.push("--print", buildWorkerPrompt(input));

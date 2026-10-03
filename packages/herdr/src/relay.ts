@@ -37,7 +37,11 @@ export function parsePaneLine(line: string): ParsedPaneLine {
     const value: unknown = JSON.parse(text);
     if (value !== null && typeof value === "object" && !Array.isArray(value)) {
       const entries = Object.entries(value as Record<string, unknown>);
-      if (entries.length === 1 && entries[0]![0] === DISPLAY_FRAME_KEY && typeof entries[0]![1] === "string") {
+      if (
+        entries.length === 1 &&
+        entries[0]![0] === DISPLAY_FRAME_KEY &&
+        typeof entries[0]![1] === "string"
+      ) {
         return { kind: "display", text: entries[0]![1] };
       }
     }
@@ -91,11 +95,17 @@ export class SteerRelaySession {
     const shown = this.#options.redact(parsed.text, this.#lineTextLimit);
     if (!shown) return;
     try {
-      await this.#options.deliver({ runId: this.#options.runId, taskId: this.#options.taskId, message: parsed.text });
+      await this.#options.deliver({
+        runId: this.#options.runId,
+        taskId: this.#options.taskId,
+        message: parsed.text,
+      });
       this.#options.echo(`→ steer: ${shown}`);
     } catch (error) {
       const brief = error instanceof Error ? error.message : String(error);
-      this.#options.echo(`! steer not delivered: ${this.#options.redact(brief, this.#lineTextLimit)}`);
+      this.#options.echo(
+        `! steer not delivered: ${this.#options.redact(brief, this.#lineTextLimit)}`,
+      );
     }
   }
 }
@@ -104,7 +114,10 @@ export class SteerRelaySession {
  * Drives a relay over an async line source and returns when the source ends
  * (pane close → stdin EOF), so the process exits with the worker's pane.
  */
-export async function runSteerRelaySession(lines: AsyncIterable<string>, options: SteerRelayOptions): Promise<void> {
+export async function runSteerRelaySession(
+  lines: AsyncIterable<string>,
+  options: SteerRelayOptions,
+): Promise<void> {
   const session = new SteerRelaySession(options);
   for await (const line of lines) {
     await session.handleLine(line);

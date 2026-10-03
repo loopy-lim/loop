@@ -60,12 +60,15 @@ export function addDecimalStrings(left: string, right: string): string {
     if (!match) throw new Error(`usage cost is not a decimal string: ${JSON.stringify(value)}`);
     const negative = value.trim().startsWith("-");
     const [whole, fraction = ""] = value.trim().replace(/^-/, "").split(".");
+    if (whole === undefined)
+      throw new Error(`usage cost is not a decimal string: ${JSON.stringify(value)}`);
     return { negative, whole: BigInt(whole), fraction, scale: fraction.length };
   };
   const a = parse(left);
   const b = parse(right);
   const scale = Math.max(a.scale, b.scale);
-  const align = (entry: ReturnType<typeof parse>) => entry.whole * 10n ** BigInt(scale) + BigInt(entry.fraction.padEnd(scale, "0") || "0");
+  const align = (entry: ReturnType<typeof parse>) =>
+    entry.whole * 10n ** BigInt(scale) + BigInt(entry.fraction.padEnd(scale, "0") || "0");
   const sum = (a.negative ? -1n : 1n) * align(a) + (b.negative ? -1n : 1n) * align(b);
   const negative = sum < 0n;
   const digits = (negative ? -sum : sum).toString().padStart(scale + 1, "0");
@@ -95,7 +98,10 @@ export class UsageLedger {
    */
   record(record: UsageRecord): void {
     if (!record.runId?.trim()) throw new Error("usage record requires runId");
-    if (!isUsageBasis(record.usage?.basis)) throw new Error(`usage record basis must be "observed" or "estimated", got ${JSON.stringify(record.usage?.basis)}`);
+    if (!isUsageBasis(record.usage?.basis))
+      throw new Error(
+        `usage record basis must be "observed" or "estimated", got ${JSON.stringify(record.usage?.basis)}`,
+      );
     for (const axis of ["inputTokens", "outputTokens", "cacheReadTokens"] as const) {
       const value: unknown = record.usage[axis];
       if (value != null && !nonNegativeInteger(value)) {
@@ -129,9 +135,13 @@ export class UsageLedger {
     const records = this.records(runId);
     const bases: UsageBasisTotals[] = [];
     for (const basis of BASES) {
-      const scoped = records.filter(record => record.usage.basis === basis);
+      const scoped = records.filter((record) => record.usage.basis === basis);
       if (scoped.length === 0) continue;
-      bases.push({ basis, recordCount: scoped.length, totals: totalize(scoped.map(record => record.usage)) });
+      bases.push({
+        basis,
+        recordCount: scoped.length,
+        totals: totalize(scoped.map((record) => record.usage)),
+      });
     }
     return { runId, bases, recordCount: records.length };
   }
@@ -151,10 +161,16 @@ export class UsageLedger {
       summary: {
         runId,
         recordCount: scoped.length,
-        bases: BASES.filter(basis => scoped.some(record => record.usage.basis === basis)).map(basis => {
-          const filtered = scoped.filter(record => record.usage.basis === basis);
-          return { basis, recordCount: filtered.length, totals: totalize(filtered.map(record => record.usage)) };
-        }),
+        bases: BASES.filter((basis) => scoped.some((record) => record.usage.basis === basis)).map(
+          (basis) => {
+            const filtered = scoped.filter((record) => record.usage.basis === basis);
+            return {
+              basis,
+              recordCount: filtered.length,
+              totals: totalize(filtered.map((record) => record.usage)),
+            };
+          },
+        ),
       },
     }));
   }
@@ -174,7 +190,9 @@ function normalizeUsage(usage: UsageMetadata): UsageMetadata {
 function totalize(usages: UsageMetadata[]): UsageAxisTotals {
   const totals: UsageAxisTotals = {};
   const sumAxis = (axis: "inputTokens" | "outputTokens" | "cacheReadTokens") => {
-    const values = usages.map(usage => usage[axis]).filter((value): value is number => value != null);
+    const values = usages
+      .map((usage) => usage[axis])
+      .filter((value): value is number => value != null);
     if (values.length > 0) totals[axis] = values.reduce((left, right) => left + right, 0);
   };
   sumAxis("inputTokens");

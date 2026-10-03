@@ -33,10 +33,7 @@ export function compactLines(lines: string[], options: CompactLinesOptions): str
   const compacted = compactItems(lines, options.lineLimit);
   const visible = compacted.items.map((line) => singleLine(line, options.lineTextLimit));
   if (compacted.omitted === 0) return visible;
-  return [
-    ...visible,
-    singleLine(options.overflow(compacted.omitted), options.lineTextLimit),
-  ];
+  return [...visible, singleLine(options.overflow(compacted.omitted), options.lineTextLimit)];
 }
 
 export function compactItems<T>(items: T[], lineLimit: number): CompactedItems<T> {

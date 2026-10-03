@@ -23,8 +23,8 @@ export function renderStatus(view: StatusView, limits: OutputLimits): string {
   } as const;
   const runLine = `Run ${view.runId}`;
   const workersLine = `Workers: ${view.workers} · Attention: ${view.attention}`;
-  const stageLines = view.stages.map((stage) =>
-    `${stage.name} ${stage.done}/${stage.total} ${symbol[stage.state]}`
+  const stageLines = view.stages.map(
+    (stage) => `${stage.name} ${stage.done}/${stage.total} ${symbol[stage.state]}`,
   );
   if (limits.statusLineLimit < 3) {
     return compactLines([runLine, ...stageLines, workersLine], {
@@ -34,18 +34,14 @@ export function renderStatus(view: StatusView, limits: OutputLimits): string {
     }).join("\n");
   }
   const stageBudget = limits.statusLineLimit - 2;
-  const stages = compactLines(
-    stageLines,
-    {
-      lineLimit: stageBudget,
-      lineTextLimit: limits.lineTextLimit,
-      overflow: (omitted) => `… ${omitted} more status lines`,
-    },
-  );
+  const stages = compactLines(stageLines, {
+    lineLimit: stageBudget,
+    lineTextLimit: limits.lineTextLimit,
+    overflow: (omitted) => `… ${omitted} more status lines`,
+  });
   return [
     singleLine(runLine, limits.lineTextLimit),
     ...stages,
     singleLine(workersLine, limits.lineTextLimit),
-  ]
-    .join("\n");
+  ].join("\n");
 }

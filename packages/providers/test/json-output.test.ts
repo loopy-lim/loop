@@ -75,7 +75,11 @@ describe("worker JSON output contract (G16)", () => {
 
   test("a parsed JSON result replaces the text summary and carries evidence", () => {
     const base = normalizeProcessResult({ exitCode: 0, stdout: "text done", stderr: "" });
-    const enforced = enforceOutputContract(base, { format: "json" }, 'step one\n{"summary": "json done", "changed_files": ["x.ts"], "risks": ["watch y"]}');
+    const enforced = enforceOutputContract(
+      base,
+      { format: "json" },
+      'step one\n{"summary": "json done", "changed_files": ["x.ts"], "risks": ["watch y"]}',
+    );
     expect(enforced.success).toBe(true);
     expect(enforced.summary).toContain("json done");
     expect(enforced.summary).toContain("changed_files: x.ts");
@@ -84,13 +88,21 @@ describe("worker JSON output contract (G16)", () => {
 
   test("requireValid fails an unparseable result as retryable incomplete output", () => {
     const base = normalizeProcessResult({ exitCode: 0, stdout: "text only, no json", stderr: "" });
-    const enforced = enforceOutputContract(base, { format: "json", requireValid: true }, "text only, no json");
+    const enforced = enforceOutputContract(
+      base,
+      { format: "json", requireValid: true },
+      "text only, no json",
+    );
     expect(enforced.success).toBe(false);
     expect(enforced.failure).toEqual({ kind: "incomplete_output", retryable: true });
   });
 
   test("without a contract the normalized result keeps the exact legacy behavior", () => {
-    const result = normalizeProcessResult({ exitCode: 0, stdout: 'prefix\n{"type":"item.completed","item":{"type":"agent_message","text":"done"}}', stderr: "" });
+    const result = normalizeProcessResult({
+      exitCode: 0,
+      stdout: 'prefix\n{"type":"item.completed","item":{"type":"agent_message","text":"done"}}',
+      stderr: "",
+    });
     expect(result).toEqual({ success: true, summary: "done", sessionId: undefined });
   });
 

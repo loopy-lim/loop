@@ -9,14 +9,36 @@ import { Orchestrator } from "../src/coordinator";
 import { CompletionVerifier } from "../src/completion";
 
 beforeAll(() => protocol.rustra.ready());
-const verifier = new CompletionVerifier({ run: async () => ({ exitCode: 0, stdout: "verification evidence", stderr: "", timedOut: false }) });
+const verifier = new CompletionVerifier({
+  run: async () => ({ exitCode: 0, stdout: "verification evidence", stderr: "", timedOut: false }),
+});
 function fixture(id: string, dependencies: string[] = []): TaskSpecInput {
-  return { id, title: id, kind: "research", dependencies, readScope: ["docs/**"], writeScope: [], requirements: ["inspect evidence"], completionChecks: [{ id: "check", command: "true", args: [], workingDirectory: null, timeoutMs: 1000 }], preferredCompute: "fast", minimumCompute: "fast", maximumCompute: "fast", maxAttempts: 2 };
+  return {
+    id,
+    title: id,
+    kind: "research",
+    dependencies,
+    readScope: ["docs/**"],
+    writeScope: [],
+    requirements: ["inspect evidence"],
+    completionChecks: [
+      { id: "check", command: "true", args: [], workingDirectory: null, timeoutMs: 1000 },
+    ],
+    preferredCompute: "fast",
+    minimumCompute: "fast",
+    maximumCompute: "fast",
+    maxAttempts: 2,
+  };
 }
 function setup(provider: FakeProvider) {
   const directory = mkdtempSync(join(tmpdir(), "loop-intervention-"));
   const input = { databasePath: join(directory, "run.db"), runId: "run" };
-  const orchestrator = new Orchestrator({ control: protocol, providers: new ProviderRegistry([provider]), maxWorkers: 2, completionVerifier: verifier });
+  const orchestrator = new Orchestrator({
+    control: protocol,
+    providers: new ProviderRegistry([provider]),
+    maxWorkers: 2,
+    completionVerifier: verifier,
+  });
   return { directory, input, orchestrator };
 }
 async function until(predicate: () => Promise<boolean>) {
@@ -33,7 +55,11 @@ test("quota failure releases the first worker and retries on another provider", 
   class QuotaProvider extends FakeProvider {
     override async result(workerId: string) {
       await super.result(workerId);
-      return { success: false, summary: "quota exhausted", failure: { kind: "quota" as const, retryable: true } };
+      return {
+        success: false,
+        summary: "quota exhausted",
+        failure: { kind: "quota" as const, retryable: true },
+      };
     }
     async release() {
       const snapshot = await protocol.getSnapshot(input);
@@ -56,8 +82,20 @@ test("quota failure releases the first worker and retries on another provider", 
   const fallback = new Fallback("fallback", ["fast"]);
   const directory = mkdtempSync(join(tmpdir(), "loop-quota-fallback-"));
   const input = { databasePath: join(directory, "run.db"), runId: "quota-fallback" };
-  const orchestrator = new Orchestrator({ control: protocol, providers: new ProviderRegistry([quota, fallback], { zai: { costWeight: 1, latency: 1 }, fallback: { costWeight: 3, latency: 2 } }), maxWorkers: 1, completionVerifier: verifier });
-  const result = await orchestrator.run({ ...input, tasks: [fixture("a")], workingDirectory: directory });
+  const orchestrator = new Orchestrator({
+    control: protocol,
+    providers: new ProviderRegistry([quota, fallback], {
+      zai: { costWeight: 1, latency: 1 },
+      fallback: { costWeight: 3, latency: 2 },
+    }),
+    maxWorkers: 1,
+    completionVerifier: verifier,
+  });
+  const result = await orchestrator.run({
+    ...input,
+    tasks: [fixture("a")],
+    workingDirectory: directory,
+  });
   expect(result.status).toBe("completed");
   expect(result.providersByTask.a).toEqual(["zai", "fallback"]);
   expect(quota.active).toBe(0);
@@ -66,7 +104,14 @@ test("quota failure releases the first worker and retries on another provider", 
   expect((await protocol.getSnapshot(input)).activeWorkers).toEqual([]);
 });
 
-for (const mode of ["exhausted", "recovered", "cleanup", "authentication", "cancel", "pause"] as const) {
+for (const mode of [
+  "exhausted",
+  "recovered",
+  "cleanup",
+  "authentication",
+  "cancel",
+  "pause",
+] as const) {
   test(`quota fallback lifecycle: ${mode}`, async () => {
     const directory = mkdtempSync(join(tmpdir(), "loop-quota-lifecycle-"));
     const input = { databasePath: join(directory, "run.db"), runId: mode };
@@ -75,7 +120,14 @@ for (const mode of ["exhausted", "recovered", "cleanup", "authentication", "canc
       override async result(id: string) {
         const result = await super.result(id);
         if (mode === "recovered" && ++calls > 1) return result;
-        return { success: false, summary: "classified failure", failure: { kind: mode === "authentication" ? "authentication" as const : "quota" as const, retryable: false } };
+        return {
+          success: false,
+          summary: "classified failure",
+          failure: {
+            kind: mode === "authentication" ? ("authentication" as const) : ("quota" as const),
+            retryable: false,
+          },
+        };
       }
       async release() {
         if (mode === "cleanup") throw new Error("cannot close quota worker");
@@ -86,7 +138,13 @@ for (const mode of ["exhausted", "recovered", "cleanup", "authentication", "canc
     class Secondary extends FakeProvider {
       override async result(id: string) {
         const result = await super.result(id);
-        return mode === "exhausted" ? { success: false, summary: "second pool exhausted", failure: { kind: "quota" as const, retryable: true } } : result;
+        return mode === "exhausted"
+          ? {
+              success: false,
+              summary: "second pool exhausted",
+              failure: { kind: "quota" as const, retryable: true },
+            }
+          : result;
       }
     }
     const primary = new Primary("zai", ["fast"]);
@@ -97,10 +155,32 @@ for (const mode of ["exhausted", "recovered", "cleanup", "authentication", "canc
       "zai-other-model": { costWeight: 2, latency: 0, quotaGroup: "zai-account" },
       fallback: { costWeight: 3, latency: 0 },
     });
-    const runtime = new Orchestrator({ control: protocol, providers, maxWorkers: 1, completionVerifier: verifier });
-    const result = await runtime.run({ ...input, workingDirectory: directory, tasks: ["recovered", "pause"].includes(mode) ? [fixture("a"), fixture("b", ["a"])] : [fixture("a")] });
-    expect(result.status).toBe(mode === "recovered" ? "completed" : mode === "cancel" ? "cancelled" : mode === "pause" ? "paused" : "attention");
-    expect(result.providersByTask.a).toEqual(["zai", ...(["exhausted", "recovered", "pause"].includes(mode) ? ["fallback"] : [])]);
+    const runtime = new Orchestrator({
+      control: protocol,
+      providers,
+      maxWorkers: 1,
+      completionVerifier: verifier,
+    });
+    const result = await runtime.run({
+      ...input,
+      workingDirectory: directory,
+      tasks: ["recovered", "pause"].includes(mode)
+        ? [fixture("a"), fixture("b", ["a"])]
+        : [fixture("a")],
+    });
+    expect(result.status).toBe(
+      mode === "recovered"
+        ? "completed"
+        : mode === "cancel"
+          ? "cancelled"
+          : mode === "pause"
+            ? "paused"
+            : "attention",
+    );
+    expect(result.providersByTask.a).toEqual([
+      "zai",
+      ...(["exhausted", "recovered", "pause"].includes(mode) ? ["fallback"] : []),
+    ]);
     expect(sibling.maxConcurrent).toBe(0);
     const snapshot = await protocol.getSnapshot(input);
     expect(snapshot.activeWorkers).toHaveLength(mode === "cleanup" ? 1 : 0);
@@ -109,15 +189,25 @@ for (const mode of ["exhausted", "recovered", "cleanup", "authentication", "canc
       expect(snapshot.openAttentionIds).toEqual([]);
       expect((await protocol.getTaskContext({ ...input, taskId: "a" })).attempt).toBe(0);
     }
-    if (mode === "exhausted") expect(snapshot.attention.some(item => item.summary.includes("fallback exhausted"))).toBe(true);
+    if (mode === "exhausted")
+      expect(snapshot.attention.some((item) => item.summary.includes("fallback exhausted"))).toBe(
+        true,
+      );
   });
 }
 
 test("external cancellation stops workers before reporting cancelled", async () => {
   const provider = new FakeProvider("fake", ["fast"], { delayMs: 500 });
   const { input, directory, orchestrator } = setup(provider);
-  const pending = orchestrator.run({ ...input, tasks: [fixture("a")], workingDirectory: directory });
-  const observed = pending.then(value => value, error => ({ status: "error", error }));
+  const pending = orchestrator.run({
+    ...input,
+    tasks: [fixture("a")],
+    workingDirectory: directory,
+  });
+  const observed = pending.then(
+    (value) => value,
+    (error) => ({ status: "error", error }),
+  );
   await until(async () => provider.active === 1);
   await protocol.cancelRun(input);
   expect((await observed).status).toBe("cancelled");
@@ -129,12 +219,23 @@ test("external cancellation stops workers before reporting cancelled", async () 
 test("pause drains current work and resume passes upstream results and new guidance", async () => {
   const received: StartWorkerInput[] = [];
   class CapturingProvider extends FakeProvider {
-    override async start(input: StartWorkerInput) { received.push(input); return super.start(input); }
+    override async start(input: StartWorkerInput) {
+      received.push(input);
+      return super.start(input);
+    }
   }
   const provider = new CapturingProvider("fake", ["fast"], { delayMs: 60 });
   const { input, directory, orchestrator } = setup(provider);
-  const pending = orchestrator.run({ ...input, tasks: [fixture("a"), fixture("b", ["a"])], workingDirectory: directory, intent: "Improve graph" });
-  const observed = pending.then(value => value, error => ({ status: "error", error }));
+  const pending = orchestrator.run({
+    ...input,
+    tasks: [fixture("a"), fixture("b", ["a"])],
+    workingDirectory: directory,
+    intent: "Improve graph",
+  });
+  const observed = pending.then(
+    (value) => value,
+    (error) => ({ status: "error", error }),
+  );
   await until(async () => provider.active === 1);
   await protocol.pauseRun(input);
   expect((await observed).status).toBe("paused");
@@ -155,13 +256,34 @@ test("cancel during verification waits for its process to stop", async () => {
   const { input, directory } = setup(provider);
   let verifying = false;
   let stopped = false;
-  const completion = new CompletionVerifier({ run: async (_command, _args, options) => {
-    verifying = true;
-    await new Promise<void>(resolve => options.signal!.addEventListener("abort", () => setTimeout(() => { stopped = true; resolve(); }, 30), { once: true }));
-    return { exitCode: 128, stdout: "", stderr: "stopped", timedOut: false };
-  } });
-  const orchestrator = new Orchestrator({ control: protocol, providers: new ProviderRegistry([provider]), maxWorkers: 1, completionVerifier: completion });
-  const pending = orchestrator.run({ ...input, tasks: [fixture("a")], workingDirectory: directory });
+  const completion = new CompletionVerifier({
+    run: async (_command, _args, options) => {
+      verifying = true;
+      await new Promise<void>((resolve) =>
+        options.signal!.addEventListener(
+          "abort",
+          () =>
+            setTimeout(() => {
+              stopped = true;
+              resolve();
+            }, 30),
+          { once: true },
+        ),
+      );
+      return { exitCode: 128, stdout: "", stderr: "stopped", timedOut: false };
+    },
+  });
+  const orchestrator = new Orchestrator({
+    control: protocol,
+    providers: new ProviderRegistry([provider]),
+    maxWorkers: 1,
+    completionVerifier: completion,
+  });
+  const pending = orchestrator.run({
+    ...input,
+    tasks: [fixture("a")],
+    workingDirectory: directory,
+  });
   await until(async () => verifying);
   await protocol.cancelRun(input);
   expect((await protocol.getSnapshot(input)).state).toBe("cancelling");
@@ -172,7 +294,11 @@ test("cancel during verification waits for its process to stop", async () => {
 test("a second execution owner cannot dispatch duplicate work", async () => {
   const provider = new FakeProvider("fake", ["fast"], { delayMs: 100 });
   const { input, directory, orchestrator } = setup(provider);
-  const pending = orchestrator.run({ ...input, tasks: [fixture("a")], workingDirectory: directory });
+  const pending = orchestrator.run({
+    ...input,
+    tasks: [fixture("a")],
+    workingDirectory: directory,
+  });
   await until(async () => provider.active === 1);
   expect(["running", "completed"]).toContain((await orchestrator.execute(input)).status);
   expect((await pending).status).toBe("completed");
@@ -186,13 +312,19 @@ test("pause arriving during provider selection drains without inventing a failur
   class SelectingProvider extends FakeProvider {
     override async capabilities() {
       selecting = true;
-      await new Promise<void>(resolve => { release = resolve; });
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
       return super.capabilities();
     }
   }
   const provider = new SelectingProvider("fake", ["fast"]);
   const { input, directory, orchestrator } = setup(provider);
-  const pending = orchestrator.run({ ...input, tasks: [fixture("a")], workingDirectory: directory });
+  const pending = orchestrator.run({
+    ...input,
+    tasks: [fixture("a")],
+    workingDirectory: directory,
+  });
   await until(async () => selecting);
   await protocol.pauseRun(input);
   release();
@@ -206,36 +338,79 @@ test("independent workers and their verification use the same bounded parallel c
   const { input, directory } = setup(provider);
   let checking = 0;
   let maxChecking = 0;
-  const completion = new CompletionVerifier({ run: async () => {
-    checking += 1;
-    maxChecking = Math.max(maxChecking, checking);
-    await Bun.sleep(50);
-    checking -= 1;
-    return { exitCode: 0, stdout: "passed", stderr: "", timedOut: false };
-  } });
-  const runtime = new Orchestrator({ control: protocol, providers: new ProviderRegistry([provider]), maxWorkers: 2, completionVerifier: completion });
-  expect((await runtime.run({ ...input, workingDirectory: directory, tasks: [fixture("a"), fixture("b"), fixture("c")] })).status).toBe("completed");
+  const completion = new CompletionVerifier({
+    run: async () => {
+      checking += 1;
+      maxChecking = Math.max(maxChecking, checking);
+      await Bun.sleep(50);
+      checking -= 1;
+      return { exitCode: 0, stdout: "passed", stderr: "", timedOut: false };
+    },
+  });
+  const runtime = new Orchestrator({
+    control: protocol,
+    providers: new ProviderRegistry([provider]),
+    maxWorkers: 2,
+    completionVerifier: completion,
+  });
+  expect(
+    (
+      await runtime.run({
+        ...input,
+        workingDirectory: directory,
+        tasks: [fixture("a"), fixture("b"), fixture("c")],
+      })
+    ).status,
+  ).toBe("completed");
   expect(maxChecking).toBe(2);
   expect(provider.maxConcurrent).toBe(2);
 });
 
 test("cancellation can interrupt a provider capability lookup", async () => {
-  class HangingProbe extends FakeProvider { override capabilities(): ReturnType<FakeProvider["capabilities"]> { return new Promise(() => {}); } }
+  class HangingProbe extends FakeProvider {
+    override capabilities(): ReturnType<FakeProvider["capabilities"]> {
+      return new Promise(() => {});
+    }
+  }
   const provider = new HangingProbe("fake", ["fast"]);
   const { input, directory, orchestrator } = setup(provider);
-  const pending = orchestrator.run({ ...input, tasks: [fixture("a")], workingDirectory: directory });
-  await until(async () => { try { return (await protocol.getSnapshot(input)).tasks[0]?.state === "ready"; } catch { return false; } });
+  const pending = orchestrator.run({
+    ...input,
+    tasks: [fixture("a")],
+    workingDirectory: directory,
+  });
+  await until(async () => {
+    try {
+      return (await protocol.getSnapshot(input)).tasks[0]?.state === "ready";
+    } catch {
+      return false;
+    }
+  });
   await protocol.cancelRun(input);
   expect((await pending).status).toBe("cancelled");
   expect(provider.active).toBe(0);
 });
 
 test("interrupted startup preserves unknown worker state for reconciliation", async () => {
-  class HangingStart extends FakeProvider { override start(): ReturnType<FakeProvider["start"]> { return new Promise(() => {}); } }
+  class HangingStart extends FakeProvider {
+    override start(): ReturnType<FakeProvider["start"]> {
+      return new Promise(() => {});
+    }
+  }
   const provider = new HangingStart("fake", ["fast"]);
   const { input, directory, orchestrator } = setup(provider);
-  const pending = orchestrator.run({ ...input, tasks: [fixture("a")], workingDirectory: directory });
-  await until(async () => { try { return (await protocol.getSnapshot(input)).activeWorkers.length === 1; } catch { return false; } });
+  const pending = orchestrator.run({
+    ...input,
+    tasks: [fixture("a")],
+    workingDirectory: directory,
+  });
+  await until(async () => {
+    try {
+      return (await protocol.getSnapshot(input)).activeWorkers.length === 1;
+    } catch {
+      return false;
+    }
+  });
   await protocol.cancelRun(input);
   expect((await pending).status).toBe("attention");
   const snapshot = await protocol.getSnapshot(input);
@@ -246,17 +421,33 @@ test("interrupted startup preserves unknown worker state for reconciliation", as
 
 test("worker resource release retries transient failures before completing", async () => {
   let attempts = 0;
-  class RetryRelease extends FakeProvider { async release() { if (++attempts === 1) throw new Error("transient close error"); } }
+  class RetryRelease extends FakeProvider {
+    async release() {
+      if (++attempts === 1) throw new Error("transient close error");
+    }
+  }
   const { input, directory, orchestrator } = setup(new RetryRelease("fake", ["fast"]));
-  expect((await orchestrator.run({ ...input, tasks: [fixture("a")], workingDirectory: directory })).status).toBe("completed");
+  expect(
+    (await orchestrator.run({ ...input, tasks: [fixture("a")], workingDirectory: directory }))
+      .status,
+  ).toBe("completed");
   expect(attempts).toBe(2);
 });
 
 test("unresolved resource cleanup remains actionable instead of completing", async () => {
-  class FailedRelease extends FakeProvider { async release() { throw new Error("cannot close worker tab"); } }
+  class FailedRelease extends FakeProvider {
+    async release() {
+      throw new Error("cannot close worker tab");
+    }
+  }
   const { input, directory, orchestrator } = setup(new FailedRelease("fake", ["fast"]));
-  expect((await orchestrator.run({ ...input, tasks: [fixture("a")], workingDirectory: directory })).status).toBe("attention");
-  expect((await protocol.getSnapshot(input)).attention[0]?.summary).toContain("cleanup requires attention");
+  expect(
+    (await orchestrator.run({ ...input, tasks: [fixture("a")], workingDirectory: directory }))
+      .status,
+  ).toBe("attention");
+  expect((await protocol.getSnapshot(input)).attention[0]?.summary).toContain(
+    "cleanup requires attention",
+  );
 });
 
 test("replacement owner waits out a stale lease then resumes the graph", async () => {
@@ -267,24 +458,48 @@ test("replacement owner waits out a stale lease then resumes the graph", async (
 });
 
 test("cancel cannot report terminal success while worker cleanup still fails", async () => {
-  class FailedRelease extends FakeProvider { async release() { throw new Error("worker tab cannot close"); } }
+  class FailedRelease extends FakeProvider {
+    async release() {
+      throw new Error("worker tab cannot close");
+    }
+  }
   const provider = new FailedRelease("fake", ["fast"], { delayMs: 500 });
   const { input, directory, orchestrator } = setup(provider);
-  const pending = orchestrator.run({ ...input, tasks: [fixture("a")], workingDirectory: directory });
+  const pending = orchestrator.run({
+    ...input,
+    tasks: [fixture("a")],
+    workingDirectory: directory,
+  });
   await until(async () => provider.active === 1);
   await protocol.cancelRun(input);
   expect((await pending).status).toBe("attention");
   const snapshot = await protocol.getSnapshot(input);
   expect(snapshot.state).toBe("cancelling");
   expect(snapshot.activeWorkers).toHaveLength(1);
-  expect(snapshot.attention.some(item => item.summary.includes("cleanup requires attention"))).toBe(true);
+  expect(
+    snapshot.attention.some((item) => item.summary.includes("cleanup requires attention")),
+  ).toBe(true);
 });
 
 test("a stale dispatcher cannot add attention to the replacement owner's run", async () => {
-  class HangingProbe extends FakeProvider { override capabilities(): ReturnType<FakeProvider["capabilities"]> { return new Promise(() => {}); } }
+  class HangingProbe extends FakeProvider {
+    override capabilities(): ReturnType<FakeProvider["capabilities"]> {
+      return new Promise(() => {});
+    }
+  }
   const { input, directory, orchestrator } = setup(new HangingProbe("fake", ["fast"]));
-  const pending = orchestrator.run({ ...input, tasks: [fixture("a")], workingDirectory: directory });
-  await until(async () => { try { return (await protocol.getSnapshot(input)).tasks[0]?.state === "ready"; } catch { return false; } });
+  const pending = orchestrator.run({
+    ...input,
+    tasks: [fixture("a")],
+    workingDirectory: directory,
+  });
+  await until(async () => {
+    try {
+      return (await protocol.getSnapshot(input)).tasks[0]?.state === "ready";
+    } catch {
+      return false;
+    }
+  });
   const previous = await protocol.getSnapshot(input);
   await protocol.releaseExecution({ ...input, owner: previous.executionOwner! });
   await protocol.claimExecution({ ...input, owner: "replacement", nowMs: Date.now(), ttlMs: 5000 });

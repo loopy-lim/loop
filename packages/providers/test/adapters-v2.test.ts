@@ -137,12 +137,17 @@ test("Codex adapter probes the official surface and normalizes a completed worke
   expect((await provider.result(handle.id)).summary).toBe("done");
   expect((await provider.result(handle.id)).sessionId).toBe("thread-1");
   expect(events).toEqual(["worker started"]);
-  expect(runner.calls.some((call) => call.command === "codex" && call.args.includes("exec"))).toBe(true);
+  expect(runner.calls.some((call) => call.command === "codex" && call.args.includes("exec"))).toBe(
+    true,
+  );
   expect(runner.calls.flatMap((call) => call.args)).toContain("workspace-write");
   expect(runner.calls.find((call) => call.args.includes("exec"))?.args).toContain("/project/task");
-  expect(runner.calls.find((call) => call.args.includes("exec"))?.args.at(-1))
-    .toContain("CONTEXT_INTENT_ONLY");
-  expect(runner.calls.flatMap((call) => call.args)).not.toContain(expect.stringContaining("API_KEY"));
+  expect(runner.calls.find((call) => call.args.includes("exec"))?.args.at(-1)).toContain(
+    "CONTEXT_INTENT_ONLY",
+  );
+  expect(runner.calls.flatMap((call) => call.args)).not.toContain(
+    expect.stringContaining("API_KEY"),
+  );
 });
 
 test("pi provider launches headless pi with the configured model pattern", async () => {
@@ -169,32 +174,57 @@ test("pi provider launches headless pi with the configured model pattern", async
 
 test("Pi workers without a write scope receive only read-only tools", async () => {
   const runner = new FakeRunner();
-  const headless = new PiProvider({ runner, cwd: "/project", command: "pi", model: "zai/glm-5.3-flash", computeClasses: ["fast"] });
-  const readOnlyInput = { ...input, context: { ...input.context!, task: { ...input.context!.task, writeScope: [] } } };
+  const headless = new PiProvider({
+    runner,
+    cwd: "/project",
+    command: "pi",
+    model: "zai/glm-5.3-flash",
+    computeClasses: ["fast"],
+  });
+  const readOnlyInput = {
+    ...input,
+    context: { ...input.context!, task: { ...input.context!.task, writeScope: [] } },
+  };
   await headless.start(readOnlyInput);
   const headlessArgs = runner.calls.at(-1)!.args;
-  expect(headlessArgs.slice(headlessArgs.indexOf("--tools"), headlessArgs.indexOf("--tools") + 2))
-    .toEqual(["--tools", "read,grep,find,ls"]);
+  expect(
+    headlessArgs.slice(headlessArgs.indexOf("--tools"), headlessArgs.indexOf("--tools") + 2),
+  ).toEqual(["--tools", "read,grep,find,ls"]);
 
   const calls: string[][] = [];
   const herdrRunner: HerdrRunner = {
     async run(_command, args) {
       calls.push(args);
-      if (args[0] === "workspace") return ok({ result: { workspace: { workspace_id: "w" }, root_pane: { pane_id: "w:p1" } } });
-      if (args[0] === "tab" && args[1] === "create") return ok({ result: { tab: { tab_id: "w:t2" }, root_pane: { pane_id: "w:p2" } } });
-      if (args[0] === "agent" && args[1] === "get") return ok({ result: { agent: { agent_status: "done" } } });
-      if (args[0] === "agent" && args[1] === "read") return { exitCode: 0, stdout: "read-only review done", stderr: "" };
+      if (args[0] === "workspace")
+        return ok({ result: { workspace: { workspace_id: "w" }, root_pane: { pane_id: "w:p1" } } });
+      if (args[0] === "tab" && args[1] === "create")
+        return ok({ result: { tab: { tab_id: "w:t2" }, root_pane: { pane_id: "w:p2" } } });
+      if (args[0] === "agent" && args[1] === "get")
+        return ok({ result: { agent: { agent_status: "done" } } });
+      if (args[0] === "agent" && args[1] === "read")
+        return { exitCode: 0, stdout: "read-only review done", stderr: "" };
       return ok({ result: {} });
     },
   };
-  const visible = new HerdrAgentProvider({ id: "pi-visible", runtime: new HerdrWorkerRuntime({ runner: herdrRunner }), kind: "pi", projectRoot: "/project", computeClasses: ["fast"], args: ["--model", "zai/glm-5.3-flash"], pollIntervalMs: 0 });
+  const visible = new HerdrAgentProvider({
+    id: "pi-visible",
+    runtime: new HerdrWorkerRuntime({ runner: herdrRunner }),
+    kind: "pi",
+    projectRoot: "/project",
+    computeClasses: ["fast"],
+    args: ["--model", "zai/glm-5.3-flash"],
+    pollIntervalMs: 0,
+  });
   const handle = await visible.start(readOnlyInput);
   try {
     expect((await visible.result(handle.id)).success).toBe(true);
-    const startArgs = calls.find(args => args[0] === "agent" && args[1] === "start")!;
-    expect(startArgs.slice(startArgs.indexOf("--tools"), startArgs.indexOf("--tools") + 2))
-      .toEqual(["--tools", "read,grep,find,ls"]);
-  } finally { await visible.release(handle.id); }
+    const startArgs = calls.find((args) => args[0] === "agent" && args[1] === "start")!;
+    expect(startArgs.slice(startArgs.indexOf("--tools"), startArgs.indexOf("--tools") + 2)).toEqual(
+      ["--tools", "read,grep,find,ls"],
+    );
+  } finally {
+    await visible.release(handle.id);
+  }
 });
 
 test("Z.AI CLI provider uses the shared generated worker context", async () => {
@@ -231,7 +261,9 @@ test("Antigravity adapter discovers models and uses stream-json execution", asyn
   expect(capabilities.available).toBe(true);
   expect(capabilities.models).toEqual(["gemini-3.1-pro"]);
   await provider.start(input);
-  const launch = runner.calls.find((call) => call.command === "agy" && call.args.includes("--output-format"));
+  const launch = runner.calls.find(
+    (call) => call.command === "agy" && call.args.includes("--output-format"),
+  );
   expect(launch?.args).toEqual([
     "--output-format",
     "stream-json",
@@ -252,7 +284,11 @@ test("Antigravity adapter discovers models and uses stream-json execution", asyn
 });
 
 test("process provider maps failures and redacts credentials", async () => {
-  const provider = new CodexProvider({ runner: new FailingRunner(), cwd: "/project", computeClasses: ["balanced"] });
+  const provider = new CodexProvider({
+    runner: new FailingRunner(),
+    cwd: "/project",
+    computeClasses: ["balanced"],
+  });
   const handle = await provider.start(input);
   const result = await provider.result(handle.id);
   expect(result.success).toBe(false);
@@ -262,21 +298,24 @@ test("process provider maps failures and redacts credentials", async () => {
 });
 
 test("machine-readable nested final events are normalized and empty success is incomplete", () => {
-  expect(normalizeProcessResult({
-    exitCode: 0,
-    stdout: JSON.stringify({
-      type: "result",
-      payload: { message: { content: "nested final" } },
-      conversation_id: "conversation-1",
+  expect(
+    normalizeProcessResult({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        type: "result",
+        payload: { message: { content: "nested final" } },
+        conversation_id: "conversation-1",
+      }),
+      stderr: "",
     }),
-    stderr: "",
-  })).toEqual({
+  ).toEqual({
     success: true,
     summary: "nested final",
     sessionId: "conversation-1",
   });
-  expect(normalizeProcessResult({ exitCode: 0, stdout: "", stderr: "" }).failure?.kind)
-    .toBe("incomplete_output");
+  expect(normalizeProcessResult({ exitCode: 0, stdout: "", stderr: "" }).failure?.kind).toBe(
+    "incomplete_output",
+  );
 });
 
 test("Antigravity stream-json result response is normalized as the final summary", () => {
@@ -311,7 +350,8 @@ test("Z.AI API adapter keeps the key in the header", async () => {
     mode: "general",
     computeClasses: ["fast"],
     fetch: async (_url, init) => {
-      authorization = String((init?.headers as Record<string, string>).Authorization);
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      authorization = String(headers.Authorization);
       const body = JSON.parse(String(init?.body)) as {
         messages: Array<{ content: string }>;
       };
@@ -338,10 +378,11 @@ test("Z.AI API adapter redacts provider errors", async () => {
     model: "configured-model",
     mode: "general",
     computeClasses: ["fast"],
-    fetch: async () => new Response(
-      JSON.stringify({ error: { message: "Bearer secret-value rejected" } }),
-      { status: 401, headers: { "content-type": "application/json" } },
-    ),
+    fetch: async () =>
+      new Response(JSON.stringify({ error: { message: "Bearer secret-value rejected" } }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      }),
   });
   const handle = await provider.start(input);
   const result = await provider.result(handle.id);
@@ -376,24 +417,49 @@ test("task routing uses risk floor and declared capability scores", async () => 
   const fast = new FakeProvider("fast", ["fast"]);
   const strong = new FakeProvider("strong", ["strong"]);
   const registry = new ProviderRegistry([fast, strong], {
-    fast: { costWeight: 1, latency: 1, capabilities: { coding: 2, reasoning: 1, tools: 1, vision: 0, longContext: 1 } },
-    strong: { costWeight: 10, latency: 10, capabilities: { coding: 4, reasoning: 4, tools: 2, vision: 0, longContext: 4 } },
+    fast: {
+      costWeight: 1,
+      latency: 1,
+      capabilities: { coding: 2, reasoning: 1, tools: 1, vision: 0, longContext: 1 },
+    },
+    strong: {
+      costWeight: 10,
+      latency: 10,
+      capabilities: { coding: 4, reasoning: 4, tools: 2, vision: 0, longContext: 4 },
+    },
   });
-  const task = { preferredCompute: "fast" as const, maximumCompute: "strong" as const,
-    routing: { risk: "high" as const, required: { coding: 3, reasoning: 3, tools: 1, vision: 0, long_context: 2 } } };
+  const task = {
+    preferredCompute: "fast" as const,
+    maximumCompute: "strong" as const,
+    routing: {
+      risk: "high" as const,
+      required: { coding: 3, reasoning: 3, tools: 1, vision: 0, long_context: 2 },
+    },
+  };
   const decision = await registry.selectForTask(task);
   expect(decision.provider.id).toBe("strong");
   expect(decision.computeClass).toBe("strong");
   expect(decision.reason).toContain("risk high");
   await expect(registry.selectForTask({ ...task, maximumCompute: "fast" })).rejects.toThrow();
-  await expect(registry.selectForTask({ ...task, routing: { ...task.routing, required: { ...task.routing.required, vision: 1 } } })).rejects.toThrow();
+  await expect(
+    registry.selectForTask({
+      ...task,
+      routing: { ...task.routing, required: { ...task.routing.required, vision: 1 } },
+    }),
+  ).rejects.toThrow();
 });
 
 test("configured risk floor reaches the Rust routing decision", async () => {
   const balanced = new FakeProvider("balanced", ["balanced"]);
   const registry = new ProviderRegistry([balanced], {}, { high: "balanced", critical: "frontier" });
-  const decision = await registry.selectForTask({ preferredCompute: "fast", maximumCompute: "balanced",
-    routing: { risk: "high", required: { coding: 0, reasoning: 0, tools: 0, vision: 0, long_context: 0 } } });
+  const decision = await registry.selectForTask({
+    preferredCompute: "fast",
+    maximumCompute: "balanced",
+    routing: {
+      risk: "high",
+      required: { coding: 0, reasoning: 0, tools: 0, vision: 0, long_context: 0 },
+    },
+  });
   expect(decision.computeClass).toBe("balanced");
 });
 
@@ -411,7 +477,9 @@ test("interactive provider delegates agent lifecycle to Herdr", async () => {
         });
       }
       if (args[0] === "tab" && args[1] === "create") {
-        return ok({ result: { tab: { tab_id: "workspace-1:t2" }, root_pane: { pane_id: "workspace-1:p2" } } });
+        return ok({
+          result: { tab: { tab_id: "workspace-1:t2" }, root_pane: { pane_id: "workspace-1:p2" } },
+        });
       }
       if (args[0] === "agent" && args[1] === "get") {
         return ok({ result: { agent: { agent_status: "done" } } });
@@ -438,14 +506,9 @@ test("interactive provider delegates agent lifecycle to Herdr", async () => {
     success: true,
     summary: "verified worker output",
   });
-  expect(calls).toContainEqual(expect.arrayContaining([
-    "agent",
-    "start",
-    "--kind",
-    "codex",
-    "--sandbox",
-    "workspace-write",
-  ]));
+  expect(calls).toContainEqual(
+    expect.arrayContaining(["agent", "start", "--kind", "codex", "--sandbox", "workspace-write"]),
+  );
   expect(calls.some((args) => args[0] === "agent" && args[1] === "prompt")).toBe(true);
   const promptCall = calls.find((args) => args[0] === "agent" && args[1] === "prompt");
   expect(promptCall?.[3]).toContain("CONTEXT_INTENT_ONLY");
@@ -463,7 +526,9 @@ test("prompt delivery rejection fails startup instead of reading stale status", 
         });
       }
       if (args[0] === "tab" && args[1] === "create") {
-        return ok({ result: { tab: { tab_id: "workspace-1:t2" }, root_pane: { pane_id: "workspace-1:p2" } } });
+        return ok({
+          result: { tab: { tab_id: "workspace-1:t2" }, root_pane: { pane_id: "workspace-1:p2" } },
+        });
       }
       if (args[0] === "agent" && args[1] === "prompt") {
         // herdr exits 0 but prints non-JSON (observed in cleanup-support-r3).
@@ -495,10 +560,17 @@ test("Herdr idle state cannot turn stale pane text into a successful result", as
   const herdrRunner: HerdrRunner = {
     async run(_command, args) {
       if (args[0] === "workspace") {
-        return ok({ result: { workspace: { workspace_id: "workspace-1" }, root_pane: { pane_id: "workspace-1:p1" } } });
+        return ok({
+          result: {
+            workspace: { workspace_id: "workspace-1" },
+            root_pane: { pane_id: "workspace-1:p1" },
+          },
+        });
       }
       if (args[0] === "tab" && args[1] === "create") {
-        return ok({ result: { tab: { tab_id: "workspace-1:t2" }, root_pane: { pane_id: "workspace-1:p2" } } });
+        return ok({
+          result: { tab: { tab_id: "workspace-1:t2" }, root_pane: { pane_id: "workspace-1:p2" } },
+        });
       }
       if (args[0] === "agent" && args[1] === "get") {
         return ok({ result: { agent: { agent_status: "idle" } } });
@@ -532,39 +604,85 @@ test("Pi returning from working to idle completes the observed Herdr turn", asyn
   let polls = 0;
   const runner: HerdrRunner = {
     async run(_command, args) {
-      if (args[0] === "workspace") return ok({ result: { workspace: { workspace_id: "workspace-1" }, root_pane: { pane_id: "workspace-1:p1" } } });
-      if (args[0] === "tab" && args[1] === "create") return ok({ result: { tab: { tab_id: "workspace-1:t2" }, root_pane: { pane_id: "workspace-1:p2" } } });
-      if (args[0] === "agent" && args[1] === "get") return ok({ result: { agent: { agent_status: polls++ === 0 ? "working" : "idle" } } });
-      if (args[0] === "agent" && args[1] === "read") return { exitCode: 0, stdout: "Pi finished the requested work", stderr: "" };
+      if (args[0] === "workspace")
+        return ok({
+          result: {
+            workspace: { workspace_id: "workspace-1" },
+            root_pane: { pane_id: "workspace-1:p1" },
+          },
+        });
+      if (args[0] === "tab" && args[1] === "create")
+        return ok({
+          result: { tab: { tab_id: "workspace-1:t2" }, root_pane: { pane_id: "workspace-1:p2" } },
+        });
+      if (args[0] === "agent" && args[1] === "get")
+        return ok({ result: { agent: { agent_status: polls++ === 0 ? "working" : "idle" } } });
+      if (args[0] === "agent" && args[1] === "read")
+        return { exitCode: 0, stdout: "Pi finished the requested work", stderr: "" };
       return ok({ result: {} });
     },
   };
-  const provider = new HerdrAgentProvider({ id: "pi-visible", runtime: new HerdrWorkerRuntime({ runner }), kind: "pi", projectRoot: "/project", computeClasses: ["fast"], pollIntervalMs: 0, startGraceMs: 10 });
+  const provider = new HerdrAgentProvider({
+    id: "pi-visible",
+    runtime: new HerdrWorkerRuntime({ runner }),
+    kind: "pi",
+    projectRoot: "/project",
+    computeClasses: ["fast"],
+    pollIntervalMs: 0,
+    startGraceMs: 10,
+  });
   const handle = await provider.start(input);
   try {
-    expect(await provider.result(handle.id)).toMatchObject({ success: true, summary: "Pi finished the requested work" });
-  } finally { await provider.release(handle.id); }
+    expect(await provider.result(handle.id)).toMatchObject({
+      success: true,
+      summary: "Pi finished the requested work",
+    });
+  } finally {
+    await provider.release(handle.id);
+  }
 });
 
 test("Herdr repairs a failed check through a second turn on the same agent handle", async () => {
   const calls: string[][] = [];
   let turns = 0;
   let polls = 0;
-  const runner: HerdrRunner = { async run(_command, args) {
-    calls.push(args);
-    if (args[0] === "workspace") return ok({ result: { workspace: { workspace_id: "ws" }, root_pane: { pane_id: "ws:p1" } } });
-    if (args[0] === "tab" && args[1] === "create") return ok({ result: { tab: { tab_id: "ws:t2" }, root_pane: { pane_id: "ws:p2" } } });
-    if (args[0] === "agent" && args[1] === "prompt") { turns++; polls = 0; return ok({ result: {} }); }
-    if (args[0] === "agent" && args[1] === "get") return ok({ result: { agent: { agent_status: polls++ === 0 ? "working" : "idle" } } });
-    if (args[0] === "agent" && args[1] === "read") return { exitCode: 0, stdout: `turn ${turns} complete`, stderr: "" };
-    return ok({ result: {} });
-  } };
-  const provider = new HerdrAgentProvider({ id: "repairable", runtime: new HerdrWorkerRuntime({ runner }), kind: "pi", projectRoot: "/project", computeClasses: ["fast"], pollIntervalMs: 0 });
+  const runner: HerdrRunner = {
+    async run(_command, args) {
+      calls.push(args);
+      if (args[0] === "workspace")
+        return ok({
+          result: { workspace: { workspace_id: "ws" }, root_pane: { pane_id: "ws:p1" } },
+        });
+      if (args[0] === "tab" && args[1] === "create")
+        return ok({ result: { tab: { tab_id: "ws:t2" }, root_pane: { pane_id: "ws:p2" } } });
+      if (args[0] === "agent" && args[1] === "prompt") {
+        turns++;
+        polls = 0;
+        return ok({ result: {} });
+      }
+      if (args[0] === "agent" && args[1] === "get")
+        return ok({ result: { agent: { agent_status: polls++ === 0 ? "working" : "idle" } } });
+      if (args[0] === "agent" && args[1] === "read")
+        return { exitCode: 0, stdout: `turn ${turns} complete`, stderr: "" };
+      return ok({ result: {} });
+    },
+  };
+  const provider = new HerdrAgentProvider({
+    id: "repairable",
+    runtime: new HerdrWorkerRuntime({ runner }),
+    kind: "pi",
+    projectRoot: "/project",
+    computeClasses: ["fast"],
+    pollIntervalMs: 0,
+  });
   const handle = await provider.start(input);
   expect((await provider.result(handle.id)).summary).toBe("turn 1 complete");
-  expect(await provider.repair(handle.id, "Fix failing test")).toMatchObject({ success: true, summary: "turn 2 complete" });
-  expect(calls.filter(args => args[0] === "tab" && args[1] === "create")).toHaveLength(1);
-  expect(calls.filter(args => args[0] === "agent" && args[1] === "prompt")).toHaveLength(2);
+  expect(await provider.repair(handle.id, "Fix failing test")).toMatchObject({
+    success: true,
+    summary: "turn 2 complete",
+  });
+  expect(calls.filter((args) => args[0] === "tab" && args[1] === "create")).toHaveLength(1);
+  expect(calls.filter((args) => args[0] === "agent" && args[1] === "prompt")).toHaveLength(2);
   await provider.release(handle.id);
 });
 
@@ -584,7 +702,9 @@ test("Herdr cancellation waits for the active turn and release closes only the w
         });
       }
       if (args[0] === "tab" && args[1] === "create") {
-        return ok({ result: { tab: { tab_id: "worker-tab" }, root_pane: { pane_id: "worker-pane" } } });
+        return ok({
+          result: { tab: { tab_id: "worker-tab" }, root_pane: { pane_id: "worker-pane" } },
+        });
       }
       if (args[0] === "agent" && args[1] === "get") {
         return ok({ result: { agent: { agent_status: observedStatus } } });

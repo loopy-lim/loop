@@ -1,8 +1,14 @@
 import { HerdrWorkerRuntime } from "@loop/herdr";
 import type { RecordActivityInput } from "@loop/protocol";
-import { TurnLoopProvider, type ModelClient, type ToolDeclaration, type ToolRunner } from "@loop/turnloop";
+import {
+  TurnLoopProvider,
+  type ModelClient,
+  type ToolDeclaration,
+  type ToolRunner,
+} from "@loop/turnloop";
 import {
   AntigravityProvider,
+  FakeProvider,
   CodexProvider,
   AgyPersistentProvider,
   HerdrAgentProvider,
@@ -55,9 +61,12 @@ export interface ProviderCompositionOptions {
    * (docs/decisions/2026-09-23-watch-to-steer.md). Optional: without it the
    * panes stay plain and `loop steer` remains the steering affordance.
    */
-  relayCommand?: (worker: { runId: string; taskId: string; paneId: string; tabId: string }) =>
-    | { command: string; args: string[] }
-    | undefined;
+  relayCommand?: (worker: {
+    runId: string;
+    taskId: string;
+    paneId: string;
+    tabId: string;
+  }) => { command: string; args: string[] } | undefined;
   /**
    * M-TL3 turnloop-lane support: supplies the model boundary for worker
    * profiles that select `lane = "turnloop"` in models.toml. Omitting the
@@ -105,12 +114,14 @@ export class StoreActivitySink implements MirrorSink {
     const now = Date.now();
     if (!immediate && now - (this.#lastRecordAt.get(workerId) ?? 0) < 1000) return;
     this.#lastRecordAt.set(workerId, now);
-    await this.#recorder.recordActivity({
-      databasePath: this.#databasePath,
-      runId: worker.runId,
-      taskId: worker.taskId,
-      activity: line,
-    }).catch(() => {});
+    await this.#recorder
+      .recordActivity({
+        databasePath: this.#databasePath,
+        runId: worker.runId,
+        taskId: worker.taskId,
+        activity: line,
+      })
+      .catch(() => {});
   }
 }
 
@@ -127,66 +138,82 @@ export function buildProviderRegistry(options: ProviderCompositionOptions): Prov
       // M-TL3 lane selection: the profile's lane swaps only the execution
       // adapter — provider identity, routing metadata, and quota grouping
       // stay exactly as configured for the pi lane.
+      if (providerId === "fake") {
+        providers.push(new FakeProvider(id, [model.computeClass]));
+        continue;
+      }
       if (model.lane === "turnloop") {
         providers.push(turnloopProfileWorker(id, model, options));
         continue;
       }
       if (providerId === "codex") {
-        providers.push(providerConfig.mode === "interactive"
-          ? visibleAgent(id, "codex", model, providerConfig, options.projectRoot, herdr)
-          : new CodexProvider({
-              id,
-              cwd: options.projectRoot,
-              command: providerConfig.command,
-              model: model.id,
-              computeClasses: [model.computeClass],
-            }));
+        providers.push(
+          providerConfig.mode === "interactive"
+            ? visibleAgent(id, "codex", model, providerConfig, options.projectRoot, herdr)
+            : new CodexProvider({
+                id,
+                cwd: options.projectRoot,
+                command: providerConfig.command,
+                model: model.id,
+                computeClasses: [model.computeClass],
+              }),
+        );
       } else if (providerId === "antigravity") {
-        providers.push(providerConfig.mode === "interactive"
-          ? visibleAgent(id, "agy", model, providerConfig, options.projectRoot, herdr)
-          : providerConfig.mode === "persistent"
-            ? new AgyPersistentProvider({
-                id,
-                cwd: options.projectRoot,
-                command: providerConfig.command,
-                model: model.id,
-                computeClasses: [model.computeClass],
-              })
-            : new AntigravityProvider({
-                id,
-                cwd: options.projectRoot,
-                command: providerConfig.command,
-                model: model.id,
-                computeClasses: [model.computeClass],
-              }));
+        providers.push(
+          providerConfig.mode === "interactive"
+            ? visibleAgent(id, "agy", model, providerConfig, options.projectRoot, herdr)
+            : providerConfig.mode === "persistent"
+              ? new AgyPersistentProvider({
+                  id,
+                  cwd: options.projectRoot,
+                  command: providerConfig.command,
+                  model: model.id,
+                  computeClasses: [model.computeClass],
+                })
+              : new AntigravityProvider({
+                  id,
+                  cwd: options.projectRoot,
+                  command: providerConfig.command,
+                  model: model.id,
+                  computeClasses: [model.computeClass],
+                }),
+        );
       } else if (providerId === "pi") {
-        providers.push(providerConfig.mode === "interactive"
-          ? visibleAgent(id, "pi", model, providerConfig, options.projectRoot, herdr)
-          : new PiProvider({
-              id,
-              cwd: options.projectRoot,
-              command: providerConfig.command,
-              model: model.id,
-              computeClasses: [model.computeClass],
-            }));
+        providers.push(
+          providerConfig.mode === "interactive"
+            ? visibleAgent(id, "pi", model, providerConfig, options.projectRoot, herdr)
+            : new PiProvider({
+                id,
+                cwd: options.projectRoot,
+                command: providerConfig.command,
+                model: model.id,
+                computeClasses: [model.computeClass],
+              }),
+        );
       } else if (providerId === "zai" && providerConfig.mode === "api") {
-        const apiKey = providerConfig.apiKeyEnv ? environment[providerConfig.apiKeyEnv] ?? "" : "";
-        providers.push(new ZaiApiProvider({
-          id,
-          baseUrl: required(providerConfig.endpoint, `${providerId}.endpoint`),
-          apiKey,
-          model: model.id,
-          mode: "general",
-          computeClasses: [model.computeClass],
-        }));
+        const apiKey = providerConfig.apiKeyEnv
+          ? (environment[providerConfig.apiKeyEnv] ?? "")
+          : "";
+        providers.push(
+          new ZaiApiProvider({
+            id,
+            baseUrl: required(providerConfig.endpoint, `${providerId}.endpoint`),
+            apiKey,
+            model: model.id,
+            mode: "general",
+            computeClasses: [model.computeClass],
+          }),
+        );
       } else if (providerId === "zai_cli") {
-        providers.push(new ZaiCliProvider({
-          id,
-          cwd: options.projectRoot,
-          command: providerConfig.command,
-          model: model.id,
-          computeClasses: [model.computeClass],
-        }));
+        providers.push(
+          new ZaiCliProvider({
+            id,
+            cwd: options.projectRoot,
+            command: providerConfig.command,
+            model: model.id,
+            computeClasses: [model.computeClass],
+          }),
+        );
       }
     }
   }
@@ -196,17 +223,22 @@ export function buildProviderRegistry(options: ProviderCompositionOptions): Prov
   }
   // Pi model patterns identify the upstream quota pool, not the launcher.
   // Keep this adapter knowledge out of the deterministic Rust policy.
-  const routing = Object.fromEntries(options.config.models.map(model => [
-    `${model.provider}:${model.id}`,
-    {
-      costWeight: model.costWeight,
-      latency: model.latency,
-      capabilities: model.capabilities,
-      quotaGroup: model.provider === "pi" && model.id.includes("/")
-        ? model.id.split("/")[0]
-        : model.provider === "zai_cli" ? "zai" : model.provider,
-    },
-  ]));
+  const routing = Object.fromEntries(
+    options.config.models.map((model) => [
+      `${model.provider}:${model.id}`,
+      {
+        costWeight: model.costWeight,
+        latency: model.latency,
+        capabilities: model.capabilities,
+        quotaGroup:
+          model.provider === "pi" && model.id.includes("/")
+            ? model.id.split("/")[0]
+            : model.provider === "zai_cli"
+              ? "zai"
+              : model.provider,
+      },
+    ]),
+  );
   return new ProviderRegistry(wrapForVisibility(providers, options, herdr), routing, {
     high: options.config.routing.highRiskFloor,
     critical: options.config.routing.criticalRiskFloor,
@@ -232,24 +264,31 @@ export function wrapForVisibility(
     sinks.push(new StoreActivitySink(options.activityRecorder, options.config.databasePath));
   }
   if (visibility === "panes") {
-    sinks.push(new PaneMirrorSink({
-      host: herdr,
-      projectRoot: options.projectRoot,
-      environment: options.environment,
-      paneLimit: options.config.output.workerPaneLimit,
-      // Interactive workers own their native TUI pane (D4) — send-text
-      // mirroring is excluded for them.
-      excluded: new Set(providers.filter(p => p instanceof HerdrAgentProvider).map(p => p.id)),
-      // Watch-to-steer: the worker pane hosts the steer relay for its lifetime.
-      relay: options.relayCommand,
-    }));
+    sinks.push(
+      new PaneMirrorSink({
+        host: herdr,
+        projectRoot: options.projectRoot,
+        environment: options.environment,
+        paneLimit: options.config.output.workerPaneLimit,
+        // Interactive workers own their native TUI pane (D4) — send-text
+        // mirroring is excluded for them.
+        excluded: new Set(
+          providers.filter((p) => p instanceof HerdrAgentProvider).map((p) => p.id),
+        ),
+        // Watch-to-steer: the worker pane hosts the steer relay for its lifetime.
+        relay: options.relayCommand,
+      }),
+    );
   }
-  if (sinks.length === 0) return providers;
-
-  const sink = sinks.length === 1 ? sinks[0] : compositeSink(...sinks);
-  return providers.map(provider => new MirroringProvider(provider, sink, {
-    lineTextLimit: options.config.output.lineTextLimit,
-  }));
+  const primary = sinks[0];
+  if (primary === undefined) return providers; // 위 length === 0 가드와 동일한 불변식
+  const sink = sinks.length === 1 ? primary : compositeSink(...sinks);
+  return providers.map(
+    (provider) =>
+      new MirroringProvider(provider, sink, {
+        lineTextLimit: options.config.output.lineTextLimit,
+      }),
+  );
 }
 
 function visibleAgent(
@@ -260,11 +299,12 @@ function visibleAgent(
   projectRoot: string,
   herdr: HerdrWorkerRuntime,
 ): HerdrAgentProvider {
-  const args = kind === "codex"
-    ? ["--sandbox", "workspace-write", "--model", model.id]
-    : kind === "agy"
-      ? ["--sandbox", "--model", model.id]
-      : ["--model", model.id];
+  const args =
+    kind === "codex"
+      ? ["--sandbox", "workspace-write", "--model", model.id]
+      : kind === "agy"
+        ? ["--sandbox", "--model", model.id]
+        : ["--model", model.id];
   return new HerdrAgentProvider({
     id,
     runtime: herdr,

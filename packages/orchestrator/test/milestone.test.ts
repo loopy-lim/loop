@@ -53,23 +53,64 @@ function task(
 
 test("composition preserves model ranking and groups shared upstream quota without network calls", async () => {
   const config = loadLoopConfig({ configDirectory: join(import.meta.dir, "../../../config") });
-  config.providers = { zai: { enabled: true, mode: "api", endpoint: "https://invalid.example", apiKeyEnv: "TEST_ONLY_KEY" } };
+  config.providers = {
+    zai: {
+      enabled: true,
+      mode: "api",
+      endpoint: "https://invalid.example",
+      apiKeyEnv: "TEST_ONLY_KEY",
+    },
+  };
   config.output.workerVisibility = "off";
   config.models = [
-    { id: "a-expensive", provider: "zai", computeClass: "fast", capabilities: { coding: 1, reasoning: 1, tools: 1, vision: 0, longContext: 1 }, latency: 5, costWeight: 1 },
-    { id: "z-cheap", provider: "zai", computeClass: "fast", capabilities: { coding: 1, reasoning: 1, tools: 1, vision: 0, longContext: 1 }, latency: 0, costWeight: 1 },
+    {
+      id: "a-expensive",
+      provider: "zai",
+      computeClass: "fast",
+      capabilities: { coding: 1, reasoning: 1, tools: 1, vision: 0, longContext: 1 },
+      latency: 5,
+      costWeight: 1,
+    },
+    {
+      id: "z-cheap",
+      provider: "zai",
+      computeClass: "fast",
+      capabilities: { coding: 1, reasoning: 1, tools: 1, vision: 0, longContext: 1 },
+      latency: 0,
+      costWeight: 1,
+    },
   ];
-  const registry = buildProviderRegistry({ config, projectRoot: process.cwd(), environment: { TEST_ONLY_KEY: "not-a-credential" } });
+  const registry = buildProviderRegistry({
+    config,
+    projectRoot: process.cwd(),
+    environment: { TEST_ONLY_KEY: "not-a-credential" },
+  });
   expect((await registry.select("fast")).id).toBe("zai:z-cheap");
   await expect(registry.select("fast", new Set(["zai:z-cheap"]))).rejects.toThrow();
 });
 
 test("volume classes keep their primary lane and fall back across lanes without widening compute constraints", async () => {
   const config = loadLoopConfig({ configDirectory: join(import.meta.dir, "../../../config") });
-  const models = config.models.filter(model => model.provider !== "local");
-  const registry = new ProviderRegistry(models.map(model => new FakeProvider(`${model.provider}:${model.id}`, [model.computeClass])), Object.fromEntries(models.map(model => [`${model.provider}:${model.id}`, { costWeight: model.costWeight, latency: model.latency }])));
-  const zaiIds = new Set(models.filter(model => model.id.includes("glm-")).map(model => `${model.provider}:${model.id}`));
-  const codexIds = new Set(models.filter(model => model.id.includes("gpt-")).map(model => `${model.provider}:${model.id}`));
+  const models = config.models.filter((model) => model.provider !== "local");
+  const registry = new ProviderRegistry(
+    models.map((model) => new FakeProvider(`${model.provider}:${model.id}`, [model.computeClass])),
+    Object.fromEntries(
+      models.map((model) => [
+        `${model.provider}:${model.id}`,
+        { costWeight: model.costWeight, latency: model.latency },
+      ]),
+    ),
+  );
+  const zaiIds = new Set(
+    models
+      .filter((model) => model.id.includes("glm-"))
+      .map((model) => `${model.provider}:${model.id}`),
+  );
+  const codexIds = new Set(
+    models
+      .filter((model) => model.id.includes("gpt-"))
+      .map((model) => `${model.provider}:${model.id}`),
+  );
   // 2026-09-30 gpt-primary promotion: tiny and fast keep the zai primary; the
   // fast gpt fallback is the low-effort sol:minimal "fast option". balanced
   // and strong select the openai-codex primary and fall back into the zai
@@ -122,14 +163,17 @@ test("transient worker failure retries within budget and then completes", async 
     to: "strong",
   });
   expect(result.providersByTask["impl-b"]).toEqual(["fast", "strong"]);
-  expect(result.startedAt.decision).toBeGreaterThanOrEqual(result.finishedAt["research-a"]);
-  expect(result.startedAt.decision).toBeGreaterThanOrEqual(result.finishedAt["research-b"]);
-  expect(result.startedAt.decision).toBeGreaterThanOrEqual(result.finishedAt["research-c"]);
+  expect(result.startedAt.decision).toBeGreaterThanOrEqual(result.finishedAt["research-a"] ?? 0);
+  expect(result.startedAt.decision).toBeGreaterThanOrEqual(result.finishedAt["research-b"] ?? 0);
+  expect(result.startedAt.decision).toBeGreaterThanOrEqual(result.finishedAt["research-c"] ?? 0);
   const snapshot = await protocol.getSnapshot({
     databasePath: join(directory, "loop.db"),
     runId: "milestone",
   });
-  expect(snapshot.tasks.find(item => item.id === "impl-b")).toMatchObject({ state: "done", attempt: 0 });
+  expect(snapshot.tasks.find((item) => item.id === "impl-b")).toMatchObject({
+    state: "done",
+    attempt: 0,
+  });
 });
 
 test("cancellation stops active providers and persists a cancelled run", async () => {
@@ -158,7 +202,9 @@ test("exhausted transient retries terminalize the task and run without attention
   const databasePath = join(directory, "loop.db");
   const orchestrator = new Orchestrator({
     control: protocol,
-    providers: new ProviderRegistry([new FailingProvider("always-fails", ["fast", "balanced", "strong"])]),
+    providers: new ProviderRegistry([
+      new FailingProvider("always-fails", ["fast", "balanced", "strong"]),
+    ]),
     maxWorkers: 1,
   });
   const failing = task("fragile", "implementation", [], ["src/**"]);
@@ -177,7 +223,9 @@ test("missing provider capability becomes human attention before workers start",
   const directory = await mkdtemp(join(tmpdir(), "loop-missing-provider-"));
   const orchestrator = new Orchestrator({
     control: protocol,
-    providers: new ProviderRegistry([new UnavailableProvider("missing", ["fast", "balanced", "strong"])]),
+    providers: new ProviderRegistry([
+      new UnavailableProvider("missing", ["fast", "balanced", "strong"]),
+    ]),
     maxWorkers: 1,
   });
   const result = await orchestrator.run({
@@ -207,13 +255,32 @@ test("failed focused check is repaired once in the same worker session", async (
   }
   const provider = new RepairProvider("repair", ["fast"]);
   const spec = task("impl", "implementation", [], ["ready.txt"]);
-  spec.completionChecks = [{ id: "focused", command: process.execPath,
-    args: ["--eval", "const fs=require('fs'); process.exit(fs.existsSync(process.argv[1]) ? 0 : 1)", readyFile],
-    workingDirectory: null, timeoutMs: 5_000 }];
-  const orchestrator = new Orchestrator({ control: protocol, providers: new ProviderRegistry([provider]), maxWorkers: 1 });
+  spec.completionChecks = [
+    {
+      id: "focused",
+      command: process.execPath,
+      args: [
+        "--eval",
+        "const fs=require('fs'); process.exit(fs.existsSync(process.argv[1]) ? 0 : 1)",
+        readyFile,
+      ],
+      workingDirectory: null,
+      timeoutMs: 5_000,
+    },
+  ];
+  const orchestrator = new Orchestrator({
+    control: protocol,
+    providers: new ProviderRegistry([provider]),
+    maxWorkers: 1,
+  });
   const runId = "same-session-repair";
   const databasePath = join(directory, "loop.db");
-  const outcome = await orchestrator.run({ databasePath, runId, tasks: [spec], workingDirectory: directory });
+  const outcome = await orchestrator.run({
+    databasePath,
+    runId,
+    tasks: [spec],
+    workingDirectory: directory,
+  });
   expect(outcome.status).toBe("completed");
   expect(starts).toBe(1);
   expect(repairHandles).toHaveLength(1);
@@ -229,10 +296,29 @@ test("tracked run completes only after its declared criterion has a stable check
   const runId = "tracked-goal";
   const spec = task("impl", "implementation", [], ["src/**"]);
   spec.requirements = ["focused check passes"];
-  spec.routing = { risk: "low", required: { coding: 0, reasoning: 0, tools: 0, vision: 0, long_context: 0 } };
-  const orchestrator = new Orchestrator({ control: protocol, providers: new ProviderRegistry([new FakeProvider("fast", ["fast"])]), maxWorkers: 1 });
-  const result = await orchestrator.run({ databasePath, runId, workingDirectory: directory, tasks: [spec],
-    criteria: [{ id: "acceptance", description: "focused check passes", taskId: "impl", checkIds: ["worker-result"] }] });
+  spec.routing = {
+    risk: "low",
+    required: { coding: 0, reasoning: 0, tools: 0, vision: 0, long_context: 0 },
+  };
+  const orchestrator = new Orchestrator({
+    control: protocol,
+    providers: new ProviderRegistry([new FakeProvider("fast", ["fast"])]),
+    maxWorkers: 1,
+  });
+  const result = await orchestrator.run({
+    databasePath,
+    runId,
+    workingDirectory: directory,
+    tasks: [spec],
+    criteria: [
+      {
+        id: "acceptance",
+        description: "focused check passes",
+        taskId: "impl",
+        checkIds: ["worker-result"],
+      },
+    ],
+  });
   const snapshot = await protocol.getSnapshot({ databasePath, runId });
   expect(result.status).toBe("completed");
   expect(snapshot.goalCriteria).toMatchObject([{ id: "acceptance", state: "verified" }]);
@@ -262,25 +348,36 @@ test("failed completion check is returned to a new worker attempt with its failu
   });
   const repairable = task("repairable", "implementation", [], ["src/**"]);
   repairable.maxAttempts = 3;
-  repairable.completionChecks = [{
-    id: "expected-content",
-    command: process.execPath,
-    args: ["--eval", `process.exit(require("node:fs").readFileSync(${JSON.stringify(markerPath)}, "utf8") === "fixed" ? 0 : 7)`],
-    workingDirectory: null,
-    timeoutMs: 5_000,
-  }];
+  repairable.completionChecks = [
+    {
+      id: "expected-content",
+      command: process.execPath,
+      args: [
+        "--eval",
+        `process.exit(require("node:fs").readFileSync(${JSON.stringify(markerPath)}, "utf8") === "fixed" ? 0 : 7)`,
+      ],
+      workingDirectory: null,
+      timeoutMs: 5_000,
+    },
+  ];
 
   const dependent = task("after-repair", "verification", ["repairable"]);
-  const result = await orchestrator.run({ databasePath, runId: "verification-repair", tasks: [repairable, dependent] });
+  const result = await orchestrator.run({
+    databasePath,
+    runId: "verification-repair",
+    tasks: [repairable, dependent],
+  });
   const snapshot = await protocol.getSnapshot({ databasePath, runId: "verification-repair" });
 
   expect(result.status).toBe("completed");
   expect(provider.starts).toEqual(["repairable:0", "repairable:1", "after-repair:0"]);
   expect(provider.previousFailures[1]).toContain("expected-content: exit 7");
-  expect(snapshot.tasks).toEqual(expect.arrayContaining([
-    expect.objectContaining({ id: "repairable", state: "done", attempt: 1 }),
-    expect.objectContaining({ id: "after-repair", state: "done", attempt: 0 }),
-  ]));
+  expect(snapshot.tasks).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: "repairable", state: "done", attempt: 1 }),
+      expect.objectContaining({ id: "after-repair", state: "done", attempt: 0 }),
+    ]),
+  );
   expect(snapshot.attention).toHaveLength(0);
 });
 
@@ -309,7 +406,11 @@ test("a repeatedly failing completion check requests attention after its attempt
     },
   ];
 
-  const result = await orchestrator.run({ databasePath, runId: "verification-failure", tasks: [unverified] });
+  const result = await orchestrator.run({
+    databasePath,
+    runId: "verification-failure",
+    tasks: [unverified],
+  });
   const snapshot = await protocol.getSnapshot({ databasePath, runId: "verification-failure" });
 
   expect(await readFile(counterPath, "utf8")).toBe("3");
@@ -340,13 +441,16 @@ test("overlapping implementation write scopes are serialized", async () => {
 
   expect(result.status).toBe("completed");
   expect(provider.maxConcurrent).toBe(1);
-  expect(result.startedAt.right).toBeGreaterThanOrEqual(result.finishedAt.left);
+  expect(result.startedAt.right).toBeGreaterThanOrEqual(result.finishedAt.left ?? 0);
 });
 
 test("retry exhaustion blocks descendants while an independent branch continues", async () => {
   const directory = await mkdtemp(join(tmpdir(), "loop-branch-terminalization-"));
   const databasePath = join(directory, "loop.db");
-  const provider = new FakeProvider("fast", ["fast", "balanced", "strong"], { failures: { doomed: 10 }, delayMs: 5 });
+  const provider = new FakeProvider("fast", ["fast", "balanced", "strong"], {
+    failures: { doomed: 10 },
+    delayMs: 5,
+  });
   const orchestrator = new Orchestrator({
     control: protocol,
     providers: new ProviderRegistry([provider]),
@@ -363,7 +467,7 @@ test("retry exhaustion blocks descendants while an independent branch continues"
     tasks: [doomed, dependent, independent],
   });
   const snapshot = await protocol.getSnapshot({ databasePath, runId: "branch-terminalization" });
-  const states = Object.fromEntries(snapshot.tasks.map(item => [item.id, item.state]));
+  const states = Object.fromEntries(snapshot.tasks.map((item) => [item.id, item.state]));
 
   expect(result.status as string).toBe("failed");
   expect(states).toEqual({ doomed: "failed", dependent: "blocked", independent: "done" });
@@ -385,7 +489,11 @@ for (const kind of ["decision", "integration"] as const) {
     const serial = task("serial", kind, [], [`.loop/${kind}`]);
     serial.maxAttempts = 1;
 
-    const result = await orchestrator.run({ databasePath, runId: `${kind}-failure`, tasks: [serial] });
+    const result = await orchestrator.run({
+      databasePath,
+      runId: `${kind}-failure`,
+      tasks: [serial],
+    });
     const snapshot = await protocol.getSnapshot({ databasePath, runId: `${kind}-failure` });
 
     expect(result.status as string).toBe("failed");

@@ -42,7 +42,10 @@ export type SnapshotRefusal =
   | "snapshot_ref_missing";
 
 export class SnapshotRefusalError extends Error {
-  constructor(readonly refusal: SnapshotRefusal, message: string) {
+  constructor(
+    readonly refusal: SnapshotRefusal,
+    message: string,
+  ) {
     super(message);
     this.name = "SnapshotRefusalError";
   }
@@ -91,7 +94,7 @@ export class WorkspaceSnapshotStore {
   /** Creates one snapshot commit + loop ref for the workspace. Explicit trigger only. */
   async create(workspaceDir: string, request: SnapshotRequest): Promise<WorkspaceSnapshotRecord> {
     const cwd = this.#guardedWorkspace(workspaceDir);
-    const toplevel = await this.#toplevel(cwd);
+    await this.#toplevel(cwd);
     const head = await this.#headCommit(cwd);
     const indexDir = mkdtempSync(join(tmpdir(), "loop-snapshot-"));
     const indexFile = join(indexDir, "index");
@@ -101,15 +104,18 @@ export class WorkspaceSnapshotStore {
       const tree = (await this.#git(cwd, ["write-tree"], { indexFile })).stdout.trim();
       const message = snapshotMessage(request);
       const commit = (
-        await this.#git(cwd, ["commit-tree", tree, ...(head ? ["-p", head] : []), "-m", message], { indexFile })
+        await this.#git(cwd, ["commit-tree", tree, ...(head ? ["-p", head] : []), "-m", message], {
+          indexFile,
+        })
       ).stdout.trim();
       const existing = await this.#listRefs(cwd, `${SNAPSHOT_REF_PREFIX}${request.runId}/`);
       // Number by the highest existing sequence, not the count: pruning keeps
       // older names alive, and count-based numbering would reuse (overwrite) them.
-      const nextSequence = existing.reduce((max, entry) => {
-        const sequence = Number.parseInt(entry.ref.split("/").pop() ?? "0", 10);
-        return Number.isInteger(sequence) && sequence > max ? sequence : max;
-      }, 0) + 1;
+      const nextSequence =
+        existing.reduce((max, entry) => {
+          const sequence = Number.parseInt(entry.ref.split("/").pop() ?? "0", 10);
+          return Number.isInteger(sequence) && sequence > max ? sequence : max;
+        }, 0) + 1;
       const ref = `${SNAPSHOT_REF_PREFIX}${sanitizeRefComponent(request.runId)}/${String(nextSequence).padStart(4, "0")}`;
       await this.#git(cwd, ["update-ref", ref, commit]);
       const record: WorkspaceSnapshotRecord = {
@@ -130,7 +136,9 @@ export class WorkspaceSnapshotStore {
   async list(workspaceDir: string, runId?: string): Promise<WorkspaceSnapshotRecord[]> {
     const cwd = this.#guardedWorkspace(workspaceDir);
     await this.#toplevel(cwd);
-    const pattern = runId ? `${SNAPSHOT_REF_PREFIX}${sanitizeRefComponent(runId)}/` : SNAPSHOT_REF_PREFIX;
+    const pattern = runId
+      ? `${SNAPSHOT_REF_PREFIX}${sanitizeRefComponent(runId)}/`
+      : SNAPSHOT_REF_PREFIX;
     const refs = await this.#listRefs(cwd, pattern);
     return refs.map(({ ref, commit, createdAt }) => {
       const runIdPart = ref.slice(SNAPSHOT_REF_PREFIX.length).split("/")[0] ?? "";
@@ -143,13 +151,25 @@ export class WorkspaceSnapshotStore {
     const cwd = this.#guardedWorkspace(workspaceDir);
     await this.#toplevel(cwd);
     if (!ref.startsWith(SNAPSHOT_REF_PREFIX) || ref.includes("..")) {
-      throw new SnapshotRefusalError("ref_outside_snapshot_namespace", `ref ${ref} is outside ${SNAPSHOT_REF_PREFIX}`);
+      throw new SnapshotRefusalError(
+        "ref_outside_snapshot_namespace",
+        `ref ${ref} is outside ${SNAPSHOT_REF_PREFIX}`,
+      );
     }
-    const commit = (await this.#git(cwd, ["rev-parse", "--verify", "-q", `${ref}^{commit}`]).catch(() => null))?.stdout.trim();
-    if (!commit) throw new SnapshotRefusalError("snapshot_ref_missing", `snapshot ref ${ref} does not resolve`);
+    const commit = (
+      await this.#git(cwd, ["rev-parse", "--verify", "-q", `${ref}^{commit}`]).catch(() => null)
+    )?.stdout.trim();
+    if (!commit)
+      throw new SnapshotRefusalError(
+        "snapshot_ref_missing",
+        `snapshot ref ${ref} does not resolve`,
+      );
     const status = await this.#git(cwd, ["status", "--porcelain"]);
     if (status.stdout.trim().length > 0) {
-      throw new SnapshotRefusalError("worktree_dirty", "refusing restore over uncommitted changes; commit, stash, or clean first");
+      throw new SnapshotRefusalError(
+        "worktree_dirty",
+        "refusing restore over uncommitted changes; commit, stash, or clean first",
+      );
     }
     await this.#git(cwd, ["checkout", commit, "--", "."]);
     return { ref, commit };
@@ -165,7 +185,10 @@ export class WorkspaceSnapshotStore {
     const removed: string[] = [];
     for (const { ref } of refs.slice(0, refs.length - bound)) {
       if (!ref.startsWith(SNAPSHOT_REF_PREFIX)) {
-        throw new SnapshotRefusalError("ref_outside_snapshot_namespace", `ref ${ref} is outside ${SNAPSHOT_REF_PREFIX}`);
+        throw new SnapshotRefusalError(
+          "ref_outside_snapshot_namespace",
+          `ref ${ref} is outside ${SNAPSHOT_REF_PREFIX}`,
+        );
       }
       await this.#git(cwd, ["update-ref", "-d", ref]);
       removed.push(ref);
@@ -181,10 +204,16 @@ export class WorkspaceSnapshotStore {
     try {
       resolved = realpathSync(resolve(workspaceDir));
     } catch {
-      throw new SnapshotRefusalError("path_outside_project", `workspace ${workspaceDir} does not exist inside the project`);
+      throw new SnapshotRefusalError(
+        "path_outside_project",
+        `workspace ${workspaceDir} does not exist inside the project`,
+      );
     }
     if (!insideRoot(realpathSync(this.#projectRoot), resolved)) {
-      throw new SnapshotRefusalError("path_outside_project", `workspace ${resolved} is outside project root ${this.#projectRoot}`);
+      throw new SnapshotRefusalError(
+        "path_outside_project",
+        `workspace ${resolved} is outside project root ${this.#projectRoot}`,
+      );
     }
     return resolved;
   }
@@ -192,11 +221,17 @@ export class WorkspaceSnapshotStore {
   async #toplevel(cwd: string): Promise<string> {
     const result = await this.#git(cwd, ["rev-parse", "--show-toplevel"]).catch(() => null);
     if (!result || result.exitCode !== 0) {
-      throw new SnapshotRefusalError("not_a_git_worktree", redactProviderText(result?.stderr || "git rev-parse failed", 400));
+      throw new SnapshotRefusalError(
+        "not_a_git_worktree",
+        redactProviderText(result?.stderr || "git rev-parse failed", 400),
+      );
     }
     const toplevel = realpathSync(result.stdout.trim());
     if (!insideRoot(realpathSync(this.#projectRoot), toplevel)) {
-      throw new SnapshotRefusalError("path_outside_project", `worktree root ${toplevel} is outside project root`);
+      throw new SnapshotRefusalError(
+        "path_outside_project",
+        `worktree root ${toplevel} is outside project root`,
+      );
     }
     return toplevel;
   }
@@ -208,7 +243,11 @@ export class WorkspaceSnapshotStore {
   }
 
   async #listRefs(cwd: string, pattern: string): Promise<SnapshotRefEntry[]> {
-    const result = await this.#git(cwd, ["for-each-ref", "--format=%(refname)%09%(objectname)%09%(creatordate:iso8601-strict)", pattern]);
+    const result = await this.#git(cwd, [
+      "for-each-ref",
+      "--format=%(refname)%09%(objectname)%09%(creatordate:iso8601-strict)",
+      pattern,
+    ]);
     return result.stdout
       .split("\n")
       .map((line) => line.trim())
@@ -226,7 +265,9 @@ export class WorkspaceSnapshotStore {
     const running = this.#runner.start("git", args, { cwd, env });
     const result = await running.result;
     if (result.exitCode !== 0) {
-      throw new Error(`git ${args[0]} failed (${result.exitCode}): ${redactProviderText(result.stderr, 400)}`);
+      throw new Error(
+        `git ${args[0]} failed (${result.exitCode}): ${redactProviderText(result.stderr, 400)}`,
+      );
     }
     return result;
   }
@@ -258,12 +299,18 @@ interface SnapshotRefEntry {
 
 function sanitizeRefComponent(component: string): string {
   const sanitized = component
+    // \x00-\x1f\x7f are the control chars git forbids in refs; sanitize them out.
+    // oxlint-disable-next-line eslint/no-control-regex -- intentional control-char strip
     .replace(/[\s~^:?*[\\\x00-\x1f\x7f]/g, "-")
     .replace(/\.\.+/g, "-")
     .replace(/^\.+|\.+$/g, "")
     .replace(/\.lock$/i, "-lock")
     .replace(/-+/g, "-");
-  if (!sanitized || sanitized === "-") throw new SnapshotRefusalError("path_outside_project", `run id ${component} cannot form a safe ref component`);
+  if (!sanitized || sanitized === "-")
+    throw new SnapshotRefusalError(
+      "path_outside_project",
+      `run id ${component} cannot form a safe ref component`,
+    );
   return sanitized.slice(0, 96);
 }
 

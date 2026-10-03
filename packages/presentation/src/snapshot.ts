@@ -23,11 +23,14 @@ export function renderSnapshot(
 
 export function renderRuns(runs: RunListOutput[], limits: OutputLimits): string {
   if (runs.length === 0) return emptyState.noRuns;
-  return compactLines(runs.map((run) => `${run.runId} ${separator.list} ${run.state}`), {
-    lineLimit: limits.listLineLimit,
-    lineTextLimit: limits.lineTextLimit,
-    overflow: (omitted) => moreItems(omitted, "runs"),
-  }).join("\n");
+  return compactLines(
+    runs.map((run) => `${run.runId} ${separator.list} ${run.state}`),
+    {
+      lineLimit: limits.listLineLimit,
+      lineTextLimit: limits.lineTextLimit,
+      overflow: (omitted) => moreItems(omitted, "runs"),
+    },
+  ).join("\n");
 }
 
 export function renderTaskContext(context: TaskContextOutput, limits: OutputLimits): string {
@@ -46,7 +49,9 @@ export function renderTaskContext(context: TaskContextOutput, limits: OutputLimi
       const outside = check.source?.observedOutsideWriteScope?.length
         ? ` ${separator.list} ${check.source.observedOutsideWriteScope.length} path(s) outside write scope (writer unknown)`
         : "";
-      const artifact = check.outputArtifact ? ` ${separator.list} artifact ${check.outputArtifact}` : "";
+      const artifact = check.outputArtifact
+        ? ` ${separator.list} artifact ${check.outputArtifact}`
+        : "";
       return `Check ${check.id} ${separator.list} exit ${check.exitCode}${source}${outside}${artifact}${evidence ? ` ${separator.list} ${evidence}` : ""}`;
     }),
     ...context.dependencyResults.map((result) => `Result ${result.taskId}: ${result.summary}`),
@@ -62,21 +67,24 @@ export function renderTaskContext(context: TaskContextOutput, limits: OutputLimi
 
 function renderGraph(snapshot: SnapshotOutput, limits: OutputLimits): string {
   if (snapshot.tasks.length === 0) return emptyState.noTasks;
-  return compactLines(snapshot.tasks.map((task) => {
-    const details = [
-      `${task.id} ${separator.depends} ${list([...task.dependencies].sort(), "root")}`,
-      task.state,
-      ...(task.blockedBy.length > 0 ? [`blocked: ${[...task.blockedBy].sort().join(", ")}`] : []),
-      `r: ${list([...task.readScope].sort())}`,
-      `w: ${list([...task.writeScope].sort())}`,
-      ...taskDetails(task),
-    ];
-    return details.join(` ${separator.list} `);
-  }), {
-    lineLimit: limits.listLineLimit,
-    lineTextLimit: limits.lineTextLimit,
-    overflow: (omitted) => moreItems(omitted, "tasks"),
-  }).join("\n");
+  return compactLines(
+    snapshot.tasks.map((task) => {
+      const details = [
+        `${task.id} ${separator.depends} ${list([...task.dependencies].sort(), "root")}`,
+        task.state,
+        ...(task.blockedBy.length > 0 ? [`blocked: ${[...task.blockedBy].sort().join(", ")}`] : []),
+        `r: ${list([...task.readScope].sort())}`,
+        `w: ${list([...task.writeScope].sort())}`,
+        ...taskDetails(task),
+      ];
+      return details.join(` ${separator.list} `);
+    }),
+    {
+      lineLimit: limits.listLineLimit,
+      lineTextLimit: limits.lineTextLimit,
+      overflow: (omitted) => moreItems(omitted, "tasks"),
+    },
+  ).join("\n");
 }
 
 function renderWorkers(snapshot: SnapshotOutput, limits: OutputLimits): string {
@@ -112,11 +120,9 @@ function renderAttention(snapshot: SnapshotOutput, limits: OutputLimits): string
   const items = openIds.map((id) => {
     const item = attentionById.get(id);
     if (!item) return id;
-    return [
-      `${item.kind} ${item.id}`,
-      item.taskId,
-      item.summary,
-    ].filter(Boolean).join(` ${separator.list} `);
+    return [`${item.kind} ${item.id}`, item.taskId, item.summary]
+      .filter(Boolean)
+      .join(` ${separator.list} `);
   });
   const next = `Next: /loop resolve ${snapshot.runId} ${openIds[0]} <resolution>`;
   if (limits.attentionLineLimit <= 1) {
@@ -132,44 +138,49 @@ function renderAttention(snapshot: SnapshotOutput, limits: OutputLimits): string
     lineTextLimit: limits.lineTextLimit,
     overflow: (omitted) => moreItems(omitted, "attention items"),
   });
-  return compactLines([
-    `Attention: ${openIds.length} open`,
-    ...compacted,
-    next,
-  ], {
+  return compactLines([`Attention: ${openIds.length} open`, ...compacted, next], {
     lineLimit: limits.attentionLineLimit,
     lineTextLimit: limits.lineTextLimit,
     overflow: (omitted) => moreItems(omitted, "attention lines"),
   }).join("\n");
 }
 
-function renderStatus(snapshot: SnapshotOutput, limits: OutputLimits, options: SnapshotRenderOptions = {}): string {
+function renderStatus(
+  snapshot: SnapshotOutput,
+  limits: OutputLimits,
+  options: SnapshotRenderOptions = {},
+): string {
   const done = snapshot.tasks.filter((task) => task.state === "done").length;
-  const taskLines = [...snapshot.tasks].sort((left, right) => {
-    return taskPriority(left.state) - taskPriority(right.state);
-  }).map((task) => {
-    const details = [...(task.title !== task.id ? [task.title] : []), ...taskDetails(task)];
-    return `${task.id} ${separator.list} ${task.state}${details.length > 0 ? ` ${separator.list} ${details.join(` ${separator.list} `)}` : ""}`;
-  });
-  const taskLineLimit = Math.min(
-    limits.findingsLineLimit,
-    Math.max(0, limits.statusLineLimit - 3),
-  );
-  const visibleTasks = taskLineLimit === 0 ? [] : compactLines(taskLines, {
-    lineLimit: taskLineLimit,
-    lineTextLimit: limits.lineTextLimit,
-    overflow: (omitted) => moreItems(omitted, "task findings"),
-  });
-  const status = compactLines([
-    `Run ${snapshot.runId}`,
-    `State: ${snapshot.state}`,
-    `Tasks: ${done}/${snapshot.tasks.length} ${separator.list} Workers: ${snapshot.activeWorkers.length} ${separator.list} Attention: ${snapshot.openAttentionIds.length}`,
-    ...visibleTasks,
-  ], {
-    lineLimit: limits.statusLineLimit,
-    lineTextLimit: limits.lineTextLimit,
-    overflow: (omitted) => moreItems(omitted, "status lines"),
-  }).join("\n");
+  const taskLines = [...snapshot.tasks]
+    .sort((left, right) => {
+      return taskPriority(left.state) - taskPriority(right.state);
+    })
+    .map((task) => {
+      const details = [...(task.title !== task.id ? [task.title] : []), ...taskDetails(task)];
+      return `${task.id} ${separator.list} ${task.state}${details.length > 0 ? ` ${separator.list} ${details.join(` ${separator.list} `)}` : ""}`;
+    });
+  const taskLineLimit = Math.min(limits.findingsLineLimit, Math.max(0, limits.statusLineLimit - 3));
+  const visibleTasks =
+    taskLineLimit === 0
+      ? []
+      : compactLines(taskLines, {
+          lineLimit: taskLineLimit,
+          lineTextLimit: limits.lineTextLimit,
+          overflow: (omitted) => moreItems(omitted, "task findings"),
+        });
+  const status = compactLines(
+    [
+      `Run ${snapshot.runId}`,
+      `State: ${snapshot.state}`,
+      `Tasks: ${done}/${snapshot.tasks.length} ${separator.list} Workers: ${snapshot.activeWorkers.length} ${separator.list} Attention: ${snapshot.openAttentionIds.length}`,
+      ...visibleTasks,
+    ],
+    {
+      lineLimit: limits.statusLineLimit,
+      lineTextLimit: limits.lineTextLimit,
+      overflow: (omitted) => moreItems(omitted, "status lines"),
+    },
+  ).join("\n");
   const feed = renderActivityFeed(snapshot, limits, options);
   return feed ? `${status}\n${feed}` : status;
 }
@@ -180,10 +191,16 @@ function renderStatus(snapshot: SnapshotOutput, limits: OutputLimits, options: S
  * budget (workerActivityLines per worker, findingsLineLimit workers) and the
  * shared line-text clamp. One-shot `loop status` omits the section.
  */
-function renderActivityFeed(snapshot: SnapshotOutput, limits: OutputLimits, options: SnapshotRenderOptions): string {
+function renderActivityFeed(
+  snapshot: SnapshotOutput,
+  limits: OutputLimits,
+  options: SnapshotRenderOptions,
+): string {
   const budget = options.workerActivityLines ?? 0;
   if (budget <= 0) return "";
-  const running = snapshot.tasks.filter((task) => task.state === "running" && task.activities.length > 0);
+  const running = snapshot.tasks.filter(
+    (task) => task.state === "running" && task.activities.length > 0,
+  );
   if (running.length === 0) return "";
   const blocks = running.map((task) => {
     const recent = task.activities.slice(-budget);

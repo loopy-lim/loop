@@ -1,20 +1,28 @@
-import type { ComputeClass, SandboxCapabilityDeclaration, TaskContextOutput, UsageMetadata } from "@loop/protocol";
+import type {
+  ComputeClass,
+  SandboxCapabilityDeclaration,
+  TaskContextOutput,
+  UsageMetadata,
+  WorkerState,
+} from "@loop/protocol";
 
 import type { WorkerOutputContract } from "./json-output";
 
 /**
- * Worker lifecycle vocabulary mirroring loop-core `WorkerState` (serde
- * snake_case). `lost` is the only terminal-without-result state — adapters
- * that end a session without a usable result report `lost` and carry the
- * failure detail in `WorkerResult.failure` instead of a `failed` status.
+ * Worker lifecycle vocabulary, re-exposed from the generated protocol
+ * (`@loop/protocol`). The domain source is loop-core `WorkerState` (serde
+ * snake_case); codegen carries it through the optional `state` fields on
+ * `WorkerInput`/`WorkerResultInput`. `lost` is the only terminal-without-result
+ * state — adapters that end a session without a usable result report `lost`
+ * and carry the failure detail in `WorkerResult.failure` instead of a `failed`
+ * status.
  *
- * Frozen-contract exception (docs/decisions/2026-09-24-evolution-roadmap.md,
- * 실행 1): this union is hand-written on purpose. Nothing in the generated
- * protocol carries `WorkerState`, so there is nothing to generate it from.
- * The strings below are a frozen contract with the Rust serde form in
- * `crates/loop-core/src/run/worker.rs` — change both together or not at all.
+ * Supersedes the frozen-contract hand-written copy (docs/decisions/
+ * 2026-09-24-evolution-roadmap.md, 실행 1 후속 결정 2026-09-30, 안 B): the
+ * generated protocol now carries `WorkerState`, so consumers must not keep a
+ * local union.
  */
-export type WorkerState = "starting" | "running" | "completed" | "lost" | "cancelled";
+export type { WorkerState };
 
 export type ProviderFailureKind =
   | "unavailable"

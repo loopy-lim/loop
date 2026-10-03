@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
 
@@ -93,8 +93,14 @@ test("configuration keeps model names and provider endpoints out of business log
 });
 
 test("the repository contains no recovered legacy product surfaces", () => {
+  // Approved product surfaces (docs/decisions/2026-xx-app-surfaces-boundary.md):
+  // apps/loop-mobile must exist; its absence is a regression.
+  for (const path of ["apps/loop-mobile"]) {
+    expect(existsSync(join(root, path))).toBe(true);
+  }
+
+  // Legacy surfaces stay banned at their specific paths (never as a blanket "apps" ban).
   for (const path of [
-    "apps",
     "crates/loop-legacy",
     "crates/loop-lock-holder",
     "crates/loop-rustra",
@@ -108,6 +114,7 @@ test("the repository contains no recovered legacy product surfaces", () => {
   }
   expect(existsSync(join(root, "plugins/loop-herdr"))).toBe(false);
   expect(existsSync(join(root, "plugins/loop-agent/herdr-plugin.toml"))).toBe(true);
+  expect(existsSync(join(root, "apps"))).toBe(true);
 });
 
 test("the interactive Loop Lead never owns Herdr workspace or attachment lifecycle", () => {
@@ -115,6 +122,98 @@ test("the interactive Loop Lead never owns Herdr workspace or attachment lifecyc
   expect(cli).not.toContain("HerdrWorkerRuntime");
   expect(cli).not.toMatch(/agent["']\s*,\s*["']attach/);
   expect(cli).not.toMatch(/workspace["']\s*,\s*["']create/);
+});
+
+// ——— App layered layout (decision 2026-xx-tokenless-auth-and-app-layout D-B) ———
+
+/** The six decided layers; arrows point at layers a layer may import. */
+const LAYERS = ["screens", "features", "gateway-client", "state", "ui", "auth"] as const;
+type Layer = (typeof LAYERS)[number];
+
+const LAYER_IMPORTS: Record<Layer, readonly Layer[]> = {
+  screens: ["features", "gateway-client", "state", "ui", "auth"],
+  features: ["gateway-client", "state", "ui", "auth"],
+  "gateway-client": [],
+  state: ["gateway-client"],
+  ui: [],
+  auth: ["gateway-client"],
+};
+
+/** The mobile src-root entry file (App.tsx) routes screens;
+ * it may import every layer. */
+const ENTRY_ALLOWED: readonly Layer[] = [...LAYERS];
+
+const APPS = ["apps/loop-mobile"] as const;
+
+function appSourceFiles(src: string): string[] {
+  return files(src, ".ts").concat(files(src, ".tsx"));
+}
+
+function layerOf(src: string, file: string): Layer | "entry" {
+  const rel = relative(src, file);
+  if (!rel.includes("/")) return "entry";
+  const layer = rel.split("/")[0] as Layer;
+  expect(LAYERS, `unexpected src directory in ${rel}`).toContain(layer);
+  return layer;
+}
+
+function importSpecifiers(source: string): string[] {
+  return [...source.matchAll(/from\s+["']([^"']+)["']/g)].flatMap((match) => {
+    const specifier = match[1];
+    return specifier === undefined ? [] : [specifier];
+  });
+}
+
+test("the app follows the decided layered layout with enforced import directions", () => {
+  for (const app of APPS) {
+    const src = join(root, app, "src");
+
+    // (iii) no top-level src directories beyond the six decided layers.
+    const dirs = readdirSync(src, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+    expect(dirs, `${app}/src layers`).toEqual([...LAYERS].sort());
+
+    for (const file of appSourceFiles(src)) {
+      const from = layerOf(src, file);
+      const allowed = from === "entry" ? ENTRY_ALLOWED : LAYER_IMPORTS[from];
+      const source = readFileSync(file, "utf8");
+      for (const spec of importSpecifiers(source)) {
+        if (spec.startsWith(".")) {
+          const target = layerOf(src, resolve(dirname(file), spec));
+          if (target === "entry" || target === from) continue; // same layer or entry
+          expect(
+            allowed,
+            `${app}: ${relative(root, file)} -> ${spec} (layer "${from}" may not import "${target}")`,
+          ).toContain(target);
+        } else if (spec === "@loop/protocol") {
+          // (i) generated protocol is reachable only through gateway-client.
+          expect(
+            from,
+            `${app}: ${relative(root, file)} imports generated protocol directly (must go through gateway-client)`,
+          ).toBe("gateway-client");
+        }
+      }
+    }
+  }
+});
+
+test("keychain/keyring/credential-store references stay confined to the auth layer", () => {
+  // Credential persistence (bearer-fallback only, decision §D-A3) lives in
+  // auth/. Any import of a keychain/keyring/credential-store module from
+  // outside auth/ is a layer violation — prose mentions are not references.
+  for (const app of APPS) {
+    const src = join(root, app, "src");
+    for (const file of appSourceFiles(src)) {
+      const rel = relative(src, file);
+      if (rel === basename(rel) || rel.startsWith("auth")) continue;
+      const leaking = importSpecifiers(readFileSync(file, "utf8")).filter(
+        (spec) => /keychain|keyring|credentialstore/i.test(spec) && !/(^|[\\/])auth[\\/]/.test(spec),
+      );
+      expect(leaking, `${app}: credential-store import outside auth/: ${rel}`).toEqual([]);
+    }
+  }
 });
 
 function rustFiles(directory: string): string[] {

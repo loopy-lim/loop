@@ -25,10 +25,10 @@ test.skipIf(process.platform === "win32")(
     const script = [
       'const { spawn } = require("node:child_process")',
       'const child = spawn(process.execPath, ["-e", "process.on(\\"SIGTERM\\", () => {}); setInterval(() => {}, 1000)"], { stdio: "ignore" })',
-      'child.unref()',
-      'console.log(child.pid)',
+      "child.unref()",
+      "console.log(child.pid)",
       'process.on("SIGTERM", () => setTimeout(() => process.exit(0), 20))',
-      'setInterval(() => {}, 1000)',
+      "setInterval(() => {}, 1000)",
     ].join(";");
     const running = runner.start(process.execPath, ["-e", script]);
     const pid = await new Promise<number>((resolve, reject) => {
@@ -52,10 +52,15 @@ test.skipIf(process.platform === "win32")(
 
 test("NodeProcessRunner leaves a stalled worker running before its deadline, then kills it and reports retryable timeout", async () => {
   const runner = new NodeProcessRunner({ runTimeoutMs: 120, cancelGraceMs: 20 });
-  const running = runner.start(process.execPath, ["-e", "process.stdout.write(String(process.pid) + '\\n'); setInterval(() => {}, 1000)"]);
+  const running = runner.start(process.execPath, [
+    "-e",
+    "process.stdout.write(String(process.pid) + '\\n'); setInterval(() => {}, 1000)",
+  ]);
   let settled = false;
-  void running.result.then(() => { settled = true; });
-  await new Promise(resolve => setTimeout(resolve, 40));
+  void running.result.then(() => {
+    settled = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 40));
   expect(settled).toBe(false);
 
   const processResult = await running.result;
@@ -93,7 +98,7 @@ test.skipIf(process.platform === "win32")(
     const script = [
       'const { spawn } = require("node:child_process")',
       'const child = spawn(process.execPath, ["-e", "setTimeout(() => console.log(\\"late-final\\"), 20)"], { stdio: ["ignore", 1, 2] })',
-      'child.unref()',
+      "child.unref()",
       'console.log("early")',
     ].join(";");
 

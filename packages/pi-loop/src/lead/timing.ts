@@ -23,14 +23,18 @@ function seconds(milliseconds: number): string {
 }
 
 export function formatHandoffTiming(receipt: LeadTimingReceipt | undefined): string | undefined {
-  if (receipt?.requestToHandoffMs !== undefined) return `요청→인계 ${seconds(receipt.requestToHandoffMs)}`;
-  if (receipt?.submissionToHandoffMs !== undefined) return `도구→인계 ${seconds(receipt.submissionToHandoffMs)}`;
+  if (receipt?.requestToHandoffMs !== undefined)
+    return `요청→인계 ${seconds(receipt.requestToHandoffMs)}`;
+  if (receipt?.submissionToHandoffMs !== undefined)
+    return `도구→인계 ${seconds(receipt.submissionToHandoffMs)}`;
   return undefined;
 }
 
 export function formatFinalTiming(receipt: LeadTimingReceipt | undefined): string | undefined {
-  if (receipt?.requestToResultMs !== undefined) return `요청→결과 ${seconds(receipt.requestToResultMs)}`;
-  if (receipt?.handoffToResultMs !== undefined) return `인계→결과 ${seconds(receipt.handoffToResultMs)}`;
+  if (receipt?.requestToResultMs !== undefined)
+    return `요청→결과 ${seconds(receipt.requestToResultMs)}`;
+  if (receipt?.handoffToResultMs !== undefined)
+    return `인계→결과 ${seconds(receipt.handoffToResultMs)}`;
   return undefined;
 }
 

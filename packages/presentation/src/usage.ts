@@ -35,17 +35,30 @@ function formatTokens(value: number | undefined): string | undefined {
  * G17 사용량 요약 렌더링: 기록된 관측만 표시하고, 추정치는 라벨로
  * 실측과 구별한다. 기록이 없으면 "none reported" — 0으로 채우지 않는다.
  */
-export function renderUsage(usage: UsageSummaryView | undefined, options: UsageRenderOptions): string {
+export function renderUsage(
+  usage: UsageSummaryView | undefined,
+  options: UsageRenderOptions,
+): string {
   if (!usage || usage.recordCount === 0) return `Usage: ${emptyState.noUsage}`;
   const lines = usage.bases.map((basis) => {
-    const label = basis.basis === "estimated" ? "estimated (derived, not measured)" : "observed (reported)";
+    const label =
+      basis.basis === "estimated" ? "estimated (derived, not measured)" : "observed (reported)";
     const parts = [
-      ...(basis.totals.inputTokens !== undefined ? [`in ${formatTokens(basis.totals.inputTokens)}`] : []),
-      ...(basis.totals.outputTokens !== undefined ? [`out ${formatTokens(basis.totals.outputTokens)}`] : []),
-      ...(basis.totals.cacheReadTokens !== undefined ? [`cache ${formatTokens(basis.totals.cacheReadTokens)}`] : []),
+      ...(basis.totals.inputTokens !== undefined
+        ? [`in ${formatTokens(basis.totals.inputTokens)}`]
+        : []),
+      ...(basis.totals.outputTokens !== undefined
+        ? [`out ${formatTokens(basis.totals.outputTokens)}`]
+        : []),
+      ...(basis.totals.cacheReadTokens !== undefined
+        ? [`cache ${formatTokens(basis.totals.cacheReadTokens)}`]
+        : []),
       ...Object.entries(basis.totals.cost ?? {}).map(([currency, cost]) => `${cost} ${currency}`),
     ];
-    return singleLine(`Usage (${label}, ${basis.recordCount} record(s)): ${parts.length > 0 ? parts.join(` ${separator.list} `) : "reported axes only"}`, options.lineTextLimit);
+    return singleLine(
+      `Usage (${label}, ${basis.recordCount} record(s)): ${parts.length > 0 ? parts.join(` ${separator.list} `) : "reported axes only"}`,
+      options.lineTextLimit,
+    );
   });
   return lines.join("\n");
 }

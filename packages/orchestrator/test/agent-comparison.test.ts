@@ -20,25 +20,71 @@ test("agent comparison runs each provider against an isolated copy of one clean 
   git(source, "init", "-q");
   writeFileSync(join(source, "result.txt"), "unchanged\n");
   git(source, "add", "result.txt");
-  git(source, "-c", "user.name=Loop Test", "-c", "user.email=loop@example.invalid", "commit", "-qm", "fixture");
+  git(
+    source,
+    "-c",
+    "user.name=Loop Test",
+    "-c",
+    "user.email=loop@example.invalid",
+    "commit",
+    "-qm",
+    "fixture",
+  );
   const task = {
-    id: "inspect", title: "Inspect", kind: "verification" as const, dependencies: [], readScope: ["result.txt"], writeScope: [],
+    id: "inspect",
+    title: "Inspect",
+    kind: "verification" as const,
+    dependencies: [],
+    readScope: ["result.txt"],
+    writeScope: [],
     requirements: ["result remains unchanged"],
-    completionChecks: [{ id: "content", command: "cat", args: ["result.txt"], workingDirectory: null, timeoutMs: 1000 }],
-    preferredCompute: "fast" as const, minimumCompute: "fast" as const, maximumCompute: "fast" as const, maxAttempts: 1,
-    routing: { risk: "low" as const, required: { coding: 0, reasoning: 0, tools: 0, vision: 0, long_context: 0 } },
+    completionChecks: [
+      {
+        id: "content",
+        command: "cat",
+        args: ["result.txt"],
+        workingDirectory: null,
+        timeoutMs: 1000,
+      },
+    ],
+    preferredCompute: "fast" as const,
+    minimumCompute: "fast" as const,
+    maximumCompute: "fast" as const,
+    maxAttempts: 1,
+    routing: {
+      risk: "low" as const,
+      required: { coding: 0, reasoning: 0, tools: 0, vision: 0, long_context: 0 },
+    },
   };
   const report = await runAgentComparison({
-    control: protocol, providers: new ProviderRegistry([new FakeProvider("agent-a", ["fast"]), new FakeProvider("agent-b", ["fast"])]),
-    databasePath: join(workspaceRoot, "runs.db"), sourceDirectory: source, workspaceRoot,
-    name: "same-task", intent: "Inspect the file", tasks: [task],
-    criteria: [{ id: "unchanged", taskId: "inspect", description: "result remains unchanged", checkIds: ["content"] }],
-    candidateIds: ["agent-a", "agent-b"], iterations: 1,
+    control: protocol,
+    providers: new ProviderRegistry([
+      new FakeProvider("agent-a", ["fast"]),
+      new FakeProvider("agent-b", ["fast"]),
+    ]),
+    databasePath: join(workspaceRoot, "runs.db"),
+    sourceDirectory: source,
+    workspaceRoot,
+    name: "same-task",
+    intent: "Inspect the file",
+    tasks: [task],
+    criteria: [
+      {
+        id: "unchanged",
+        taskId: "inspect",
+        description: "result remains unchanged",
+        checkIds: ["content"],
+      },
+    ],
+    candidateIds: ["agent-a", "agent-b"],
+    iterations: 1,
   });
-  expect(report.rows.map(row => row.providerId)).toEqual(["agent-a", "agent-b"]);
-  expect(report.rows.map(row => row.verifiedCriteria)).toEqual([1, 1]);
-  expect(report.rows.every(row => row.status === "completed" && row.scopeViolations.length === 0)).toBe(true);
+  expect(report.rows.map((row) => row.providerId)).toEqual(["agent-a", "agent-b"]);
+  expect(report.rows.map((row) => row.verifiedCriteria)).toEqual([1, 1]);
+  expect(
+    report.rows.every((row) => row.status === "completed" && row.scopeViolations.length === 0),
+  ).toBe(true);
   expect(report.rows[0]!.workspace).not.toBe(report.rows[1]!.workspace);
   expect(report.rows[0]!.sourceCommit).toBe(report.rows[1]!.sourceCommit);
-  expect(report.rows.every(row => row.elapsedMs >= 0)).toBe(true);
+  expect(report.rows.every((row) => row.elapsedMs >= 0)).toBe(true);
 });

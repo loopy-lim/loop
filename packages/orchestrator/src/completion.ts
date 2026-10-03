@@ -44,7 +44,11 @@ export class CompletionVerifier {
       const started = Date.now();
       const cwd = safeWorkingDirectory(root, check.workingDirectory);
       const timeoutMs = safeTimeout(check.timeoutMs, check.id);
-      const result = await this.runner.run(check.command, [...check.args], { cwd, timeoutMs, signal });
+      const result = await this.runner.run(check.command, [...check.args], {
+        cwd,
+        timeoutMs,
+        signal,
+      });
       results.push({
         id: check.id,
         command: check.command,
@@ -60,27 +64,41 @@ export class CompletionVerifier {
 }
 
 export class NodeCompletionRunner implements CompletionRunner {
-  async run(command: string, args: string[], options: { cwd: string; timeoutMs: number; signal?: AbortSignal }): Promise<CompletionProcessResult> {
+  async run(
+    command: string,
+    args: string[],
+    options: { cwd: string; timeoutMs: number; signal?: AbortSignal },
+  ): Promise<CompletionProcessResult> {
     // The compiled Loop CLI points Rustra at its adjacent native bridge.
     // Passing that private path to checks in another checkout can load a
     // library with an older generated contract. Keep an explicit project
     // override; remove only the path inserted by Loop itself.
-    const library = globalThis.process.platform === "darwin" ? "libloop_bridge.dylib"
-      : globalThis.process.platform === "win32" ? "loop_bridge.dll" : "libloop_bridge.so";
+    const library =
+      globalThis.process.platform === "darwin"
+        ? "libloop_bridge.dylib"
+        : globalThis.process.platform === "win32"
+          ? "loop_bridge.dll"
+          : "libloop_bridge.so";
     const privateBridge = join(dirname(globalThis.process.execPath), library);
-    const env = globalThis.process.env.RUSTRA_BUN_LIBRARY === privateBridge
-      ? { RUSTRA_BUN_LIBRARY: undefined }
-      : undefined;
+    const env =
+      globalThis.process.env.RUSTRA_BUN_LIBRARY === privateBridge
+        ? { RUSTRA_BUN_LIBRARY: undefined }
+        : undefined;
     const process = new NodeProcessRunner().start(command, args, { cwd: options.cwd, env });
     let timedOut = false;
     let stopping: Promise<void> | undefined;
     let rejectStop!: (error: unknown) => void;
-    const stopFailure = new Promise<never>((_, reject) => { rejectStop = reject; });
+    const stopFailure = new Promise<never>((_, reject) => {
+      rejectStop = reject;
+    });
     const stop = () => {
       stopping ??= process.cancel();
       void stopping.catch(rejectStop);
     };
-    const timeout = setTimeout(() => { timedOut = true; stop(); }, options.timeoutMs);
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      stop();
+    }, options.timeoutMs);
     options.signal?.addEventListener("abort", stop, { once: true });
     if (options.signal?.aborted) stop();
     try {

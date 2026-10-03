@@ -6,7 +6,12 @@ import { FakeProvider, MirroringProvider } from "@loop/providers";
 
 import type { LoopConfig } from "../src/config";
 import { KIND_DEFAULT_PERSONAS } from "../src/persona";
-import { buildProviderRegistry, StoreActivitySink, wrapForVisibility, type ActivityRecorder } from "../src/composition";
+import {
+  buildProviderRegistry,
+  StoreActivitySink,
+  wrapForVisibility,
+  type ActivityRecorder,
+} from "../src/composition";
 
 beforeAll(() => protocol.rustra.ready());
 
@@ -56,6 +61,7 @@ function loopConfig(workerVisibility: LoopConfig["output"]["workerVisibility"]):
       highRiskFloor: "strong",
       criticalRiskFloor: "frontier",
       escalation: ["fast", "strong"],
+      computeSelection: "cheapest",
     },
     output: {
       statusLineLimit: 8,
@@ -68,14 +74,16 @@ function loopConfig(workerVisibility: LoopConfig["output"]["workerVisibility"]):
       workerPaneLimit: 4,
     },
     lead: { command: "pi", provider: "zai", model: "glm-5.3-flashx" },
-    models: [{
-      id: "flashx",
-      provider: "pi",
-      computeClass: "fast",
-      capabilities: { coding: 3, reasoning: 3, tools: 3, vision: 0, longContext: 0 },
-      latency: 3,
-      costWeight: 1,
-    }],
+    models: [
+      {
+        id: "flashx",
+        provider: "pi",
+        computeClass: "fast",
+        capabilities: { coding: 3, reasoning: 3, tools: 3, vision: 0, longContext: 0 },
+        latency: 3,
+        costWeight: 1,
+      },
+    ],
     providers: { pi: { command: "pi", enabled: true, mode: "interactive" } },
     personas: {},
     personaKindDefaults: KIND_DEFAULT_PERSONAS,
@@ -98,7 +106,11 @@ test("watch visibility wraps providers in the mirroring decorator", async () => 
     config: loopConfig("watch"),
     projectRoot: "/project",
     environment: {},
-    activityRecorder: { async recordActivity(input) { recorded.push(input); } },
+    activityRecorder: {
+      async recordActivity(input) {
+        recorded.push(input);
+      },
+    },
   });
   const provider = await registry.select("fast");
   expect(provider instanceof MirroringProvider).toBe(true);
@@ -120,10 +132,25 @@ test("panes visibility hosts the steer relay in each worker pane via the composi
     async run(_command, args) {
       calls.push(args);
       if (args[0] === "workspace") {
-        return { exitCode: 0, stdout: JSON.stringify({ result: { workspace: { workspace_id: "ws-1" }, root_pane: { pane_id: "ws-1:p-root" } } }), stderr: "" };
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            result: { workspace: { workspace_id: "ws-1" }, root_pane: { pane_id: "ws-1:p-root" } },
+          }),
+          stderr: "",
+        };
       }
       if (args[0] === "tab" && args[1] === "create") {
-        return { exitCode: 0, stdout: JSON.stringify({ result: { tab: { tab_id: `ws-lead:t-${calls.length}` }, root_pane: { pane_id: `ws-lead:p-${calls.length}` } } }), stderr: "" };
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            result: {
+              tab: { tab_id: `ws-lead:t-${calls.length}` },
+              root_pane: { pane_id: `ws-lead:p-${calls.length}` },
+            },
+          }),
+          stderr: "",
+        };
       }
       return { exitCode: 0, stdout: "{}", stderr: "" };
     },
@@ -136,12 +163,22 @@ test("panes visibility hosts the steer relay in each worker pane via the composi
       projectRoot: "/project",
       environment: { HERDR_WORKSPACE_ID: "ws-lead", HERDR_PANE_ID: "ws-lead:p-lead" },
       herdr,
-      relayCommand: (worker) => ({ command: "loop", args: ["__steer-relay", worker.runId, worker.taskId, "--database", "/tmp/loop-visibility.sqlite"] }),
+      relayCommand: (worker) => ({
+        command: "loop",
+        args: [
+          "__steer-relay",
+          worker.runId,
+          worker.taskId,
+          "--database",
+          "/tmp/loop-visibility.sqlite",
+        ],
+      }),
     },
     herdr,
   );
   expect(provider instanceof MirroringProvider).toBe(true);
 
+  if (provider === undefined) throw new Error("expected a wrapped provider");
   const handle = await provider.start({
     runId: "run-1",
     taskId: "t-1",
@@ -155,7 +192,7 @@ test("panes visibility hosts the steer relay in each worker pane via the composi
   await provider.cancel(handle.id);
 
   const relayRun = calls.find((args) => args[0] === "pane" && args[1] === "run");
-  expect(relayRun).toBeDefined();
+  if (relayRun === undefined) throw new Error("expected a pane run relay call");
   expect(relayRun).toContain("__steer-relay");
   expect(relayRun).toContain("run-1");
   expect(relayRun).toContain("t-1");
@@ -182,6 +219,7 @@ test("panes visibility without herdr context never hosts a relay (headless no-op
     },
     herdr,
   );
+  if (provider === undefined) throw new Error("expected a wrapped provider");
   const handle = await provider.start({
     runId: "run-1",
     taskId: "t-1",

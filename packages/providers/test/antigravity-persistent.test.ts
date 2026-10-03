@@ -48,12 +48,17 @@ function fakeChild() {
 }
 
 function spawnScript(child: FakeChild, onSpawn?: () => void) {
-  const spawnProcess = ((() => {
+  const spawnProcess = (() => {
     onSpawn?.();
     // emit init asynchronously, like a real process
-    queueMicrotask(() => child.stdout.emit("data", `${JSON.stringify({ event: "init", conversation_id: "conv-1" })}\n`));
+    queueMicrotask(() =>
+      child.stdout.emit(
+        "data",
+        `${JSON.stringify({ event: "init", conversation_id: "conv-1" })}\n`,
+      ),
+    );
     return child;
-  }) as unknown) as typeof import("node:child_process").spawn;
+  }) as unknown as typeof import("node:child_process").spawn;
   return spawnProcess;
 }
 
@@ -148,7 +153,11 @@ describe("AgyStreamDriver", () => {
       capturedArgs = args;
       return child;
     }) as unknown as typeof import("node:child_process").spawn;
-    const driver = AgyStreamDriver.start({ cwd: "/project", conversationId: "conv-9", spawnProcess });
+    const driver = AgyStreamDriver.start({
+      cwd: "/project",
+      conversationId: "conv-9",
+      spawnProcess,
+    });
     expect(driver.conversationId).toBe("conv-9");
     expect(capturedArgs).toContain("--conversation");
     expect(capturedArgs![capturedArgs!.indexOf("--conversation") + 1]).toBe("conv-9");
@@ -185,24 +194,49 @@ describe("AgyStreamDriver", () => {
 describe("AgyPersistentProvider", () => {
   test("streams redacted activity before the turn completes and unsubscribes", async () => {
     const { child } = fakeChild();
-    const driver = AgyStreamDriver.start({ cwd: "/project", spawnProcess: spawnScript(child), turnTimeoutMs: 5000 });
-    const provider = new AgyPersistentProvider({ id: "agy-progress", cwd: "/project", computeClasses: ["balanced"], driverFactory: () => driver });
+    const driver = AgyStreamDriver.start({
+      cwd: "/project",
+      spawnProcess: spawnScript(child),
+      turnTimeoutMs: 5000,
+    });
+    const provider = new AgyPersistentProvider({
+      id: "agy-progress",
+      cwd: "/project",
+      computeClasses: ["balanced"],
+      driverFactory: () => driver,
+    });
     const handle = await provider.start(input);
     const events: ProviderEvent[] = [];
-    const unsubscribe = provider.subscribe(handle.id, event => events.push(event));
+    const unsubscribe = provider.subscribe(handle.id, (event) => events.push(event));
     try {
-      child.stdout.emit("data", JSON.stringify({ event: "step_update", step_update: { text_delta: "Checking graph dependencies" } }) + "\n");
+      child.stdout.emit(
+        "data",
+        JSON.stringify({
+          event: "step_update",
+          step_update: { text_delta: "Checking graph dependencies" },
+        }) + "\n",
+      );
       child.stderr.emit("data", "Authorization: Bearer provider-secret\nretrying transport");
-      expect(events).toContainEqual({ type: "output", stream: "stdout", text: "Checking graph dependencies" });
+      expect(events).toContainEqual({
+        type: "output",
+        stream: "stdout",
+        text: "Checking graph dependencies",
+      });
       expect(JSON.stringify(events)).toContain("retrying transport");
       expect(JSON.stringify(events)).not.toContain("provider-secret");
       expect(await provider.status(handle.id)).toBe("running");
       const count = events.length;
       unsubscribe();
-      child.stdout.emit("data", JSON.stringify({ event: "step_update", step_update: { text_delta: "more work" } }) + "\n");
+      child.stdout.emit(
+        "data",
+        JSON.stringify({ event: "step_update", step_update: { text_delta: "more work" } }) + "\n",
+      );
       expect(events).toHaveLength(count);
     } finally {
-      child.stdout.emit("data", JSON.stringify({ event: "result", result: { status: "SUCCESS", response: "done" } }) + "\n");
+      child.stdout.emit(
+        "data",
+        JSON.stringify({ event: "result", result: { status: "SUCCESS", response: "done" } }) + "\n",
+      );
       await provider.result(handle.id);
       await provider.release(handle.id);
     }
@@ -210,8 +244,17 @@ describe("AgyPersistentProvider", () => {
 
   test("a timed-out turn reports failure and releases its process before reuse", async () => {
     const { child } = fakeChild();
-    const driver = AgyStreamDriver.start({ cwd: "/project", spawnProcess: spawnScript(child), turnTimeoutMs: 20 });
-    const provider = new AgyPersistentProvider({ id: "agy-timeout", cwd: "/project", computeClasses: ["balanced"], driverFactory: () => driver });
+    const driver = AgyStreamDriver.start({
+      cwd: "/project",
+      spawnProcess: spawnScript(child),
+      turnTimeoutMs: 20,
+    });
+    const provider = new AgyPersistentProvider({
+      id: "agy-timeout",
+      cwd: "/project",
+      computeClasses: ["balanced"],
+      driverFactory: () => driver,
+    });
     const handle = await provider.start(input);
     const result = await provider.result(handle.id);
     await provider.release(handle.id);
@@ -278,18 +321,24 @@ describe("AgyPersistentProvider", () => {
   });
 
   test("cancel waits for the driver and active turn to stop", async () => {
-    const turn = deferred<{ ok: boolean; response: string; conversationId: string; failure: { kind: "cancelled"; retryable: false } }>();
+    const turn = deferred<{
+      ok: boolean;
+      response: string;
+      conversationId: string;
+      failure: { kind: "cancelled"; retryable: false };
+    }>();
     const stopped = deferred<void>();
     const driver = {
       turn: () => turn.promise,
-      cancel: () => stopped.promise.then(() => {
-        turn.resolve({
-          ok: false,
-          response: "",
-          conversationId: "conv-cancel",
-          failure: { kind: "cancelled", retryable: false },
-        });
-      }),
+      cancel: () =>
+        stopped.promise.then(() => {
+          turn.resolve({
+            ok: false,
+            response: "",
+            conversationId: "conv-cancel",
+            failure: { kind: "cancelled", retryable: false },
+          });
+        }),
       dispose: async () => undefined,
       get conversationId() {
         return "conv-cancel";

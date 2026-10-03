@@ -11,7 +11,12 @@ import { loadLoopConfig, loadPersonaKindDefaults, loadPersonaRegistry } from "..
 import { Orchestrator } from "../src/coordinator";
 import { CompletionVerifier } from "../src/completion";
 import type { OrchestrationControl } from "../src/control";
-import { derivePersonaVocabulary, KIND_DEFAULT_PERSONAS, PERSONA_IDS, resolvePersona } from "../src/persona";
+import {
+  derivePersonaVocabulary,
+  KIND_DEFAULT_PERSONAS,
+  PERSONA_IDS,
+  resolvePersona,
+} from "../src/persona";
 import { executeTask } from "../src/task-execution";
 
 const registry = {
@@ -62,11 +67,17 @@ test("resolvePersona warns and falls back to the kind default for unknown ids", 
   const resolution = resolvePersona({ requested: "pirate", kind: "decision", registry });
   expect(resolution.id).toBe("architect");
   expect(resolution.instructions).toBe("ARCHITECT TEXT");
-  expect(resolution.warning).toBe("[persona] unknown id 'pirate' — fell back to 'architect' (kind=decision)");
+  expect(resolution.warning).toBe(
+    "[persona] unknown id 'pirate' — fell back to 'architect' (kind=decision)",
+  );
 });
 
 test("resolvePersona omits the section with a warning when the kind default is missing", () => {
-  const unknownWithoutDefault = resolvePersona({ requested: "pirate", kind: "research", registry: {} });
+  const unknownWithoutDefault = resolvePersona({
+    requested: "pirate",
+    kind: "research",
+    registry: {},
+  });
   expect(unknownWithoutDefault.instructions).toBeUndefined();
   expect(unknownWithoutDefault.warning).toBe(
     "[persona] unknown id 'pirate' — no default persona for kind=research; section omitted",
@@ -100,7 +111,9 @@ test("KIND_DEFAULT_PERSONAS covers every task kind", () => {
 test("resolvePersona honors kind-default overrides and keeps the floor for unlisted kinds", () => {
   const registryWithDesigner = { ...registry, designer: "DESIGNER TEXT" };
   const defaults = { ...KIND_DEFAULT_PERSONAS, decision: "designer" };
-  expect(resolvePersona({ requested: null, kind: "decision", registry: registryWithDesigner, defaults })).toEqual({
+  expect(
+    resolvePersona({ requested: null, kind: "decision", registry: registryWithDesigner, defaults }),
+  ).toEqual({
     id: "designer",
     instructions: "DESIGNER TEXT",
   });
@@ -160,7 +173,9 @@ test("derivePersonaVocabulary drops explicit-only status once a kind defaults to
 });
 
 test("loadPersonaKindDefaults returns no overrides when the optional file is absent", () => {
-  expect(loadPersonaKindDefaults(mkdtempSync(join(tmpdir(), "loop-persona-defaults-none-")))).toEqual({});
+  expect(
+    loadPersonaKindDefaults(mkdtempSync(join(tmpdir(), "loop-persona-defaults-none-"))),
+  ).toEqual({});
   const withDirectory = mkdtempSync(join(tmpdir(), "loop-persona-defaults-empty-"));
   mkdirSync(join(withDirectory, "personas"), { recursive: true });
   expect(loadPersonaKindDefaults(withDirectory)).toEqual({});
@@ -190,7 +205,11 @@ test("designer persona is explicit-only by derivation and loadable from the repo
     expect(repository[id]).toBeTypeOf("string");
   }
   expect(repository.designer).toContain("디자이너");
-  const resolution = resolvePersona({ requested: "designer", kind: "decision", registry: repository });
+  const resolution = resolvePersona({
+    requested: "designer",
+    kind: "decision",
+    registry: repository,
+  });
   expect(resolution).toEqual({ id: "designer", instructions: repository.designer });
 });
 
@@ -215,10 +234,15 @@ function spec(id: string, kind: TaskSpecInput["kind"], persona?: string | null):
     kind,
     dependencies: [],
     readScope: [],
-    writeScope: kind === "decision" || kind === "implementation" || kind === "integration" ? [".loop/persona"] : [],
+    writeScope:
+      kind === "decision" || kind === "implementation" || kind === "integration"
+        ? [".loop/persona"]
+        : [],
     requirements: [],
     persona,
-    completionChecks: [{ id: "check", command: "true", args: [], workingDirectory: null, timeoutMs: 1000 }],
+    completionChecks: [
+      { id: "check", command: "true", args: [], workingDirectory: null, timeoutMs: 1000 },
+    ],
     preferredCompute: "fast",
     minimumCompute: "fast",
     maximumCompute: "fast",
@@ -261,7 +285,11 @@ test("executeTask injects resolved persona instructions and prepends warnings to
   }
   const provider = new CapturingProvider("fake", ["fast"], { delayMs: 1 });
   const recorded: Array<{ success: boolean; summary: string }> = [];
-  const input = { databasePath: join(mkdtempSync(join(tmpdir(), "loop-persona-exec-")), "run.db"), runId: "run", executionOwner: "test" };
+  const input = {
+    databasePath: join(mkdtempSync(join(tmpdir(), "loop-persona-exec-")), "run.db"),
+    runId: "run",
+    executionOwner: "test",
+  };
   const run = (task: TaskSpecInput) =>
     executeTask({
       input,
@@ -335,7 +363,11 @@ test("executeTask resolves kind defaults through configured overrides", async ()
   }
   const provider = new CapturingProvider("fake", ["fast"], { delayMs: 1 });
   const recorded: Array<{ success: boolean; summary: string }> = [];
-  const input = { databasePath: join(mkdtempSync(join(tmpdir(), "loop-persona-exec-")), "run.db"), runId: "run", executionOwner: "test" };
+  const input = {
+    databasePath: join(mkdtempSync(join(tmpdir(), "loop-persona-exec-")), "run.db"),
+    runId: "run",
+    executionOwner: "test",
+  };
   const run = (task: TaskSpecInput) =>
     executeTask({
       input,
@@ -344,7 +376,11 @@ test("executeTask resolves kind defaults through configured overrides", async ()
       provider,
       control: fakeControl(recorded),
       verifier,
-      personas: { architect: "ARCHITECT TEXT", reviewer: "REVIEWER TEXT", designer: "DESIGNER TEXT" },
+      personas: {
+        architect: "ARCHITECT TEXT",
+        reviewer: "REVIEWER TEXT",
+        designer: "DESIGNER TEXT",
+      },
       personaKindDefaults: { ...KIND_DEFAULT_PERSONAS, decision: "designer" },
     }).done;
 

@@ -56,7 +56,9 @@ test("benchmark runs every profile and iteration and ranks all traces determinis
   const directory = await mkdtemp(join(tmpdir(), "loop-benchmark-"));
   const report = await runBenchmark({
     control: protocol,
-    providers: new ProviderRegistry([new FakeProvider("bench-fast", ["tiny", "fast", "balanced"], { delayMs: 2 })]),
+    providers: new ProviderRegistry([
+      new FakeProvider("bench-fast", ["tiny", "fast", "balanced"], { delayMs: 2 }),
+    ]),
     databasePath: join(directory, "loop.db"),
     benchmark: benchmark(),
     workingDirectory: directory,
@@ -66,12 +68,15 @@ test("benchmark runs every profile and iteration and ranks all traces determinis
   expect(report.runs).toHaveLength(6);
   expect(new Set(report.runs.map((run) => run.runId)).size).toBe(6);
   expect(report.runs.map((run) => run.profile)).toEqual([
-    "plan-first", "plan-first",
-    "spike-first", "spike-first",
-    "tdd-first", "tdd-first",
+    "plan-first",
+    "plan-first",
+    "spike-first",
+    "spike-first",
+    "tdd-first",
+    "tdd-first",
   ]);
   for (const [index, run] of report.runs.entries()) {
-    expect(run.iteration).toBe(index % 2 + 1);
+    expect(run.iteration).toBe((index % 2) + 1);
     expect(run.status).toBe("completed");
     expect(run.summary.tasks_created).toBe(3);
     expect(run.summary.tasks_completed).toBe(3);
@@ -83,8 +88,8 @@ test("benchmark runs every profile and iteration and ranks all traces determinis
   }
 
   expect(report.comparison.rankings).toHaveLength(6);
-  const totals = report.comparison.rankings.map((ranking) =>
-    ranking.score.reliability + ranking.score.autonomy + ranking.score.first_pass
+  const totals = report.comparison.rankings.map(
+    (ranking) => ranking.score.reliability + ranking.score.autonomy + ranking.score.first_pass,
   );
   expect([...totals].sort((a, b) => b - a)).toEqual(totals);
   const labels = report.comparison.rankings.map((ranking) => ranking.label);
@@ -139,22 +144,26 @@ test("scripted worker failures surface in the trace and demote the ranking", asy
 });
 
 test("benchmark config parsing validates names, profiles, and iterations", () => {
-  expect(parseBenchmarkConfig(`
+  expect(
+    parseBenchmarkConfig(`
 name = "auth"
 intent = "Implement JWT validation"
 profiles = ["tdd-first", "plan-first"]
 iterations = 2
-`)).toEqual({
+`),
+  ).toEqual({
     name: "auth",
     intent: "Implement JWT validation",
     profiles: ["tdd-first", "plan-first"],
     iterations: 2,
   });
-  expect(parseBenchmarkConfig(`
+  expect(
+    parseBenchmarkConfig(`
 name = "auth"
 intent = "Implement JWT validation"
 profiles = ["plan-first"]
-`).iterations).toBe(1);
+`).iterations,
+  ).toBe(1);
 
   const invalid = (text: string) => {
     try {
@@ -169,13 +178,30 @@ profiles = ["plan-first"]
   expect(malformed).toBeInstanceOf(ConfigError);
   expect(malformed!.code).toBe("benchmark.parse_failed");
 
-  const missingName = invalid(`intent = "y"\nprofiles = ["plan-first"]\n`) as ConfigError | undefined;
+  const missingName = invalid(`intent = "y"\nprofiles = ["plan-first"]\n`) as
+    | ConfigError
+    | undefined;
   expect(missingName).toBeInstanceOf(ConfigError);
   expect(missingName!.code).toBe("benchmark.invalid");
 
-  expect((invalid(`name = "x"\nintent = "y"\nprofiles = []\n`) as ConfigError).code).toBe("benchmark.invalid");
-  expect((invalid(`name = "x"\nintent = "y"\nprofiles = ["waterfall"]\n`) as ConfigError).message).toContain("unknown workflow profile");
-  expect((invalid(`name = "x"\nintent = "y"\nprofiles = ["plan-first", "plan-first"]\n`) as ConfigError).message).toContain("duplicate");
-  expect((invalid(`name = "x"\nintent = ""\nprofiles = ["plan-first"]\n`) as ConfigError).message).toContain("intent");
-  expect((invalid(`name = "x"\nintent = "y"\nprofiles = ["plan-first"]\niterations = 0\n`) as ConfigError).message).toContain("iterations");
+  expect((invalid(`name = "x"\nintent = "y"\nprofiles = []\n`) as ConfigError).code).toBe(
+    "benchmark.invalid",
+  );
+  expect(
+    (invalid(`name = "x"\nintent = "y"\nprofiles = ["waterfall"]\n`) as ConfigError).message,
+  ).toContain("unknown workflow profile");
+  expect(
+    (invalid(`name = "x"\nintent = "y"\nprofiles = ["plan-first", "plan-first"]\n`) as ConfigError)
+      .message,
+  ).toContain("duplicate");
+  expect(
+    (invalid(`name = "x"\nintent = ""\nprofiles = ["plan-first"]\n`) as ConfigError).message,
+  ).toContain("intent");
+  expect(
+    (
+      invalid(
+        `name = "x"\nintent = "y"\nprofiles = ["plan-first"]\niterations = 0\n`,
+      ) as ConfigError
+    ).message,
+  ).toContain("iterations");
 });

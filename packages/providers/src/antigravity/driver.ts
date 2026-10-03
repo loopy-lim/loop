@@ -36,7 +36,10 @@ export interface AgyTurnResult {
   response: string;
   error?: string;
   conversationId?: string;
-  failure?: { kind: "authentication" | "quota" | "timeout" | "cancelled" | "incomplete_output"; retryable: boolean };
+  failure?: {
+    kind: "authentication" | "quota" | "timeout" | "cancelled" | "incomplete_output";
+    retryable: boolean;
+  };
 }
 
 interface PendingTurn {
@@ -177,7 +180,9 @@ export class AgyStreamDriver {
           if (this.#pending !== pending) return;
           this.#pending = undefined;
           void this.cancel().catch((error: unknown) => {
-            this.#onLog(`failed to stop timed-out agy driver: ${error instanceof Error ? error.message : String(error)}`);
+            this.#onLog(
+              `failed to stop timed-out agy driver: ${error instanceof Error ? error.message : String(error)}`,
+            );
           });
           resolve({
             ok: false,
@@ -270,7 +275,9 @@ export class AgyStreamDriver {
       pending.resolve({
         ok,
         response,
-        error: ok ? undefined : (event.result?.error ?? `agy reported ${event.result?.status ?? "unknown"}`),
+        error: ok
+          ? undefined
+          : (event.result?.error ?? `agy reported ${event.result?.status ?? "unknown"}`),
         conversationId: this.#conversationId,
         failure: ok ? undefined : { kind: "incomplete_output", retryable: true },
       });

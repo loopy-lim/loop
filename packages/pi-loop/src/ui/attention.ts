@@ -16,12 +16,7 @@ export function renderAttention(view: AttentionView, limits: OutputLimits): stri
       overflow: (omitted) => `… ${omitted} more options`,
     },
   );
-  return compactLines([
-    `Attention · ${view.kind}`,
-    view.summary,
-    ...options,
-    view.question,
-  ], {
+  return compactLines([`Attention · ${view.kind}`, view.summary, ...options, view.question], {
     lineLimit: limits.attentionLineLimit,
     lineTextLimit: limits.lineTextLimit,
     overflow: (omitted) => `… ${omitted} more attention lines`,

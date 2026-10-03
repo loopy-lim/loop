@@ -386,7 +386,10 @@ export function syncPiModelsJson(options: SyncPiModelsJsonOptions): PiModelsJson
       );
     }
   }
-  const merged = mergeModelsJson(existingRaw === undefined ? undefined : JSON.parse(existingRaw), fragment);
+  const merged = mergeModelsJson(
+    existingRaw === undefined ? undefined : JSON.parse(existingRaw),
+    fragment,
+  );
   const serialized = `${JSON.stringify(merged, null, 2)}\n`;
   if (serialized === existingRaw) {
     return { filePath, changed: false, providers: Object.keys(fragment.providers).sort(), models };

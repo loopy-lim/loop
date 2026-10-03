@@ -150,7 +150,10 @@ export class NodeProcessRunner implements ProcessRunner {
             signal(child, groupPid, "SIGKILL");
             // SIGKILL cannot be ignored; don't let a broken OS/process state
             // keep the worker result pending indefinitely.
-            await Promise.race([waitForGroupExit(groupPid, this.#killWaitMs), delay(this.#killWaitMs)]);
+            await Promise.race([
+              waitForGroupExit(groupPid, this.#killWaitMs),
+              delay(this.#killWaitMs),
+            ]);
           }
           await Promise.race([result, delay(this.#killWaitMs)]);
           return;

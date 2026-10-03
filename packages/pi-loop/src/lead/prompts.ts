@@ -14,16 +14,22 @@ export const TASK_SPEC_INPUT_EXAMPLE = {
   readScope: ["packages/example/src/**"],
   writeScope: ["packages/example/src/change.ts"],
   requirements: ["Return a concise result summary with evidence for dependent tasks"],
-  completionChecks: [{
-    id: "focused-tests",
-    command: "bun",
-    args: ["test", "packages/example/test"],
-    workingDirectory: null,
-    timeoutMs: 120_000,
-  }],
+  completionChecks: [
+    {
+      id: "focused-tests",
+      command: "bun",
+      args: ["test", "packages/example/test"],
+      workingDirectory: null,
+      timeoutMs: 120_000,
+    },
+  ],
   preferredCompute: "fast",
   minimumCompute: "tiny",
   maximumCompute: "strong",
+  routing: {
+    risk: "low",
+    required: { coding: 2, reasoning: 1, tools: 1, vision: 0, long_context: 1 },
+  },
   maxAttempts: 3,
 } satisfies TaskSpecInput;
 
@@ -37,10 +43,11 @@ export function taskSpecInputDescription(vocabulary: PersonaVocabulary): string 
     .map(([kind, id]) => `${kind}→${id}`)
     .join(", ");
   return [
-    "JSON TaskSpecInput[] using the generated protocol fields.",
+    "JSON object {tasks: TaskSpecInput[], criteria: GoalCriterionInput[]} using the generated protocol fields. Each criterion has id, taskId, description equal to one task requirement, and checkIds naming only the checks that prove it. Cover every requirement explicitly; do not attach all checks to every requirement by default.",
     "Dependencies must reference task ids; scopes must state exact read and write ownership; completion checks must be machine-verifiable.",
+    "Every task needs routing.risk and routing.required capability scores (coding, reasoning, tools, vision, long_context; 0 to 5). Use low for bounded edits, high for cross-module decisions and integration, and critical only for genuinely high-consequence work. Request only capabilities the task uses.",
     `Each task may carry an optional "persona" id (${personaListProse}); unknown ids are rejected at submission with the valid id list. Kind defaults: ${kindDefaultsProse}.`,
-    `Typed example: ${JSON.stringify([TASK_SPEC_INPUT_EXAMPLE])}`,
+    `Typed example: ${JSON.stringify({ tasks: [TASK_SPEC_INPUT_EXAMPLE], criteria: [{ id: "implementation:1", taskId: "implementation", description: TASK_SPEC_INPUT_EXAMPLE.requirements[0], checkIds: ["focused-tests"] }] })}`,
   ].join(" ");
 }
 
@@ -53,9 +60,11 @@ export function decompositionPrompt(intent: string, vocabulary: PersonaVocabular
     "For a small bounded change, delegate directly to one execution task with focused completion checks. Do not add ceremonial research or decision tasks.",
     "Add a separate verification task only for material risk or acceptance criteria that need an independent reviewer; each extra worker has latency and cost.",
     "Map the original intent to executable checks that cover each acceptance criterion; a generic test command is insufficient when its tests omit a stated behavior.",
+    "For two or more implementation tasks, add an integration task depending transitively on every implementation task; its checks must run against the combined result.",
     "Rust bridge or generated protocol changes also need a TypeScript typecheck after codegen; focused Rust and generated-runtime tests alone can miss stale TypeScript consumers and fixtures.",
     "Put a check that needs downstream consumer edits on the downstream task. If the producer's completion checks require those edits, its dependent consumer task can never start.",
     "Every task needs dependencies, exact read and write ownership, compute bounds, and machine-verifiable completion checks.",
+    "Prefer fast for narrow implementation and strong for high-risk decisions or integration; the Rust router applies the risk floor and chooses the least costly sufficient configured worker.",
     "Describe expected outputs in requirements so each worker returns a concise result summary with evidence; dependent tasks receive dependency result summaries.",
     taskSpecInputDescription(vocabulary),
     intent.trim(),

@@ -23,15 +23,30 @@ describe("HerdrLifecycleReporter", () => {
     const directory = mkdtempSync(join(tmpdir(), "loop-herdr-report-"));
     const command = join(directory, "herdr-fixture");
     const lateReply = join(directory, "late-reply");
-    writeFileSync(command, `#!/usr/bin/env bun\nsetTimeout(() => { require('node:fs').writeFileSync(${JSON.stringify(lateReply)}, 'late'); }, 400);\n`);
+    writeFileSync(
+      command,
+      `#!/usr/bin/env bun\nsetTimeout(() => { require('node:fs').writeFileSync(${JSON.stringify(lateReply)}, 'late'); }, 400);\n`,
+    );
     chmodSync(command, 0o755);
     try {
-      const reporter = new HerdrLifecycleReporter({ environment: insideHerdr({ HERDR_BIN_PATH: command }), timeoutMs: 60 });
+      const reporter = new HerdrLifecycleReporter({
+        environment: insideHerdr({ HERDR_BIN_PATH: command }),
+        timeoutMs: 60,
+      });
       const handlers = new Map<string, () => Promise<void> | void>();
-      registerHerdrLifecycle({ on: (event, handler) => { handlers.set(event, handler); } }, reporter);
+      registerHerdrLifecycle(
+        {
+          on: (event, handler) => {
+            handlers.set(event, handler);
+          },
+        },
+        reporter,
+      );
       await handlers.get("agent_end")!();
       expect(existsSync(lateReply)).toBe(false);
-    } finally { rmSync(directory, { recursive: true, force: true }); }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test("makes no calls outside Herdr", async () => {
@@ -70,7 +85,7 @@ describe("HerdrLifecycleReporter", () => {
       .filter((args) => args.includes("report-agent"))
       .map((args) => Number(args[args.indexOf("--seq") + 1]));
     expect(seqs).toEqual([0, 1, 2]);
-    expect(calls[3].slice(1)).toEqual([
+    expect(calls[3]?.slice(1)).toEqual([
       "pane",
       "release-agent",
       "--pane",
@@ -87,7 +102,11 @@ describe("HerdrLifecycleReporter", () => {
     const reporter: HerdrLifecycleReporter = new HerdrLifecycleReporter({
       environment: insideHerdr(),
       runner: async (args) => {
-        states.push(args.includes("release-agent") ? "release" : (args[args.indexOf("--state") + 1] as HerdrLifecycleState));
+        states.push(
+          args.includes("release-agent")
+            ? "release"
+            : (args[args.indexOf("--state") + 1] as HerdrLifecycleState),
+        );
       },
     });
     const handlers = new Map<string, () => Promise<void> | void>();

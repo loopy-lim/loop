@@ -6,6 +6,7 @@ import type { ComputeClass, TaskKind } from "@loop/protocol";
 import { parse as parseToml } from "smol-toml";
 
 import { DEFAULT_CONTEXT_LIFECYCLE_POLICY, type ContextLifecyclePolicy } from "./context-lifecycle";
+import { DEFAULT_COMPUTE_SELECTION, type ComputeSelection } from "./compute-selection";
 import {
   KIND_DEFAULT_PERSONAS,
   LEAD_PERSONA_IDS,
@@ -64,6 +65,14 @@ export interface LoopConfig {
     highRiskFloor: ComputeClass;
     criticalRiskFloor: ComputeClass;
     escalation: ComputeClass[];
+    /**
+     * Provider-selection bias over each task's declared compute range
+     * (dispatch-scaling): "cheapest" (default) keeps the router's
+     * least-costly-sufficient choice; "strongest" routes every task at the
+     * top of its own range and degrades to the declared floor when no
+     * available candidate satisfies the ceiling.
+     */
+    computeSelection: ComputeSelection;
   };
   output: {
     statusLineLimit: number;
@@ -191,13 +200,14 @@ export function loadLoopConfig(options: LoadLoopConfigOptions = {}): LoopConfig 
         "routing.default_compute_class",
       ),
       highRiskFloor: computeClass(routing.high_risk_floor, "routing.high_risk_floor"),
-      criticalRiskFloor: computeClass(
-        routing.critical_risk_floor,
-        "routing.critical_risk_floor",
-      ),
+      criticalRiskFloor: computeClass(routing.critical_risk_floor, "routing.critical_risk_floor"),
       escalation: array(routing.escalation, "routing.escalation").map((value, index) =>
         computeClass(value, `routing.escalation[${index}]`),
       ),
+      computeSelection:
+        routing.compute_selection === undefined
+          ? DEFAULT_COMPUTE_SELECTION
+          : computeSelection(routing.compute_selection),
     },
     output: {
       statusLineLimit: positiveInteger(output.status_line_limit, "output.status_line_limit"),
@@ -205,10 +215,7 @@ export function loadLoopConfig(options: LoadLoopConfigOptions = {}): LoopConfig 
         output.attention_line_limit,
         "output.attention_line_limit",
       ),
-      findingsLineLimit: positiveInteger(
-        output.findings_line_limit,
-        "output.findings_line_limit",
-      ),
+      findingsLineLimit: positiveInteger(output.findings_line_limit, "output.findings_line_limit"),
       listLineLimit: positiveInteger(output.list_line_limit, "output.list_line_limit"),
       lineTextLimit: positiveInteger(output.line_text_limit, "output.line_text_limit"),
       workerVisibility: workerVisibility(output.worker_visibility),
@@ -277,9 +284,10 @@ export function loadPersonaKindDefaults(configDirectory: string): PersonaKindDef
     if (error instanceof ConfigError) throw error;
     throw new ConfigError("config.parse_failed", `failed to parse ${path}: ${String(error)}`);
   }
-  const table = document.kind_defaults === undefined
-    ? {}
-    : record(document.kind_defaults, "personas.defaults.kind_defaults");
+  const table =
+    document.kind_defaults === undefined
+      ? {}
+      : record(document.kind_defaults, "personas.defaults.kind_defaults");
   const defaults: PersonaKindDefaults = {};
   for (const [kind, value] of Object.entries(table)) {
     if (!taskKinds.has(kind as TaskKind)) {
@@ -354,7 +362,8 @@ function parseModels(document: Record<string, unknown>): ModelProfile[] {
     }
     seen.add(id);
     const capabilities = record(entry.capabilities, `models[${index}].capabilities`);
-    const lane = entry.lane === undefined ? undefined : workerLane(entry.lane, `models[${index}].lane`);
+    const lane =
+      entry.lane === undefined ? undefined : workerLane(entry.lane, `models[${index}].lane`);
     return {
       id,
       provider: text(entry.provider, `models[${index}].provider`),
@@ -402,17 +411,19 @@ function parseProviders(document: Record<string, unknown>): Record<string, Provi
           `provider ${id} requires api_key_env`,
         );
       }
-      return [[
-        id,
-        {
-          enabled,
-          command: optionalText(entry.command),
-          endpoint: optionalText(entry.endpoint),
-          auth,
-          apiKeyEnv,
-          mode: optionalText(entry.mode) as ProviderConfig["mode"],
-        },
-      ]];
+      return [
+        [
+          id,
+          {
+            enabled,
+            command: optionalText(entry.command),
+            endpoint: optionalText(entry.endpoint),
+            auth,
+            apiKeyEnv,
+            mode: optionalText(entry.mode) as ProviderConfig["mode"],
+          },
+        ],
+      ];
     }),
   );
 }
@@ -464,7 +475,8 @@ function optionalText(value: unknown): string | undefined {
 }
 
 function boolean(value: unknown, path: string): boolean {
-  if (typeof value !== "boolean") throw new ConfigError("config.invalid", `${path} must be boolean`);
+  if (typeof value !== "boolean")
+    throw new ConfigError("config.invalid", `${path} must be boolean`);
   return value;
 }
 
@@ -481,13 +493,24 @@ function workerVisibility(value: unknown): WorkerVisibility {
   // 명시적으로 "off"를 지정하면 그대로 존중된다).
   if (value === undefined) return "watch";
   if (value === "off" || value === "watch" || value === "panes") return value;
-  throw new ConfigError("config.invalid", `output.worker_visibility must be "off", "watch", or "panes"`);
+  throw new ConfigError(
+    "config.invalid",
+    `output.worker_visibility must be "off", "watch", or "panes"`,
+  );
 }
 
 function codeMapInjection(value: unknown): "off" | "scopes" {
   if (value === undefined) return "off";
   if (value === "off" || value === "scopes") return value;
   throw new ConfigError("config.invalid", `output.code_map_injection must be "off" or "scopes"`);
+}
+
+function computeSelection(value: unknown): ComputeSelection {
+  if (value === "cheapest" || value === "strongest") return value;
+  throw new ConfigError(
+    "config.invalid",
+    `routing.compute_selection must be "cheapest" or "strongest"`,
+  );
 }
 
 /**
@@ -502,15 +525,18 @@ export function resolveContextPolicy(section: unknown): ContextLifecyclePolicy {
   }
   const value = section as Record<string, unknown>;
   return {
-    advisoryByteBudget: value.advisory_byte_budget === undefined
-      ? DEFAULT_CONTEXT_LIFECYCLE_POLICY.advisoryByteBudget
-      : nonNegativeInteger(value.advisory_byte_budget, "context.advisory_byte_budget"),
-    summaryEntryBytes: value.summary_entry_bytes === undefined
-      ? DEFAULT_CONTEXT_LIFECYCLE_POLICY.summaryEntryBytes
-      : positiveInteger(value.summary_entry_bytes, "context.summary_entry_bytes"),
-    summaryByteCap: value.summary_byte_cap === undefined
-      ? DEFAULT_CONTEXT_LIFECYCLE_POLICY.summaryByteCap
-      : positiveInteger(value.summary_byte_cap, "context.summary_byte_cap"),
+    advisoryByteBudget:
+      value.advisory_byte_budget === undefined
+        ? DEFAULT_CONTEXT_LIFECYCLE_POLICY.advisoryByteBudget
+        : nonNegativeInteger(value.advisory_byte_budget, "context.advisory_byte_budget"),
+    summaryEntryBytes:
+      value.summary_entry_bytes === undefined
+        ? DEFAULT_CONTEXT_LIFECYCLE_POLICY.summaryEntryBytes
+        : positiveInteger(value.summary_entry_bytes, "context.summary_entry_bytes"),
+    summaryByteCap:
+      value.summary_byte_cap === undefined
+        ? DEFAULT_CONTEXT_LIFECYCLE_POLICY.summaryByteCap
+        : positiveInteger(value.summary_byte_cap, "context.summary_byte_cap"),
   };
 }
 
@@ -528,7 +554,8 @@ function nonNegativeNumber(value: unknown, path: string): number {
 
 function nonNegativeInteger(value: unknown, path: string): number {
   const parsed = nonNegativeNumber(value, path);
-  if (!Number.isInteger(parsed)) throw new ConfigError("config.invalid", `${path} must be an integer`);
+  if (!Number.isInteger(parsed))
+    throw new ConfigError("config.invalid", `${path} must be an integer`);
   return parsed;
 }
 

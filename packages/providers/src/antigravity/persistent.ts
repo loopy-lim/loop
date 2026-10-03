@@ -1,6 +1,6 @@
 import type { ComputeClass } from "@loop/protocol";
 
-import { NodeProcessRunner, type ProcessRunner } from "../process";
+import { NodeProcessRunner } from "../process";
 import type {
   AgentProvider,
   ProviderCapabilities,
@@ -22,7 +22,11 @@ interface AgyPersistentProviderOptions {
   /** Compute-class stance comes from configuration at construction time. */
   computeClasses: ComputeClass[];
   turnTimeoutMs?: number;
-  driverFactory?: (options: { cwd: string; model?: string; conversationId?: string }) => AgyStreamDriver;
+  driverFactory?: (options: {
+    cwd: string;
+    model?: string;
+    conversationId?: string;
+  }) => AgyStreamDriver;
   available?: boolean;
 }
 
@@ -105,7 +109,11 @@ export class AgyPersistentProvider implements AgentProvider {
 
   async resume(sessionId: string, input: ResumeWorkerInput): Promise<WorkerHandle> {
     const workerId = `${input.runId}:${input.taskId}:${input.attempt}`;
-    const driver = this.#driverFactory({ cwd: this.#cwd, model: this.#model, conversationId: sessionId });
+    const driver = this.#driverFactory({
+      cwd: this.#cwd,
+      model: this.#model,
+      conversationId: sessionId,
+    });
     const session: Session = {
       driver,
       workerId,

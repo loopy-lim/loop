@@ -31,20 +31,21 @@ test("natural-language Pi turns receive the Loop Lead contract", async () => {
   registerLoopExtension(host.api, fakeBackend(), undefined, settings);
 
   const hook = host.hooks.get("before_agent_start")!;
-  const result = await hook(
-    { prompt: "Implement feature X", systemPrompt: "base" },
-    context(),
-  );
+  const result = await hook({ prompt: "Implement feature X", systemPrompt: "base" }, context());
 
   expect(result.systemPrompt).toContain("interactive Lead for Loop");
   expect(result.systemPrompt).toContain("call loop_run exactly once");
   expect(result.systemPrompt).toContain("loop_quick_run");
-  expect(result.systemPrompt).toContain("Do not deeply debug, investigate root causes, or implement the change yourself");
+  expect(result.systemPrompt).toContain(
+    "Do not deeply debug, investigate root causes, or implement the change yourself",
+  );
   expect(result.systemPrompt).toContain("minimum path and contract context");
   expect(result.systemPrompt).toContain("same parallel frontier");
   expect(result.systemPrompt).toContain("non-overlapping implementation tasks");
   expect(result.systemPrompt).toContain("A sibling task's write path in readScope serializes them");
-  expect(result.systemPrompt).toContain("Put a check that needs downstream consumer edits on the downstream task");
+  expect(result.systemPrompt).toContain(
+    "Put a check that needs downstream consumer edits on the downstream task",
+  );
   expect(result.systemPrompt).toContain("Keep dependency-ordered work sequential");
   expect(result.systemPrompt).toContain("serialize decision and integration tasks");
   expect(result.systemPrompt).toContain("Do not add ceremonial research or decision tasks");
@@ -54,12 +55,18 @@ test("natural-language Pi turns receive the Loop Lead contract", async () => {
   expect(result.systemPrompt).toContain("acceptance criteria");
   expect(result.systemPrompt).toContain("separate verification task only for material risk");
   expect(result.systemPrompt).toContain("executable checks that cover each acceptance criterion");
-  expect(result.systemPrompt).toContain("generated protocol changes also need a TypeScript typecheck");
+  expect(result.systemPrompt).toContain(
+    "generated protocol changes also need a TypeScript typecheck",
+  );
   expect(result.systemPrompt).toContain("If a verifier reports FAIL");
   expect(result.systemPrompt).toContain("Do not poll or sleep after loop_run returns");
   expect(result.systemPrompt).toContain("For changed acceptance criteria, add a dependent task");
-  expect(result.systemPrompt).toContain("Never claim that guidance was implemented from delivery alone");
-  expect(result.systemPrompt).toContain("previous run ended in attention, paused, cancelled, or otherwise incomplete");
+  expect(result.systemPrompt).toContain(
+    "Never claim that guidance was implemented from delivery alone",
+  );
+  expect(result.systemPrompt).toContain(
+    "previous run ended in attention, paused, cancelled, or otherwise incomplete",
+  );
   expect(result.systemPrompt).toContain("Do not invent unavailable run or task details");
   expect(result.systemPrompt).toContain("Implement feature X");
 
@@ -68,30 +75,55 @@ test("natural-language Pi turns receive the Loop Lead contract", async () => {
   expect(tasksDescription).toContain("TaskSpecInput[]");
   expect(tasksDescription).toContain('"completionChecks"');
   expect(tasksDescription).toContain('"preferredCompute"');
-  expect(host.tools.get("loop_steer")?.description).toContain("Use loop_add_task for changed acceptance criteria");
+  expect(host.tools.get("loop_steer")?.description).toContain(
+    "Use loop_add_task for changed acceptance criteria",
+  );
   expect(host.tools.get("loop_code_map")?.description).toContain("file and exported symbol names");
 });
 
 test("a bounded single-file change starts through a compact typed task", async () => {
   const host = fakePi();
   const submitted: TaskSpecInput[][] = [];
-  registerLoopExtension(host.api, fakeBackend({
-    async run(input) {
-      submitted.push(input.tasks);
-      return { status: "running", tasks: input.tasks.length, escalations: [], providersByTask: {}, startedAt: {}, finishedAt: {} };
-    },
-  }), undefined, settings);
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async run(input) {
+        submitted.push(input.tasks);
+        return {
+          status: "running",
+          tasks: input.tasks.length,
+          escalations: [],
+          providersByTask: {},
+          startedAt: {},
+          finishedAt: {},
+        };
+      },
+    }),
+    undefined,
+    settings,
+  );
 
   const quick = host.tools.get("loop_quick_run");
   expect(quick).toBeDefined();
-  const response = await quick.execute("quick-1", {
-    intent: "Deduplicate models without changing order",
-    title: "Deduplicate model list",
-    readScope: ["packages/pi-loop/src/ui/models.ts"],
-    writeScope: ["packages/pi-loop/src/ui/models.ts", "packages/pi-loop/test/models.test.ts"],
-    requirements: ["Duplicate models appear once in original order"],
-    checks: [{ id: "focused", command: "bun", args: ["test", "packages/pi-loop/test/models.test.ts"] }],
-  }, new AbortController().signal, undefined, context());
+  const response = await quick.execute(
+    "quick-1",
+    {
+      intent: "Deduplicate models without changing order",
+      title: "Deduplicate model list",
+      readScope: ["packages/pi-loop/src/ui/models.ts"],
+      writeScope: ["packages/pi-loop/src/ui/models.ts", "packages/pi-loop/test/models.test.ts"],
+      requirements: ["Duplicate models appear once in original order"],
+      acceptance: [
+        { requirement: "Duplicate models appear once in original order", checkIds: ["focused"] },
+      ],
+      checks: [
+        { id: "focused", command: "bun", args: ["test", "packages/pi-loop/test/models.test.ts"] },
+      ],
+    },
+    new AbortController().signal,
+    undefined,
+    context(),
+  );
 
   expect(response.details.status).toBe("running");
   expect(submitted).toHaveLength(1);
@@ -109,48 +141,220 @@ test("a bounded single-file change starts through a compact typed task", async (
 test("quick run preserves every required executable check", async () => {
   const host = fakePi();
   const submitted: TaskSpecInput[][] = [];
-  registerLoopExtension(host.api, fakeBackend({
-    async run(input) {
-      submitted.push(input.tasks);
-      return { status: "running", tasks: input.tasks.length, escalations: [], providersByTask: {}, startedAt: {}, finishedAt: {} };
+  const submittedCriteria: Array<import("@loop/protocol").GoalCriterionInput[]> = [];
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async run(input) {
+        submitted.push(input.tasks);
+        submittedCriteria.push(input.criteria);
+        return {
+          status: "running",
+          tasks: input.tasks.length,
+          escalations: [],
+          providersByTask: {},
+          startedAt: {},
+          finishedAt: {},
+        };
+      },
+    }),
+    undefined,
+    settings,
+  );
+  await host.tools.get("loop_quick_run")!.execute(
+    "quick-many",
+    {
+      intent: "Update Rust and generated consumers",
+      title: "Update bridge",
+      readScope: ["crates/loop-bridge/src/execution.rs"],
+      writeScope: ["crates/loop-bridge/src/execution.rs", "packages/protocol/src/generated/**"],
+      requirements: ["Bridge and generated consumers compile"],
+      acceptance: [
+        { requirement: "Bridge and generated consumers compile", checkIds: ["rust", "typecheck"] },
+      ],
+      checks: [
+        { id: "rust", command: "cargo", args: ["test", "-p", "loop-bridge"] },
+        { id: "typecheck", command: "bun", args: ["run", "typecheck"] },
+      ],
     },
-  }), undefined, settings);
-  await host.tools.get("loop_quick_run")!.execute("quick-many", {
-    intent: "Update Rust and generated consumers", title: "Update bridge",
-    readScope: ["crates/loop-bridge/src/execution.rs"],
-    writeScope: ["crates/loop-bridge/src/execution.rs", "packages/protocol/src/generated/**"],
-    requirements: ["Bridge and generated consumers compile"],
-    checks: [
-      { id: "rust", command: "cargo", args: ["test", "-p", "loop-bridge"] },
-      { id: "typecheck", command: "bun", args: ["run", "typecheck"] },
-    ],
-  }, new AbortController().signal, undefined, context());
+    new AbortController().signal,
+    undefined,
+    context(),
+  );
   expect(submitted[0]?.[0]?.completionChecks).toMatchObject([
     { id: "rust", command: "cargo", args: ["test", "-p", "loop-bridge"] },
     { id: "typecheck", command: "bun", args: ["run", "typecheck"] },
+  ]);
+  expect(submittedCriteria[0]).toMatchObject([
+    {
+      description: "Bridge and generated consumers compile",
+      taskId: "implementation",
+      checkIds: ["rust", "typecheck"],
+    },
   ]);
 });
 
 test("quick run rejects missing ownership and executable evidence before handoff", async () => {
   const host = fakePi();
   let submissions = 0;
-  registerLoopExtension(host.api, fakeBackend({
-    async run(input) {
-      submissions++;
-      return { status: "running", tasks: input.tasks.length, escalations: [], providersByTask: {}, startedAt: {}, finishedAt: {} };
-    },
-  }), undefined, settings);
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async run(input) {
+        submissions++;
+        return {
+          status: "running",
+          tasks: input.tasks.length,
+          escalations: [],
+          providersByTask: {},
+          startedAt: {},
+          finishedAt: {},
+        };
+      },
+    }),
+    undefined,
+    settings,
+  );
   const quick = host.tools.get("loop_quick_run")!;
 
-  await expect(quick.execute("quick-no-scope", {
-    intent: "Change a file", title: "Change", readScope: [], writeScope: [],
-    requirements: ["Change"], checks: [{ id: "focused", command: "bun", args: ["test"] }],
-  }, new AbortController().signal, undefined, context())).rejects.toThrow(/writeScope/);
-  await expect(quick.execute("quick-no-check", {
-    intent: "Change a file", title: "Change", readScope: [], writeScope: ["src/file.ts"],
-    requirements: ["Change"], checks: [],
-  }, new AbortController().signal, undefined, context())).rejects.toThrow(/checks/);
+  await expect(
+    quick.execute(
+      "quick-no-scope",
+      {
+        intent: "Change a file",
+        title: "Change",
+        readScope: [],
+        writeScope: [],
+        requirements: ["Change"],
+        checks: [{ id: "focused", command: "bun", args: ["test"] }],
+        acceptance: [{ requirement: "Change", checkIds: ["focused"] }],
+      },
+      new AbortController().signal,
+      undefined,
+      context(),
+    ),
+  ).rejects.toThrow(/writeScope/);
+  await expect(
+    quick.execute(
+      "quick-no-check",
+      {
+        intent: "Change a file",
+        title: "Change",
+        readScope: [],
+        writeScope: ["src/file.ts"],
+        requirements: ["Change"],
+        checks: [],
+        acceptance: [{ requirement: "Change", checkIds: ["focused"] }],
+      },
+      new AbortController().signal,
+      undefined,
+      context(),
+    ),
+  ).rejects.toThrow(/checks/);
   expect(submissions).toBe(0);
+});
+
+test("quick run requires explicit coverage instead of inferring every check for every requirement", async () => {
+  const host = fakePi();
+  let submissions = 0;
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async run(input) {
+        submissions++;
+        return {
+          status: "running",
+          tasks: input.tasks.length,
+          escalations: [],
+          providersByTask: {},
+          startedAt: {},
+          finishedAt: {},
+        };
+      },
+    }),
+    undefined,
+    settings,
+  );
+  await expect(
+    host.tools.get("loop_quick_run")!.execute(
+      "quick-coverage",
+      {
+        intent: "Render and persist",
+        title: "Do both",
+        readScope: ["src/**"],
+        writeScope: ["src/result.ts"],
+        requirements: ["Render", "Persist"],
+        checks: [
+          { id: "render", command: "bun", args: ["test", "render"] },
+          { id: "persist", command: "bun", args: ["test", "persist"] },
+        ],
+      },
+      new AbortController().signal,
+      undefined,
+      context(),
+    ),
+  ).rejects.toThrow(/explicit criteria|no explicit criterion/);
+  expect(submissions).toBe(0);
+});
+
+test("loop_run forwards explicit requirement-to-check mapping to the durable backend", async () => {
+  const host = fakePi();
+  const submitted: Array<import("@loop/protocol").GoalCriterionInput[]> = [];
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async run(input) {
+        submitted.push(input.criteria);
+        return {
+          status: "running",
+          tasks: input.tasks.length,
+          escalations: [],
+          providersByTask: {},
+          startedAt: {},
+          finishedAt: {},
+        };
+      },
+    }),
+    undefined,
+    settings,
+  );
+  const implementation = {
+    ...task("impl", "implementation", [], ["src/impl.ts"]),
+    requirements: ["Render", "Persist"],
+    completionChecks: [
+      {
+        id: "render",
+        command: "bun",
+        args: ["test", "render"],
+        workingDirectory: null,
+        timeoutMs: 1000,
+      },
+      {
+        id: "persist",
+        command: "bun",
+        args: ["test", "persist"],
+        workingDirectory: null,
+        timeoutMs: 1000,
+      },
+    ],
+  };
+  await host.tools.get("loop_run")!.execute(
+    "plan-coverage",
+    {
+      intent: "Render and persist",
+      tasksJson: JSON.stringify({
+        tasks: [implementation],
+        criteria: [
+          { id: "render", taskId: "impl", description: "Render", checkIds: ["render"] },
+          { id: "persist", taskId: "impl", description: "Persist", checkIds: ["persist"] },
+        ],
+      }),
+    },
+    new AbortController().signal,
+    undefined,
+    context(),
+  );
+  expect(submitted[0]?.map((item) => item.checkIds)).toEqual([["render"], ["persist"]]);
 });
 
 test("Pi conversation can inspect bounded durable detail for a selected task", async () => {
@@ -158,7 +362,13 @@ test("Pi conversation can inspect bounded durable detail for a selected task", a
   registerLoopExtension(host.api, fakeBackend(), undefined, settings);
   const inspect = host.tools.get("loop_task");
   expect(inspect).toBeDefined();
-  const detail = await inspect.execute("task-detail", { runId: "run-x", taskId: "impl" }, new AbortController().signal, undefined, context());
+  const detail = await inspect.execute(
+    "task-detail",
+    { runId: "run-x", taskId: "impl" },
+    new AbortController().signal,
+    undefined,
+    context(),
+  );
   expect(detail.content[0]?.text).toContain("Dependencies: research");
   expect(detail.content[0]?.text).toContain("Write: src/impl.ts");
   expect(detail.content[0]?.text.split("\n").length).toBeLessThanOrEqual(8);
@@ -166,12 +376,25 @@ test("Pi conversation can inspect bounded durable detail for a selected task", a
 
 test("Pi reports a correction as recorded until worker delivery is proven", async () => {
   const host = fakePi();
-  registerLoopExtension(host.api, fakeBackend({
-    async guidance() { return "4 · delivered\n5 · recorded\n"; },
-  }), undefined, settings);
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async guidance() {
+        return "4 · delivered\n5 · recorded\n";
+      },
+    }),
+    undefined,
+    settings,
+  );
   const inspect = host.tools.get("loop_guidance");
   expect(inspect).toBeDefined();
-  const status = await inspect.execute("guidance-detail", { runId: "run-x", taskId: "impl" }, new AbortController().signal, undefined, context());
+  const status = await inspect.execute(
+    "guidance-detail",
+    { runId: "run-x", taskId: "impl" },
+    new AbortController().signal,
+    undefined,
+    context(),
+  );
   expect(status.content[0]?.text).toContain("4 · delivered");
   expect(status.content[0]?.text).toContain("5 · recorded");
   expect(status.content[0]?.text).toContain("inspect coverage for the changed criterion");
@@ -206,12 +429,10 @@ test("loop_run validates the DAG and delegates execution to Loop", async () => {
     {
       intent: "Implement feature X",
       runId: "run-x",
-      tasksJson: JSON.stringify([task("research", "research", [], []), task(
-        "implementation",
-        "implementation",
-        ["research"],
-        ["src/**"],
-      )]),
+      tasksJson: planJson([
+        task("research", "research", [], []),
+        task("implementation", "implementation", ["research"], ["src/**"]),
+      ]),
     },
     new AbortController().signal,
     (update: { content: Array<{ text: string }> }) => updates.push(update.content[0]?.text ?? ""),
@@ -231,7 +452,7 @@ test("loop_run distinguishes completed goals from attention and gives a continua
     {
       intent: "Finish every acceptance criterion",
       runId: "run-completed",
-      tasksJson: JSON.stringify([task("implementation", "implementation", [], ["src/**"])]),
+      tasksJson: planJson([task("implementation", "implementation", [], ["src/**"])]),
     },
     new AbortController().signal,
     undefined,
@@ -239,24 +460,29 @@ test("loop_run distinguishes completed goals from attention and gives a continua
   );
 
   const attentionHost = fakePi();
-  registerLoopExtension(attentionHost.api, fakeBackend({
-    async run(input) {
-      return {
-        status: "attention",
-        tasks: input.tasks.length,
-        escalations: [],
-        providersByTask: {},
-        startedAt: {},
-        finishedAt: {},
-      };
-    },
-  }), undefined, settings);
+  registerLoopExtension(
+    attentionHost.api,
+    fakeBackend({
+      async run(input) {
+        return {
+          status: "attention",
+          tasks: input.tasks.length,
+          escalations: [],
+          providersByTask: {},
+          startedAt: {},
+          finishedAt: {},
+        };
+      },
+    }),
+    undefined,
+    settings,
+  );
   const attention = await attentionHost.tools.get("loop_run")!.execute(
     "tool-attention",
     {
       intent: "Finish every acceptance criterion",
       runId: "run-attention",
-      tasksJson: JSON.stringify([task("implementation", "implementation", [], ["src/**"])]),
+      tasksJson: planJson([task("implementation", "implementation", [], ["src/**"])]),
     },
     new AbortController().signal,
     undefined,
@@ -267,7 +493,9 @@ test("loop_run distinguishes completed goals from attention and gives a continua
   expect(completed.content[0]?.text).toContain("Verification: passed");
   expect(completed.content[0]?.text).not.toContain("Goal: incomplete");
   expect(attention.content[0]?.text).toContain("Goal: incomplete");
-  expect(attention.content[0]?.text).toContain("Remaining: original acceptance criteria are not fully verified");
+  expect(attention.content[0]?.text).toContain(
+    "Remaining: original acceptance criteria are not fully verified",
+  );
   expect(attention.content[0]?.text).toContain("Answer the attention here");
   expect(attention.content[0]?.text).not.toContain("/loop");
   expect(attention.content[0]?.text).not.toContain("Goal: complete");
@@ -328,7 +556,7 @@ test("Pi updates, notify, tool result, and commands share injected output limits
     {
       intent: "Implement bounded output",
       runId: "run\r\nlimited",
-      tasksJson: JSON.stringify([task("implementation", "implementation", [], ["src/**"])]),
+      tasksJson: planJson([task("implementation", "implementation", [], ["src/**"])]),
     },
     new AbortController().signal,
     (update: { content: Array<{ text: string }> }) => updates.push(update.content[0]?.text ?? ""),
@@ -398,26 +626,75 @@ test("natural-language tools use the bound run and preserve the user's steering 
   const host = fakePi();
   const calls: string[] = [];
   const backend = fakeBackend({
-    async run(input) { return { status: "running", tasks: input.tasks.length, escalations: [], providersByTask: {}, startedAt: {}, finishedAt: {} }; },
-    async steer(runId, taskId, message) { calls.push(`steer:${runId}:${taskId}:${message}`); return snapshot(runId); },
-    async addTask(runId, task) { calls.push(`add:${runId}:${task.id}`); return { ...snapshot(runId), lastSequence: 2 }; },
-    async pause(runId) { calls.push(`pause:${runId}`); return { ...snapshot(runId), state: "paused", lastSequence: 3 }; },
+    async run(input) {
+      return {
+        status: "running",
+        tasks: input.tasks.length,
+        escalations: [],
+        providersByTask: {},
+        startedAt: {},
+        finishedAt: {},
+      };
+    },
+    async steer(runId, taskId, message) {
+      calls.push(`steer:${runId}:${taskId}:${message}`);
+      return snapshot(runId);
+    },
+    async addTask(runId, task) {
+      calls.push(`add:${runId}:${task.id}`);
+      return { ...snapshot(runId), lastSequence: 2 };
+    },
+    async pause(runId) {
+      calls.push(`pause:${runId}`);
+      return { ...snapshot(runId), state: "paused", lastSequence: 3 };
+    },
   });
   registerLoopExtension(host.api, backend, undefined, settings);
   const piContext = context();
-  await host.tools.get("loop_run")!.execute("start", { intent: "Fix", runId: "run-x", tasksJson: JSON.stringify([task("impl", "implementation", [], ["src/**"])]) }, new AbortController().signal, undefined, piContext);
-  await host.hooks.get("before_agent_start")!({ prompt: "지금 작업에서 X는 빼줘", systemPrompt: "base" }, piContext);
-  await host.tools.get("loop_steer")!.execute("steer", { taskId: "impl" }, new AbortController().signal, undefined, piContext);
-  await host.tools.get("loop_add_task")!.execute("add", { taskJson: JSON.stringify(task("verify", "verification", ["impl"], [])) }, new AbortController().signal, undefined, piContext);
-  await host.tools.get("loop_control")!.execute("pause", { action: "pause" }, new AbortController().signal, undefined, piContext);
-  expect(calls).toEqual(["steer:run-x:impl:지금 작업에서 X는 빼줘", "add:run-x:verify", "pause:run-x"]);
+  await host.tools.get("loop_run")!.execute(
+    "start",
+    {
+      intent: "Fix",
+      runId: "run-x",
+      tasksJson: planJson([task("impl", "implementation", [], ["src/**"])]),
+    },
+    new AbortController().signal,
+    undefined,
+    piContext,
+  );
+  await host.hooks.get("before_agent_start")!(
+    { prompt: "지금 작업에서 X는 빼줘", systemPrompt: "base" },
+    piContext,
+  );
+  await host.tools
+    .get("loop_steer")!
+    .execute("steer", { taskId: "impl" }, new AbortController().signal, undefined, piContext);
+  await host.tools
+    .get("loop_add_task")!
+    .execute(
+      "add",
+      { taskJson: goalTaskJson(task("verify", "verification", ["impl"], [])) },
+      new AbortController().signal,
+      undefined,
+      piContext,
+    );
+  await host.tools
+    .get("loop_control")!
+    .execute("pause", { action: "pause" }, new AbortController().signal, undefined, piContext);
+  expect(calls).toEqual([
+    "steer:run-x:impl:지금 작업에서 X는 빼줘",
+    "add:run-x:verify",
+    "pause:run-x",
+  ]);
 });
 
 test("resolving exhausted failure attention restarts the detached owner for ready tasks", async () => {
   const host = fakePi();
   const calls: string[] = [];
   const backend = fakeBackend({
-    async snapshot(runId) { return { ...snapshot(runId), state: "attention", openAttentionIds: ["failure-1"] }; },
+    async snapshot(runId) {
+      return { ...snapshot(runId), state: "attention", openAttentionIds: ["failure-1"] };
+    },
     async resolve(runId, attentionId, resolution) {
       calls.push(`resolve:${runId}:${attentionId}:${resolution}`);
       return { ...snapshot(runId), tasks: [{ ...snapshot(runId).tasks[0]!, state: "ready" }] };
@@ -429,9 +706,17 @@ test("resolving exhausted failure attention restarts the detached owner for read
   });
   registerLoopExtension(host.api, backend, undefined, settings);
   const piContext = context();
-  const result = await host.tools.get("loop_resolve")!.execute("resolve", {
-    runId: "run-x", attentionId: "failure-1", resolution: "retry",
-  }, new AbortController().signal, undefined, piContext);
+  const result = await host.tools.get("loop_resolve")!.execute(
+    "resolve",
+    {
+      runId: "run-x",
+      attentionId: "failure-1",
+      resolution: "retry",
+    },
+    new AbortController().signal,
+    undefined,
+    piContext,
+  );
 
   expect(calls).toEqual(["resolve:run-x:failure-1:retry", "resume:run-x"]);
   expect(result.content[0]?.text).toContain("Owner restart requested");
@@ -439,123 +724,340 @@ test("resolving exhausted failure attention restarts the detached owner for read
 
   await host.commands.get("loop")!.handler("resolve run-x failure-1 retry", piContext);
   expect(calls).toEqual([
-    "resolve:run-x:failure-1:retry", "resume:run-x",
-    "resolve:run-x:failure-1:retry", "resume:run-x",
+    "resolve:run-x:failure-1:retry",
+    "resume:run-x",
+    "resolve:run-x:failure-1:retry",
+    "resume:run-x",
   ]);
 });
 
 test("resolved attention does not start a second owner when the CLI already holds a lease", async () => {
   const host = fakePi();
   let resumeCalls = 0;
-  registerLoopExtension(host.api, fakeBackend({
-    async resolve(runId) {
-      return { ...snapshot(runId), tasks: [{ ...snapshot(runId).tasks[0]!, state: "ready" }],
-        activeWorkers: [], executionOwner: "123:owner", executionExpiresAt: Date.now() + 10_000 };
-    },
-    async resume(runId) { resumeCalls++; return snapshot(runId); },
-  }), undefined, settings);
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async resolve(runId) {
+        return {
+          ...snapshot(runId),
+          tasks: [{ ...snapshot(runId).tasks[0]!, state: "ready" }],
+          activeWorkers: [],
+          executionOwner: "123:owner",
+          executionExpiresAt: Date.now() + 10_000,
+        };
+      },
+      async resume(runId) {
+        resumeCalls++;
+        return snapshot(runId);
+      },
+    }),
+    undefined,
+    settings,
+  );
 
-  const response = await host.tools.get("loop_resolve")!.execute("resolve", {
-    runId: "run-x", attentionId: "failure-1", resolution: "retry",
-  }, new AbortController().signal, undefined, context());
+  const response = await host.tools.get("loop_resolve")!.execute(
+    "resolve",
+    {
+      runId: "run-x",
+      attentionId: "failure-1",
+      resolution: "retry",
+    },
+    new AbortController().signal,
+    undefined,
+    context(),
+  );
   expect(response.details.state).toBe("active");
   expect(resumeCalls).toBe(0);
 });
 
 test("resolved attention reports an owner restart failure to the Lead", async () => {
   const host = fakePi();
-  registerLoopExtension(host.api, fakeBackend({
-    async resolve(runId) { return { ...snapshot(runId), tasks: [{ ...snapshot(runId).tasks[0]!, state: "ready" }] }; },
-    async resume() { throw new Error("owner launch failed"); },
-  }), undefined, settings);
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async resolve(runId) {
+        return { ...snapshot(runId), tasks: [{ ...snapshot(runId).tasks[0]!, state: "ready" }] };
+      },
+      async resume() {
+        throw new Error("owner launch failed");
+      },
+    }),
+    undefined,
+    settings,
+  );
 
-  await expect(host.tools.get("loop_resolve")!.execute("resolve", {
-    runId: "run-x", attentionId: "failure-1", resolution: "retry",
-  }, new AbortController().signal, undefined, context())).rejects.toThrow("owner could not restart");
+  await expect(
+    host.tools.get("loop_resolve")!.execute(
+      "resolve",
+      {
+        runId: "run-x",
+        attentionId: "failure-1",
+        resolution: "retry",
+      },
+      new AbortController().signal,
+      undefined,
+      context(),
+    ),
+  ).rejects.toThrow("owner could not restart");
 });
 
 test("session start restores one run in this directory and avoids ambiguous auto-attach", async () => {
   const host = fakePi();
   const statuses: string[] = [];
-  const piContext = { ...context(), ui: { notify() {}, setStatus(_key: string, value?: string) { statuses.push(value ?? ""); } }, sessionManager: { getBranch: () => [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-x", workingDirectory: "/project" } }] } };
+  const piContext = {
+    ...context(),
+    ui: {
+      notify() {},
+      setStatus(_key: string, value?: string) {
+        statuses.push(value ?? "");
+      },
+    },
+    sessionManager: {
+      getBranch: () => [
+        {
+          type: "custom",
+          customType: "loop-run-binding",
+          data: { runId: "run-x", workingDirectory: "/project" },
+        },
+      ],
+    },
+  };
   registerLoopExtension(host.api, fakeBackend(), undefined, settings);
   await host.events.get("session_start")?.at(-1)?.({}, piContext);
   await Bun.sleep(20);
-  expect(statuses.some(value => value.includes("Loop active"))).toBe(true);
+  expect(statuses.some((value) => value.includes("Loop active"))).toBe(true);
   await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
 
   const ambiguous = fakePi();
   const messages: string[] = [];
-  const backend = fakeBackend({ async runs() { return [{ runId: "a", state: "active" }, { runId: "b", state: "active" }]; }, async snapshot(runId) { return snapshot(runId); } });
+  const backend = fakeBackend({
+    async runs() {
+      return [
+        { runId: "a", state: "active" },
+        { runId: "b", state: "active" },
+      ];
+    },
+    async snapshot(runId) {
+      return snapshot(runId);
+    },
+  });
   registerLoopExtension(ambiguous.api, backend, undefined, settings);
-  await ambiguous.events.get("session_start")?.at(-1)?.({}, { ...context(), ui: { notify() {}, setStatus(_key: string, value?: string) { messages.push(value ?? ""); } }, sessionManager: { getBranch: () => [] } });
+  await ambiguous.events.get("session_start")?.at(-1)?.(
+    {},
+    {
+      ...context(),
+      ui: {
+        notify() {},
+        setStatus(_key: string, value?: string) {
+          messages.push(value ?? "");
+        },
+      },
+      sessionManager: { getBranch: () => [] },
+    },
+  );
   expect(messages).toContain("2 Loop runs · choose one in conversation");
 });
 
 test("Pi remains usable when the run database cannot be read at startup", async () => {
   const host = fakePi();
   const statuses: string[] = [];
-  registerLoopExtension(host.api, fakeBackend({ async runs() { throw new Error("database unavailable"); } }), undefined, settings);
-  const piContext = { ...context(), ui: { notify() {}, setStatus(_key: string, value?: string) { statuses.push(value ?? ""); } }, sessionManager: { getBranch: () => [] } };
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async runs() {
+        throw new Error("database unavailable");
+      },
+    }),
+    undefined,
+    settings,
+  );
+  const piContext = {
+    ...context(),
+    ui: {
+      notify() {},
+      setStatus(_key: string, value?: string) {
+        statuses.push(value ?? "");
+      },
+    },
+    sessionManager: { getBranch: () => [] },
+  };
   await expect(host.events.get("session_start")?.at(-1)?.({}, piContext)).resolves.toBeUndefined();
   expect(statuses).toContain("Loop status unavailable");
 });
 
 test("last branch binding wins and a different directory does not revive an older run", async () => {
   const host = fakePi();
-  registerLoopExtension(host.api, fakeBackend({ async runs() { return []; } }), undefined, settings);
-  const piContext = { ...context(), sessionManager: { getBranch: () => [
-    { type: "custom", customType: "loop-run-binding", data: { runId: "old", workingDirectory: "/project" } },
-    { type: "custom", customType: "loop-run-binding", data: { runId: "new", workingDirectory: "/elsewhere" } },
-  ] } };
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async runs() {
+        return [];
+      },
+    }),
+    undefined,
+    settings,
+  );
+  const piContext = {
+    ...context(),
+    sessionManager: {
+      getBranch: () => [
+        {
+          type: "custom",
+          customType: "loop-run-binding",
+          data: { runId: "old", workingDirectory: "/project" },
+        },
+        {
+          type: "custom",
+          customType: "loop-run-binding",
+          data: { runId: "new", workingDirectory: "/elsewhere" },
+        },
+      ],
+    },
+  };
   await host.events.get("session_start")?.at(-1)?.({}, piContext);
-  const status = await host.tools.get("loop_status")!.execute("status", {}, new AbortController().signal, undefined, piContext);
+  const status = await host.tools
+    .get("loop_status")!
+    .execute("status", {}, new AbortController().signal, undefined, piContext);
   expect(status.content[0]?.text).toBe("No active Loop run in this directory.");
 });
 
 test("a slow old branch restore cannot replace a newer branch binding", async () => {
   const host = fakePi();
   let releaseOld!: (value: SnapshotOutput) => void;
-  const oldSnapshot = new Promise<SnapshotOutput>(resolve => { releaseOld = resolve; });
-  let branch = [{ type: "custom", customType: "loop-run-binding", data: { runId: "old", workingDirectory: "/project" } }];
-  registerLoopExtension(host.api, fakeBackend({ async snapshot(runId) { return runId === "old" ? oldSnapshot : snapshot(runId); } }), undefined, settings);
+  const oldSnapshot = new Promise<SnapshotOutput>((resolve) => {
+    releaseOld = resolve;
+  });
+  let branch = [
+    {
+      type: "custom",
+      customType: "loop-run-binding",
+      data: { runId: "old", workingDirectory: "/project" },
+    },
+  ];
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async snapshot(runId) {
+        return runId === "old" ? oldSnapshot : snapshot(runId);
+      },
+    }),
+    undefined,
+    settings,
+  );
   const piContext = { ...context(), sessionManager: { getBranch: () => branch } };
   const slow = host.events.get("session_start")?.at(-1)?.({}, piContext);
-  branch = [{ type: "custom", customType: "loop-run-binding", data: { runId: "new", workingDirectory: "/project" } }];
+  branch = [
+    {
+      type: "custom",
+      customType: "loop-run-binding",
+      data: { runId: "new", workingDirectory: "/project" },
+    },
+  ];
   await host.events.get("session_tree")?.at(-1)?.({}, piContext);
   releaseOld(snapshot("old"));
   await slow;
-  const status = await host.tools.get("loop_status")!.execute("status", {}, new AbortController().signal, undefined, piContext);
+  const status = await host.tools
+    .get("loop_status")!
+    .execute("status", {}, new AbortController().signal, undefined, piContext);
   expect(status.details.runId).toBe("new");
 });
 
 test("new run refuses another active goal in the same directory even without a binding", async () => {
   const host = fakePi();
-  registerLoopExtension(host.api, fakeBackend({ async runs() { return [{ runId: "other", state: "active" }]; }, async snapshot(runId) { return snapshot(runId); } }), undefined, settings);
-  await expect(host.tools.get("loop_run")!.execute("new", { intent: "Another goal", tasksJson: JSON.stringify([task("impl", "implementation", [], ["src/**"])]) }, new AbortController().signal, undefined, context())).rejects.toThrow("other");
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async runs() {
+        return [{ runId: "other", state: "active" }];
+      },
+      async snapshot(runId) {
+        return snapshot(runId);
+      },
+    }),
+    undefined,
+    settings,
+  );
+  await expect(
+    host.tools.get("loop_run")!.execute(
+      "new",
+      {
+        intent: "Another goal",
+        tasksJson: planJson([task("impl", "implementation", [], ["src/**"])]),
+      },
+      new AbortController().signal,
+      undefined,
+      context(),
+    ),
+  ).rejects.toThrow("other");
 });
 
 test("new run waits while an earlier run is still cancelling", async () => {
   const host = fakePi();
-  registerLoopExtension(host.api, fakeBackend({ async runs() { return [{ runId: "draining", state: "cancelling" }]; }, async snapshot(runId) { return { ...snapshot(runId), state: "cancelling" }; } }), undefined, settings);
-  await expect(host.tools.get("loop_run")!.execute("new", { intent: "Next goal", tasksJson: JSON.stringify([task("impl", "implementation", [], ["src/**"])]) }, new AbortController().signal, undefined, context())).rejects.toThrow("draining");
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async runs() {
+        return [{ runId: "draining", state: "cancelling" }];
+      },
+      async snapshot(runId) {
+        return { ...snapshot(runId), state: "cancelling" };
+      },
+    }),
+    undefined,
+    settings,
+  );
+  await expect(
+    host.tools.get("loop_run")!.execute(
+      "new",
+      {
+        intent: "Next goal",
+        tasksJson: planJson([task("impl", "implementation", [], ["src/**"])]),
+      },
+      new AbortController().signal,
+      undefined,
+      context(),
+    ),
+  ).rejects.toThrow("draining");
 });
 
 test("ambiguous runs can be listed and a status read does not switch the control target", async () => {
   const host = fakePi();
   const paused: string[] = [];
-  registerLoopExtension(host.api, fakeBackend({
-    async runs() { return [{ runId: "a", state: "active" }, { runId: "b", state: "active" }]; },
-    async snapshot(runId) { return { ...snapshot(runId), intent: runId === "a" ? "Fix login" : "Fix build" }; },
-    async pause(runId) { paused.push(runId); return { ...snapshot(runId), state: "paused" }; },
-  }), undefined, settings);
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async runs() {
+        return [
+          { runId: "a", state: "active" },
+          { runId: "b", state: "active" },
+        ];
+      },
+      async snapshot(runId) {
+        return { ...snapshot(runId), intent: runId === "a" ? "Fix login" : "Fix build" };
+      },
+      async pause(runId) {
+        paused.push(runId);
+        return { ...snapshot(runId), state: "paused" };
+      },
+    }),
+    undefined,
+    settings,
+  );
   const piContext = context();
-  const listed = await host.tools.get("loop_status")!.execute("list", {}, new AbortController().signal, undefined, piContext);
+  const listed = await host.tools
+    .get("loop_status")!
+    .execute("list", {}, new AbortController().signal, undefined, piContext);
   expect(listed.content[0]?.text).toContain("Fix login");
   expect(listed.content[0]?.text).toContain("Fix build");
-  await host.tools.get("loop_select_run")!.execute("select", { runId: "a" }, new AbortController().signal, undefined, piContext);
-  await host.tools.get("loop_status")!.execute("inspect", { runId: "b" }, new AbortController().signal, undefined, piContext);
-  await host.tools.get("loop_control")!.execute("pause", { action: "pause" }, new AbortController().signal, undefined, piContext);
+  await host.tools
+    .get("loop_select_run")!
+    .execute("select", { runId: "a" }, new AbortController().signal, undefined, piContext);
+  await host.tools
+    .get("loop_status")!
+    .execute("inspect", { runId: "b" }, new AbortController().signal, undefined, piContext);
+  await host.tools
+    .get("loop_control")!
+    .execute("pause", { action: "pause" }, new AbortController().signal, undefined, piContext);
   expect(paused).toEqual(["a"]);
 });
 
@@ -568,27 +1070,75 @@ test("Pi Lead refuses to steer a completed task while a descendant verifier is r
         ...snapshot(runId),
         tasks: [
           { ...snapshot(runId).tasks[0]!, id: "implementation", state: "done" },
-          { ...snapshot(runId).tasks[0]!, id: "verification", kind: "verification", state: "running", dependencies: ["implementation"], writeScope: [] },
+          {
+            ...snapshot(runId).tasks[0]!,
+            id: "verification",
+            kind: "verification",
+            state: "running",
+            dependencies: ["implementation"],
+            writeScope: [],
+          },
         ],
       };
     },
-    async steer(_runId, taskId) { steered.push(taskId); return snapshot("run-x"); },
+    async steer(_runId, taskId) {
+      steered.push(taskId);
+      return snapshot("run-x");
+    },
   });
   registerLoopExtension(host.api, backend, undefined, settings);
   const piContext = context();
-  await host.tools.get("loop_select_run")!.execute("select", { runId: "run-x" }, new AbortController().signal, undefined, piContext);
-  const instructions = await host.hooks.get("before_agent_start")!({ prompt: "Also support underscores", systemPrompt: "base" }, piContext);
-  expect(instructions.systemPrompt).toContain("If the bound run is terminal and the user has an unfinished requirement, start a follow-up run");
+  await host.tools
+    .get("loop_select_run")!
+    .execute("select", { runId: "run-x" }, new AbortController().signal, undefined, piContext);
+  const instructions = await host.hooks.get("before_agent_start")!(
+    { prompt: "Also support underscores", systemPrompt: "base" },
+    piContext,
+  );
+  expect(instructions.systemPrompt).toContain(
+    "If the bound run is terminal and the user has an unfinished requirement, start a follow-up run",
+  );
 
-  await expect(host.tools.get("loop_steer")!.execute("steer", { taskId: "implementation" }, new AbortController().signal, undefined, piContext))
-    .rejects.toThrow(/completed.*dependent task/i);
+  await expect(
+    host.tools
+      .get("loop_steer")!
+      .execute(
+        "steer",
+        { taskId: "implementation" },
+        new AbortController().signal,
+        undefined,
+        piContext,
+      ),
+  ).rejects.toThrow(/completed.*dependent task/i);
   expect(steered).toEqual([]);
 });
 
 test("Pi attention status gives a conversational resolution path", async () => {
   const host = fakePi();
-  registerLoopExtension(host.api, fakeBackend({ async snapshot(runId) { return { ...snapshot(runId), state: "attention", openAttentionIds: ["approval-1"], attention: [{ id: "approval-1", kind: "approval", summary: "Approve migration" }] }; } }), undefined, settings);
-  const output = await host.tools.get("loop_status")!.execute("attention", { runId: "run-x", action: "attention" }, new AbortController().signal, undefined, context());
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async snapshot(runId) {
+        return {
+          ...snapshot(runId),
+          state: "attention",
+          openAttentionIds: ["approval-1"],
+          attention: [{ id: "approval-1", kind: "approval", summary: "Approve migration" }],
+        };
+      },
+    }),
+    undefined,
+    settings,
+  );
+  const output = await host.tools
+    .get("loop_status")!
+    .execute(
+      "attention",
+      { runId: "run-x", action: "attention" },
+      new AbortController().signal,
+      undefined,
+      context(),
+    );
   expect(output.content[0]?.text).toContain("Approve migration");
   expect(output.content[0]?.text).toContain("Answer the relevant item here");
   expect(output.content[0]?.text).not.toContain("/loop");
@@ -596,40 +1146,98 @@ test("Pi attention status gives a conversational resolution path", async () => {
 
 test("observer records one final message with check evidence across session restoration", async () => {
   const host = fakePi();
-  const entries: Array<{ type: string; customType: string; data: unknown }> = [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-x", workingDirectory: "/project" } }];
+  const entries: Array<{ type: string; customType: string; data: unknown }> = [
+    {
+      type: "custom",
+      customType: "loop-run-binding",
+      data: { runId: "run-x", workingDirectory: "/project" },
+    },
+  ];
   const messages: Array<{ customType: string; content: string }> = [];
   host.api.appendEntry = (customType, data) => entries.push({ type: "custom", customType, data });
-  host.api.sendMessage = message => { messages.push(message); };
+  host.api.sendMessage = (message) => {
+    messages.push(message);
+  };
   const backend = fakeBackend({
-    async snapshot() { return { ...snapshot("run-x"), state: "completed", tasks: [{ ...snapshot("run-x").tasks[0]!, state: "done", resultSummary: "Fixed the bug" }], lastSequence: 7 }; },
-    async task(_runId, taskId) { return { ...taskContext(taskId), previousChecks: [{ id: "focused", command: "bun", args: ["test"], workingDirectory: "/project", exitCode: 0, stdout: "", stderr: "", timedOut: false, durationMs: 1 }] }; },
+    async snapshot() {
+      return {
+        ...snapshot("run-x"),
+        state: "completed",
+        tasks: [{ ...snapshot("run-x").tasks[0]!, state: "done", resultSummary: "Fixed the bug" }],
+        lastSequence: 7,
+      };
+    },
+    async task(_runId, taskId) {
+      return {
+        ...taskContext(taskId),
+        previousChecks: [
+          {
+            id: "focused",
+            command: "bun",
+            args: ["test"],
+            workingDirectory: "/project",
+            exitCode: 0,
+            stdout: "",
+            stderr: "",
+            timedOut: false,
+            durationMs: 1,
+          },
+        ],
+      };
+    },
   });
   registerLoopExtension(host.api, backend, undefined, settings);
-  const piContext = { ...context(), ui: { notify() {}, setStatus() {} }, sessionManager: { getBranch: () => entries } };
+  const piContext = {
+    ...context(),
+    ui: { notify() {}, setStatus() {} },
+    sessionManager: { getBranch: () => entries },
+  };
   await host.events.get("session_start")?.at(-1)?.({}, piContext);
   await Bun.sleep(20);
-  expect(messages.filter(message => message.customType === "loop-final")).toHaveLength(1);
-  expect(messages.find(message => message.customType === "loop-final")?.content).toContain("checks focused");
-  expect(messages.find(message => message.customType === "loop-final")?.content).toContain("Verified tasks: 1/1");
-  expect(messages.filter(message => message.customType === "loop-final-review")).toHaveLength(1);
+  expect(messages.filter((message) => message.customType === "loop-final")).toHaveLength(1);
+  expect(messages.find((message) => message.customType === "loop-final")?.content).toContain(
+    "checks focused",
+  );
+  expect(messages.find((message) => message.customType === "loop-final")?.content).toContain(
+    "Verified tasks: 1/1",
+  );
+  expect(messages.filter((message) => message.customType === "loop-final-review")).toHaveLength(1);
   await host.events.get("session_start")?.at(-1)?.({}, piContext);
   await Bun.sleep(20);
-  expect(messages.filter(message => message.customType === "loop-final")).toHaveLength(1);
-  expect(messages.filter(message => message.customType === "loop-final-review")).toHaveLength(1);
+  expect(messages.filter((message) => message.customType === "loop-final")).toHaveLength(1);
+  expect(messages.filter((message) => message.customType === "loop-final-review")).toHaveLength(1);
   await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
 });
 
 test("Pi Lead reviews a completed goal once and does not recursively review its automatic follow-up", async () => {
   const host = fakePi();
   const entries: Array<{ type: string; customType: string; data: unknown }> = [
-    { type: "custom", customType: "loop-run-binding", data: { runId: "run-first", workingDirectory: "/project" } },
+    {
+      type: "custom",
+      customType: "loop-run-binding",
+      data: { runId: "run-first", workingDirectory: "/project" },
+    },
   ];
-  const messages: Array<{ customType: string; content: string; display: boolean; triggerTurn?: boolean }> = [];
+  const messages: Array<{
+    customType: string;
+    content: string;
+    display: boolean;
+    triggerTurn?: boolean;
+  }> = [];
   host.api.appendEntry = (customType, data) => entries.push({ type: "custom", customType, data });
-  host.api.sendMessage = (message, options) => { messages.push({ ...message, triggerTurn: options?.triggerTurn }); };
+  host.api.sendMessage = (message, options) => {
+    messages.push({ ...message, triggerTurn: options?.triggerTurn });
+  };
   const backend = fakeBackend({
     async run(input) {
-      return { status: "running", tasks: input.tasks.length, escalations: [], providersByTask: {}, startedAt: {}, finishedAt: {} };
+      return {
+        status: "running",
+        tasks: input.tasks.length,
+        escalations: [],
+        providersByTask: {},
+        startedAt: {},
+        finishedAt: {},
+      };
     },
     async snapshot(runId) {
       return {
@@ -641,41 +1249,75 @@ test("Pi Lead reviews a completed goal once and does not recursively review its 
     },
   });
   registerLoopExtension(host.api, backend, undefined, settings);
-  const piContext = { ...context(), ui: { notify() {}, setStatus() {} }, sessionManager: { getBranch: () => entries } };
-  await host.hooks.get("before_agent_start")!({ prompt: "Fix the original bug", systemPrompt: "base" }, piContext);
+  const piContext = {
+    ...context(),
+    ui: { notify() {}, setStatus() {} },
+    sessionManager: { getBranch: () => entries },
+  };
+  await host.hooks.get("before_agent_start")!(
+    { prompt: "Fix the original bug", systemPrompt: "base" },
+    piContext,
+  );
   await host.events.get("session_start")?.at(-1)?.({}, piContext);
   await Bun.sleep(20);
 
-  expect(messages.filter(message => message.customType === "loop-final")).toHaveLength(1);
-  const review = messages.find(message => message.customType === "loop-final-review");
+  expect(messages.filter((message) => message.customType === "loop-final")).toHaveLength(1);
+  const review = messages.find((message) => message.customType === "loop-final-review");
   expect(review).toMatchObject({ display: false, triggerTurn: true });
   expect(review?.content).toContain("original goal");
   expect(review?.content).toContain("at most 8 lines");
   expect(review?.content).toContain("details only when asked");
 
-  await host.events.get("message_start")?.at(-1)?.({ message: { role: "custom", customType: "loop-final-review" } }, piContext);
-  await expect(host.tools.get("loop_steer")!.execute("review-steer", { taskId: "all" }, new AbortController().signal, undefined, piContext))
-    .rejects.toThrow("latest user message");
-  await host.tools.get("loop_run")!.execute("follow-up", {
-    intent: "Finish the uncovered requirement",
-    runId: "run-follow-up",
-    tasksJson: JSON.stringify([task("finish", "implementation", [], ["src/**"])]),
-  }, new AbortController().signal, undefined, piContext);
+  await host.events.get("message_start")?.at(-1)?.(
+    { message: { role: "custom", customType: "loop-final-review" } },
+    piContext,
+  );
+  await expect(
+    host.tools
+      .get("loop_steer")!
+      .execute(
+        "review-steer",
+        { taskId: "all" },
+        new AbortController().signal,
+        undefined,
+        piContext,
+      ),
+  ).rejects.toThrow("latest user message");
+  await host.tools.get("loop_run")!.execute(
+    "follow-up",
+    {
+      intent: "Finish the uncovered requirement",
+      runId: "run-follow-up",
+      tasksJson: planJson([task("finish", "implementation", [], ["src/**"])]),
+    },
+    new AbortController().signal,
+    undefined,
+    piContext,
+  );
   await Bun.sleep(20);
 
-  expect(messages.filter(message => message.customType === "loop-final")).toHaveLength(2);
-  expect(messages.filter(message => message.customType === "loop-final-review")).toHaveLength(1);
+  expect(messages.filter((message) => message.customType === "loop-final")).toHaveLength(2);
+  expect(messages.filter((message) => message.customType === "loop-final-review")).toHaveLength(1);
   await host.events.get("agent_end")?.at(-1)?.({}, piContext);
-  await host.hooks.get("before_agent_start")!({ prompt: "Another user correction", systemPrompt: "base" }, piContext);
+  await host.hooks.get("before_agent_start")!(
+    { prompt: "Another user correction", systemPrompt: "base" },
+    piContext,
+  );
   await host.events.get("message_start")?.at(-1)?.({ message: { role: "user" } }, piContext);
-  await host.tools.get("loop_run")!.execute("user-correction", {
-    intent: "Apply the later user correction",
-    runId: "run-user-correction",
-    tasksJson: JSON.stringify([task("correction", "implementation", [], ["src/**"])]),
-  }, new AbortController().signal, undefined, piContext);
+  await host.tools.get("loop_run")!.execute(
+    "user-correction",
+    {
+      intent: "Apply the later user correction",
+      runId: "run-user-correction",
+      tasksJson: planJson([task("correction", "implementation", [], ["src/**"])]),
+    },
+    new AbortController().signal,
+    undefined,
+    piContext,
+  );
   await Bun.sleep(20);
-  expect(messages.filter(message => message.customType === "loop-final")).toHaveLength(3);
-  expect(messages.filter(message => message.customType === "loop-final-review")).toHaveLength(2);
+  expect(messages.filter((message) => message.customType === "loop-final")).toHaveLength(3);
+  expect(messages.filter((message) => message.customType === "loop-final-review")).toHaveLength(2);
   await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
 });
 
@@ -683,52 +1325,113 @@ test("Pi Lead shows measured handoff and final time only in the originating sess
   const host = fakePi();
   const entries: Array<{ type: string; customType: string; data: unknown }> = [];
   const messages: Array<{ customType: string; content: string }> = [];
-  host.api.appendEntry = (customType, data) => { entries.push({ type: "custom", customType, data }); };
-  host.api.sendMessage = message => { messages.push(message); };
+  host.api.appendEntry = (customType, data) => {
+    entries.push({ type: "custom", customType, data });
+  };
+  host.api.sendMessage = (message) => {
+    messages.push(message);
+  };
   const backend = fakeBackend({
-    async run(input) { return { status: "running", tasks: input.tasks.length, escalations: [], providersByTask: {}, startedAt: {}, finishedAt: {} }; },
-    async snapshot(runId) { return { ...emptySnapshot(runId), state: "completed", tasks: [{ ...snapshot(runId).tasks[0]!, state: "done" }], lastSequence: 3 }; },
+    async run(input) {
+      return {
+        status: "running",
+        tasks: input.tasks.length,
+        escalations: [],
+        providersByTask: {},
+        startedAt: {},
+        finishedAt: {},
+      };
+    },
+    async snapshot(runId) {
+      return {
+        ...emptySnapshot(runId),
+        state: "completed",
+        tasks: [{ ...snapshot(runId).tasks[0]!, state: "done" }],
+        lastSequence: 3,
+      };
+    },
   });
   registerLoopExtension(host.api, backend, undefined, settings);
-  const piContext = { ...context(), ui: { notify() {}, setStatus() {} }, sessionManager: { getBranch: () => entries } };
-  await host.hooks.get("before_agent_start")!({ prompt: "Finish this change", systemPrompt: "base" }, piContext);
-  const handoff = await host.tools.get("loop_run")!.execute("timed", {
-    intent: "Finish this change",
-    runId: "timed-run",
-    tasksJson: JSON.stringify([task("impl", "implementation", [], ["src/**"])]),
-  }, new AbortController().signal, undefined, piContext);
+  const piContext = {
+    ...context(),
+    ui: { notify() {}, setStatus() {} },
+    sessionManager: { getBranch: () => entries },
+  };
+  await host.hooks.get("before_agent_start")!(
+    { prompt: "Finish this change", systemPrompt: "base" },
+    piContext,
+  );
+  const handoff = await host.tools.get("loop_run")!.execute(
+    "timed",
+    {
+      intent: "Finish this change",
+      runId: "timed-run",
+      tasksJson: planJson([task("impl", "implementation", [], ["src/**"])]),
+    },
+    new AbortController().signal,
+    undefined,
+    piContext,
+  );
   expect(handoff.content[0]?.text).toMatch(/요청→인계 \d+\.\d초/);
   await Bun.sleep(20);
-  const final = messages.find(message => message.customType === "loop-final")?.content;
+  const final = messages.find((message) => message.customType === "loop-final")?.content;
   expect(final).toMatch(/요청→결과 \d+\.\d초/);
   expect(final?.split("\n").length).toBeLessThanOrEqual(8);
 
   const restored = fakePi();
   const restoredMessages: Array<{ customType: string; content: string }> = [];
-  restored.api.sendMessage = message => { restoredMessages.push(message); };
+  restored.api.sendMessage = (message) => {
+    restoredMessages.push(message);
+  };
   registerLoopExtension(restored.api, backend, undefined, settings);
-  const restoredContext = { ...piContext, sessionManager: { getBranch: () => entries.filter(entry => entry.customType === "loop-run-binding") } };
+  const restoredContext = {
+    ...piContext,
+    sessionManager: {
+      getBranch: () => entries.filter((entry) => entry.customType === "loop-run-binding"),
+    },
+  };
   await restored.events.get("session_start")?.at(-1)?.({}, restoredContext);
   await Bun.sleep(20);
-  expect(restoredMessages.find(message => message.customType === "loop-final")?.content).not.toContain("요청→결과");
+  expect(
+    restoredMessages.find((message) => message.customType === "loop-final")?.content,
+  ).not.toContain("요청→결과");
   await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
   await restored.events.get("session_shutdown")?.at(-1)?.({}, restoredContext);
 });
 
 test("explicitly cancelled runs report their result without starting an automatic review", async () => {
   const host = fakePi();
-  const entries = [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-cancelled", workingDirectory: "/project" } }];
+  const entries = [
+    {
+      type: "custom",
+      customType: "loop-run-binding",
+      data: { runId: "run-cancelled", workingDirectory: "/project" },
+    },
+  ];
   const messages: Array<{ customType: string }> = [];
-  host.api.sendMessage = message => { messages.push(message); };
-  registerLoopExtension(host.api, fakeBackend({
-    async snapshot(runId) { return { ...emptySnapshot(runId), state: "cancelled", lastSequence: 2 }; },
-  }), undefined, settings);
-  const piContext = { ...context(), ui: { notify() {}, setStatus() {} }, sessionManager: { getBranch: () => entries } };
+  host.api.sendMessage = (message) => {
+    messages.push(message);
+  };
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async snapshot(runId) {
+        return { ...emptySnapshot(runId), state: "cancelled", lastSequence: 2 };
+      },
+    }),
+    undefined,
+    settings,
+  );
+  const piContext = {
+    ...context(),
+    ui: { notify() {}, setStatus() {} },
+    sessionManager: { getBranch: () => entries },
+  };
 
   await host.events.get("session_start")?.at(-1)?.({}, piContext);
   await Bun.sleep(20);
 
-  expect(messages.map(message => message.customType)).toEqual(["loop-final"]);
+  expect(messages.map((message) => message.customType)).toEqual(["loop-final"]);
   await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
 });
 
@@ -746,19 +1449,55 @@ test("Pi widget follows active work and attention, then clears after completion"
         widgets.push(lines);
       },
     },
-    sessionManager: { getBranch: () => [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-x", workingDirectory: "/project" } }] },
+    sessionManager: {
+      getBranch: () => [
+        {
+          type: "custom",
+          customType: "loop-run-binding",
+          data: { runId: "run-x", workingDirectory: "/project" },
+        },
+      ],
+    },
   };
-  registerLoopExtension(host.api, fakeBackend({ async snapshot() { return latest; } }), undefined, settings);
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async snapshot() {
+        return latest;
+      },
+    }),
+    undefined,
+    settings,
+  );
 
   await host.events.get("session_start")?.at(-1)?.({}, piContext);
   await Bun.sleep(20);
-  expect(widgets.at(-1)).toEqual(["Loop · active · 0/1 verified", "Working: Implement · ask here to adjust"]);
+  expect(widgets.at(-1)).toEqual([
+    "Loop · active · 0/1 verified",
+    "Working: Implement · ask here to adjust",
+  ]);
 
-  latest = { ...latest, state: "attention", lastSequence: 2, openAttentionIds: ["a1"], attention: [{ id: "a1", kind: "question", summary: "Choose scope" }] };
+  latest = {
+    ...latest,
+    state: "attention",
+    lastSequence: 2,
+    openAttentionIds: ["a1"],
+    attention: [{ id: "a1", kind: "question", summary: "Choose scope" }],
+  };
   await Bun.sleep(550);
-  expect(widgets.at(-1)).toEqual(["Loop · attention · 0/1 verified", "Decision: Choose scope · answer here"]);
+  expect(widgets.at(-1)).toEqual([
+    "Loop · attention · 0/1 verified",
+    "Decision: Choose scope · answer here",
+  ]);
 
-  latest = { ...latest, state: "completed", lastSequence: 3, openAttentionIds: [], attention: [], tasks: [{ ...latest.tasks[0]!, state: "done" }] };
+  latest = {
+    ...latest,
+    state: "completed",
+    lastSequence: 3,
+    openAttentionIds: [],
+    attention: [],
+    tasks: [{ ...latest.tasks[0]!, state: "done" }],
+  };
   await Bun.sleep(550);
   expect(widgets.at(-1)).toBeUndefined();
   await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
@@ -772,14 +1511,37 @@ test("Pi widget names the active worker's selectable Herdr tab", async () => {
     lastSequence: 1,
     activeWorkers: [{ id: "worker-1", taskId: "impl" }],
   };
-  registerLoopExtension(host.api, fakeBackend({ async snapshot() { return active; } }), undefined, {
-    ...settings,
-    herdrVisible: true,
-  });
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async snapshot() {
+        return active;
+      },
+    }),
+    undefined,
+    {
+      ...settings,
+      herdrVisible: true,
+    },
+  );
   const piContext = {
     ...context(),
-    ui: { notify() {}, setStatus() {}, setWidget(_key: string, lines: string[] | undefined) { widgets.push(lines); } },
-    sessionManager: { getBranch: () => [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-x", workingDirectory: "/project" } }] },
+    ui: {
+      notify() {},
+      setStatus() {},
+      setWidget(_key: string, lines: string[] | undefined) {
+        widgets.push(lines);
+      },
+    },
+    sessionManager: {
+      getBranch: () => [
+        {
+          type: "custom",
+          customType: "loop-run-binding",
+          data: { runId: "run-x", workingDirectory: "/project" },
+        },
+      ],
+    },
   };
   await host.events.get("session_start")?.at(-1)?.({}, piContext);
   await Bun.sleep(20);
@@ -798,23 +1560,52 @@ test("inspecting or controlling another run leaves the bound Pi widget on its ru
     ui: {
       notify() {},
       setStatus() {},
-      setWidget(_key: string, lines: string[] | undefined) { widgets.push(lines); },
+      setWidget(_key: string, lines: string[] | undefined) {
+        widgets.push(lines);
+      },
     },
-    sessionManager: { getBranch: () => [{ type: "custom", customType: "loop-run-binding", data: { runId: "a", workingDirectory: "/project" } }] },
+    sessionManager: {
+      getBranch: () => [
+        {
+          type: "custom",
+          customType: "loop-run-binding",
+          data: { runId: "a", workingDirectory: "/project" },
+        },
+      ],
+    },
   };
-  registerLoopExtension(host.api, fakeBackend({
-    async snapshot(runId) { return { ...snapshot(runId), lastSequence: runId === "a" ? boundSequence : 100 }; },
-    async pause(runId) { return { ...snapshot(runId), state: "paused", lastSequence: 100 }; },
-  }), undefined, settings);
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async snapshot(runId) {
+        return { ...snapshot(runId), lastSequence: runId === "a" ? boundSequence : 100 };
+      },
+      async pause(runId) {
+        return { ...snapshot(runId), state: "paused", lastSequence: 100 };
+      },
+    }),
+    undefined,
+    settings,
+  );
 
   await host.events.get("session_start")?.at(-1)?.({}, piContext);
   await Bun.sleep(20);
   expect(widgets.at(-1)?.[0]).toContain("Loop · active");
 
   await host.commands.get("loop")!.handler("status b", piContext);
-  await host.tools.get("loop_control")!.execute("pause-b", { action: "pause", runId: "b" }, new AbortController().signal, undefined, piContext);
+  await host.tools
+    .get("loop_control")!
+    .execute(
+      "pause-b",
+      { action: "pause", runId: "b" },
+      new AbortController().signal,
+      undefined,
+      piContext,
+    );
   expect(widgets.at(-1)?.[0]).toContain("Loop · active");
-  const currentStatus = await host.tools.get("loop_status")!.execute("status-a", {}, new AbortController().signal, undefined, piContext);
+  const currentStatus = await host.tools
+    .get("loop_status")!
+    .execute("status-a", {}, new AbortController().signal, undefined, piContext);
   expect(currentStatus.details.runId).toBe("a");
 
   boundSequence = 2;
@@ -826,10 +1617,38 @@ test("inspecting or controlling another run leaves the bound Pi widget on its ru
 test("final message prioritizes a late failed task over earlier successful tasks", async () => {
   const host = fakePi();
   const messages: string[] = [];
-  host.api.sendMessage = message => { messages.push(message.content); };
-  const tasks = Array.from({ length: 6 }, (_, index) => ({ ...snapshot("run-x").tasks[0]!, id: `task-${index}`, state: index === 5 ? "failed" as const : "done" as const, lastFailure: index === 5 ? "focused check failed" : null }));
-  registerLoopExtension(host.api, fakeBackend({ async snapshot() { return { ...snapshot("run-x"), state: "failed", tasks, lastSequence: 9 }; } }), undefined, settings);
-  const piContext = { ...context(), ui: { notify() {}, setStatus() {} }, sessionManager: { getBranch: () => [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-x", workingDirectory: "/project" } }] } };
+  host.api.sendMessage = (message) => {
+    messages.push(message.content);
+  };
+  const tasks = Array.from({ length: 6 }, (_, index) => ({
+    ...snapshot("run-x").tasks[0]!,
+    id: `task-${index}`,
+    state: index === 5 ? ("failed" as const) : ("done" as const),
+    lastFailure: index === 5 ? "focused check failed" : null,
+  }));
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async snapshot() {
+        return { ...snapshot("run-x"), state: "failed", tasks, lastSequence: 9 };
+      },
+    }),
+    undefined,
+    settings,
+  );
+  const piContext = {
+    ...context(),
+    ui: { notify() {}, setStatus() {} },
+    sessionManager: {
+      getBranch: () => [
+        {
+          type: "custom",
+          customType: "loop-run-binding",
+          data: { runId: "run-x", workingDirectory: "/project" },
+        },
+      ],
+    },
+  };
   await host.events.get("session_start")?.at(-1)?.({}, piContext);
   await Bun.sleep(20);
   expect(messages[0]).toContain("task-5: failed");
@@ -841,15 +1660,45 @@ test("final message prioritizes a late failed task over earlier successful tasks
 test("a repaired task final message does not present an earlier failure as its result", async () => {
   const host = fakePi();
   const messages: string[] = [];
-  host.api.sendMessage = message => { if (message.customType === "loop-final") messages.push(message.content); };
+  host.api.sendMessage = (message) => {
+    if (message.customType === "loop-final") messages.push(message.content);
+  };
   const repaired = {
     ...snapshot("run-repaired"),
     state: "completed" as const,
-    tasks: [{ ...snapshot("run-repaired").tasks[0]!, state: "done" as const, lastFailure: "old typecheck exit 1", resultSummary: "Formatting verified" }],
+    tasks: [
+      {
+        ...snapshot("run-repaired").tasks[0]!,
+        state: "done" as const,
+        lastFailure: "old typecheck exit 1",
+        resultSummary: "Formatting verified",
+      },
+    ],
     lastSequence: 5,
   };
-  registerLoopExtension(host.api, fakeBackend({ async snapshot() { return repaired; } }), undefined, settings);
-  const piContext = { ...context(), ui: { notify() {}, setStatus() {} }, sessionManager: { getBranch: () => [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-repaired", workingDirectory: "/project" } }] } };
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async snapshot() {
+        return repaired;
+      },
+    }),
+    undefined,
+    settings,
+  );
+  const piContext = {
+    ...context(),
+    ui: { notify() {}, setStatus() {} },
+    sessionManager: {
+      getBranch: () => [
+        {
+          type: "custom",
+          customType: "loop-run-binding",
+          data: { runId: "run-repaired", workingDirectory: "/project" },
+        },
+      ],
+    },
+  };
 
   await host.events.get("session_start")?.at(-1)?.({}, piContext);
   await Bun.sleep(20);
@@ -862,26 +1711,117 @@ test("a repaired task final message does not present an earlier failure as its r
 test("Pi Lead surfaces a verifier FAIL even when executable checks marked the run completed", async () => {
   const host = fakePi();
   const messages: string[] = [];
-  host.api.sendMessage = message => { messages.push(message.content); };
+  host.api.sendMessage = (message) => {
+    messages.push(message.content);
+  };
   const failedReview = {
     ...snapshot("run-x"),
     state: "completed" as const,
     lastSequence: 9,
     tasks: [
-      { ...snapshot("run-x").tasks[0]!, id: "implementation", state: "done" as const, resultSummary: "Implemented" },
-      { ...snapshot("run-x").tasks[0]!, id: "verification", kind: "verification" as const, state: "done" as const, resultSummary: "- Verdict: FAIL — missing edge-case test" },
+      {
+        ...snapshot("run-x").tasks[0]!,
+        id: "implementation",
+        state: "done" as const,
+        resultSummary: "Implemented",
+      },
+      {
+        ...snapshot("run-x").tasks[0]!,
+        id: "verification",
+        kind: "verification" as const,
+        state: "done" as const,
+        resultSummary: "- Verdict: FAIL — missing edge-case test",
+      },
     ],
   };
-  registerLoopExtension(host.api, fakeBackend({ async snapshot() { return failedReview; } }), undefined, settings);
-  const piContext = { ...context(), ui: { notify() {}, setStatus() {} }, sessionManager: { getBranch: () => [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-x", workingDirectory: "/project" } }] } };
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async snapshot() {
+        return failedReview;
+      },
+    }),
+    undefined,
+    settings,
+  );
+  const piContext = {
+    ...context(),
+    ui: { notify() {}, setStatus() {} },
+    sessionManager: {
+      getBranch: () => [
+        {
+          type: "custom",
+          customType: "loop-run-binding",
+          data: { runId: "run-x", workingDirectory: "/project" },
+        },
+      ],
+    },
+  };
 
   await host.events.get("session_start")?.at(-1)?.({}, piContext);
   await Bun.sleep(20);
   expect(messages[0]).toContain("Review needed: verifier reported FAIL");
   expect(messages[0]?.split("\n").length).toBeLessThanOrEqual(8);
-  const status = await host.tools.get("loop_status")!.execute("status", {}, new AbortController().signal, undefined, piContext);
+  const status = await host.tools
+    .get("loop_status")!
+    .execute("status", {}, new AbortController().signal, undefined, piContext);
   expect(status.content[0]?.text).toContain("Review needed: verifier reported FAIL");
   expect(status.content[0]?.text.split("\n").length).toBeLessThanOrEqual(8);
+  await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
+});
+
+test("Pi final report names unverified goal criteria even if a snapshot says completed", async () => {
+  const host = fakePi();
+  const messages: Array<{ customType: string; content: string }> = [];
+  host.api.sendMessage = (message) => {
+    messages.push(message);
+  };
+  const inconsistent = {
+    ...snapshot("run-goal-gap"),
+    state: "completed" as const,
+    lastSequence: 9,
+    tasks: [{ ...snapshot("run-goal-gap").tasks[0]!, state: "done" as const }],
+    goalCriteria: [
+      {
+        id: "criterion-1",
+        description: "required behavior",
+        taskId: "impl",
+        checkIds: ["tests"],
+        state: "pending" as const,
+      },
+    ],
+  };
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async snapshot() {
+        return inconsistent;
+      },
+    }),
+    undefined,
+    settings,
+  );
+  const piContext = {
+    ...context(),
+    ui: { notify() {}, setStatus() {} },
+    sessionManager: {
+      getBranch: () => [
+        {
+          type: "custom",
+          customType: "loop-run-binding",
+          data: { runId: "run-goal-gap", workingDirectory: "/project" },
+        },
+      ],
+    },
+  };
+  await host.events.get("session_start")?.at(-1)?.({}, piContext);
+  await Bun.sleep(20);
+  expect(messages.find((item) => item.customType === "loop-final")?.content).toContain(
+    "Remaining criteria: criterion-1",
+  );
+  expect(messages.find((item) => item.customType === "loop-final-review")?.content).toContain(
+    "criterion-1 pending: required behavior",
+  );
   await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
 });
 
@@ -889,17 +1829,53 @@ test("observer resumes after attention and stops following the old session branc
   const host = fakePi();
   const messages: string[] = [];
   const widgets: Array<string[] | undefined> = [];
-  host.api.sendMessage = message => { messages.push(`${message.customType}:${message.content}`); };
+  host.api.sendMessage = (message) => {
+    messages.push(`${message.customType}:${message.content}`);
+  };
   let latest = { ...snapshot("run-x"), lastSequence: 1 };
-  let branch: Array<{ type: string; customType: string; data: unknown }> = [{ type: "custom", customType: "loop-run-binding", data: { runId: "run-x", workingDirectory: "/project" } }];
-  registerLoopExtension(host.api, fakeBackend({ async snapshot() { return latest; }, async runs() { return []; } }), undefined, settings);
-  const piContext = { ...context(), ui: { notify() {}, setStatus() {}, setWidget(_key: string, lines: string[] | undefined) { widgets.push(lines); } }, sessionManager: { getBranch: () => branch } };
+  let branch: Array<{ type: string; customType: string; data: unknown }> = [
+    {
+      type: "custom",
+      customType: "loop-run-binding",
+      data: { runId: "run-x", workingDirectory: "/project" },
+    },
+  ];
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async snapshot() {
+        return latest;
+      },
+      async runs() {
+        return [];
+      },
+    }),
+    undefined,
+    settings,
+  );
+  const piContext = {
+    ...context(),
+    ui: {
+      notify() {},
+      setStatus() {},
+      setWidget(_key: string, lines: string[] | undefined) {
+        widgets.push(lines);
+      },
+    },
+    sessionManager: { getBranch: () => branch },
+  };
   await host.events.get("session_start")?.at(-1)?.({}, piContext);
   await Bun.sleep(20);
   expect(widgets.at(-1)?.[0]).toContain("Loop · active");
-  latest = { ...latest, state: "attention", lastSequence: 2, openAttentionIds: ["a1"], attention: [{ id: "a1", kind: "question", summary: "Choose scope" }] };
+  latest = {
+    ...latest,
+    state: "attention",
+    lastSequence: 2,
+    openAttentionIds: ["a1"],
+    attention: [{ id: "a1", kind: "question", summary: "Choose scope" }],
+  };
   await Bun.sleep(550);
-  expect(messages.filter(value => value.startsWith("loop-attention:"))).toHaveLength(1);
+  expect(messages.filter((value) => value.startsWith("loop-attention:"))).toHaveLength(1);
   latest = { ...latest, state: "active", lastSequence: 3, openAttentionIds: [], attention: [] };
   await Bun.sleep(550);
   branch = [];
@@ -907,33 +1883,38 @@ test("observer resumes after attention and stops following the old session branc
   expect(widgets.at(-1)).toBeUndefined();
   latest = { ...latest, state: "completed", lastSequence: 4 };
   await Bun.sleep(550);
-  expect(messages.filter(value => value.startsWith("loop-final:"))).toHaveLength(0);
+  expect(messages.filter((value) => value.startsWith("loop-final:"))).toHaveLength(0);
   await host.events.get("session_shutdown")?.at(-1)?.({}, piContext);
 });
 
 test("loop_run reports observer interruption as still running", async () => {
   const host = fakePi();
   const notifications: string[] = [];
-  registerLoopExtension(host.api, fakeBackend({
-    async run(input) {
-      input.signal.throwIfAborted();
-      return {
-        status: "running",
-        tasks: input.tasks.length,
-        escalations: [],
-        providersByTask: {},
-        startedAt: {},
-        finishedAt: {},
-      };
-    },
-  }), undefined, settings);
+  registerLoopExtension(
+    host.api,
+    fakeBackend({
+      async run(input) {
+        input.signal.throwIfAborted();
+        return {
+          status: "running",
+          tasks: input.tasks.length,
+          escalations: [],
+          providersByTask: {},
+          startedAt: {},
+          finishedAt: {},
+        };
+      },
+    }),
+    undefined,
+    settings,
+  );
 
   const result = await host.tools.get("loop_run")!.execute(
     "tool-running",
     {
       intent: "Continue in the detached owner",
       runId: "run-detached",
-      tasksJson: JSON.stringify([task("impl", "implementation", [], ["src/**"])]),
+      tasksJson: planJson([task("impl", "implementation", [], ["src/**"])]),
     },
     new AbortController().signal,
     undefined,
@@ -947,12 +1928,15 @@ test("loop_run reports observer interruption as still running", async () => {
 test("aborted handoff does not report a confirmed owner", async () => {
   const directory = mkdtempSync(join(tmpdir(), "loop-observer-abort-"));
   const executable = join(directory, "fake-loop");
-  writeFileSync(executable, [
-    "#!/usr/bin/env bun",
-    "process.stdin.resume();",
-    "process.on('SIGTERM', () => process.exit(1));",
-    "setInterval(() => {}, 1000);",
-  ].join("\n"));
+  writeFileSync(
+    executable,
+    [
+      "#!/usr/bin/env bun",
+      "process.stdin.resume();",
+      "process.on('SIGTERM', () => process.exit(1));",
+      "setInterval(() => {}, 1000);",
+    ].join("\n"),
+  );
   chmodSync(executable, 0o755);
   const previous = process.env.LOOP_BIN;
   process.env.LOOP_BIN = executable;
@@ -976,18 +1960,30 @@ test("aborted handoff does not report a confirmed owner", async () => {
 test("confirmed handoff returns to Pi without waiting for owner completion", async () => {
   const directory = mkdtempSync(join(tmpdir(), "loop-observer-completed-"));
   const executable = join(directory, "fake-loop");
-  writeFileSync(executable, [
-    "#!/usr/bin/env bun",
-    "process.stdin.resume();",
-    "console.log(JSON.stringify({ runId: 'completed-run', state: 'active', ownerPid: 42 }));",
-  ].join("\n"));
+  writeFileSync(
+    executable,
+    [
+      "#!/usr/bin/env bun",
+      "process.stdin.resume();",
+      "console.log(JSON.stringify({ runId: 'completed-run', state: 'active', ownerPid: 42 }));",
+    ].join("\n"),
+  );
   chmodSync(executable, 0o755);
   const previous = process.env.LOOP_BIN;
   process.env.LOOP_BIN = executable;
   const controller = new AbortController();
   try {
-    const pending = runLoopPlan({ intent: "Complete", tasks: [task("impl", "implementation", [], ["src/**"])], runId: "completed-run", cwd: directory, signal: controller.signal });
-    const result = await Promise.race([pending, Bun.sleep(300).then(() => ({ status: "still-waiting" }))]);
+    const pending = runLoopPlan({
+      intent: "Complete",
+      tasks: [task("impl", "implementation", [], ["src/**"])],
+      runId: "completed-run",
+      cwd: directory,
+      signal: controller.signal,
+    });
+    const result = await Promise.race([
+      pending,
+      Bun.sleep(300).then(() => ({ status: "still-waiting" })),
+    ]);
     expect(result.status).toBe("running");
   } finally {
     controller.abort();
@@ -999,9 +1995,14 @@ test("confirmed handoff returns to Pi without waiting for owner completion", asy
 
 test("Pi extension does not hide output configuration errors behind defaults", () => {
   const previous = process.env.LOOP_CONFIG_DIR;
-  process.env.LOOP_CONFIG_DIR = join(mkdtempSync(join(tmpdir(), "loop-pi-config-error-")), "missing");
+  process.env.LOOP_CONFIG_DIR = join(
+    mkdtempSync(join(tmpdir(), "loop-pi-config-error-")),
+    "missing",
+  );
   try {
-    expect(() => registerLoopExtension(fakePi().api, fakeBackend())).toThrow(/missing configuration file/);
+    expect(() => registerLoopExtension(fakePi().api, fakeBackend())).toThrow(
+      /missing configuration file/,
+    );
   } finally {
     if (previous === undefined) delete process.env.LOOP_CONFIG_DIR;
     else process.env.LOOP_CONFIG_DIR = previous;
@@ -1021,19 +2022,44 @@ function task(
     dependencies,
     readScope: [],
     writeScope,
-    requirements: [],
-    completionChecks: [{
-      id: "tests",
-      command: "bun",
-      args: ["test"],
-      workingDirectory: null,
-      timeoutMs: 120_000,
-    }],
+    requirements: [id],
+    completionChecks: [
+      {
+        id: "tests",
+        command: "bun",
+        args: ["test"],
+        workingDirectory: null,
+        timeoutMs: 120_000,
+      },
+    ],
     preferredCompute: "fast",
     minimumCompute: "tiny",
     maximumCompute: "strong",
+    routing: {
+      risk: "low",
+      required: { coding: 1, reasoning: 1, tools: 1, vision: 0, long_context: 1 },
+    },
     maxAttempts: 3,
   };
+}
+
+function goalTaskJson(value: TaskSpecInput): string {
+  return JSON.stringify({ task: value, criteria: criteriaForFixture([value]) });
+}
+
+function planJson(tasks: TaskSpecInput[]): string {
+  return JSON.stringify({ tasks, criteria: criteriaForFixture(tasks) });
+}
+
+function criteriaForFixture(tasks: TaskSpecInput[]) {
+  return tasks.flatMap((task) =>
+    task.requirements.map((description, index) => ({
+      id: `${task.id}:${index + 1}`,
+      taskId: task.id,
+      description,
+      checkIds: task.completionChecks.map((check) => check.id),
+    })),
+  );
 }
 
 function fakePi() {
@@ -1117,6 +2143,7 @@ function emptySnapshot(runId: string): SnapshotOutput {
     intent: "Test intent",
     workingDirectory: "/project",
     guidance: [],
+    goalCriteria: [],
     lastSequence: 0,
   };
 }
@@ -1124,19 +2151,21 @@ function emptySnapshot(runId: string): SnapshotOutput {
 function snapshot(runId: string): SnapshotOutput {
   return {
     ...emptySnapshot(runId),
-    tasks: [{
-      id: "impl",
-      title: "Implement",
-      kind: "implementation",
-      state: "running",
-      attempt: 1,
-      preferredCompute: "fast",
-      dependencies: ["research"],
-      readScope: ["src/**"],
-      writeScope: ["src/impl.ts"],
-      blockedBy: [],
-      activities: ["Editing renderer"],
-    }],
+    tasks: [
+      {
+        id: "impl",
+        title: "Implement",
+        kind: "implementation",
+        state: "running",
+        attempt: 1,
+        preferredCompute: "fast",
+        dependencies: ["research"],
+        readScope: ["src/**"],
+        writeScope: ["src/impl.ts"],
+        blockedBy: [],
+        activities: ["Editing renderer"],
+      },
+    ],
   };
 }
 
@@ -1146,11 +2175,13 @@ function taskContext(taskId: string): TaskContextOutput {
     workingDirectory: "/project",
     task: task(taskId, "implementation", ["research"], ["src/impl.ts"]),
     attempt: 1,
-    dependencyResults: [{
-      taskId: "research",
-      title: "Research",
-      summary: "Found the generated contract",
-    }],
+    dependencyResults: [
+      {
+        taskId: "research",
+        title: "Research",
+        summary: "Found the generated contract",
+      },
+    ],
     previousChecks: [],
     guidance: [],
   };
@@ -1159,6 +2190,10 @@ function taskContext(taskId: string): TaskContextOutput {
 function context(notifications: string[] = []) {
   return {
     cwd: "/project",
-    ui: { notify(message: string) { notifications.push(message); } },
+    ui: {
+      notify(message: string) {
+        notifications.push(message);
+      },
+    },
   };
 }

@@ -12,13 +12,15 @@ export function openAgentInvocation(paneId: string): { command: string; args: st
   return { command: "herdr", args: ["pane", "run", "--pane", paneId, "loop"] };
 }
 
-async function main(spawn: SpawnLike = ((command, args) => {
-  const child = Bun.spawn([command, ...args], {
-    stdio: ["inherit", "inherit", "inherit"],
-    stdin: "inherit",
-  });
-  void child.exited;
-}) as SpawnLike): Promise<void> {
+async function main(
+  spawn: SpawnLike = ((command, args) => {
+    const child = Bun.spawn([command, ...args], {
+      stdio: ["inherit", "inherit", "inherit"],
+      stdin: "inherit",
+    });
+    void child.exited;
+  }) as SpawnLike,
+): Promise<void> {
   const paneId = process.env.HERDR_PANE_ID;
   if (!paneId) {
     console.error("Open Loop Agent must run inside a Herdr pane (HERDR_PANE_ID missing).");
@@ -28,7 +30,8 @@ async function main(spawn: SpawnLike = ((command, args) => {
   spawn(invocation.command, invocation.args);
 }
 
-const isDirectRun = process.argv[1] && import.meta.path === (await import("node:path")).resolve(process.argv[1]);
+const isDirectRun =
+  process.argv[1] && import.meta.path === (await import("node:path")).resolve(process.argv[1]);
 if (isDirectRun) {
   await main();
 }

@@ -10,7 +10,12 @@ import type { GuidanceMailboxOptions } from "./mailbox";
 import type { PersonaKindDefaults, PersonaRegistry } from "./persona";
 import type { CodeMapProvider } from "./code-map";
 import type { UsageLedger } from "./usage";
-import { Orchestrator, type CleanupRunReport, type CleanupRunRequest, type RunSummary } from "./coordinator";
+import {
+  Orchestrator,
+  type CleanupRunReport,
+  type CleanupRunRequest,
+  type RunSummary,
+} from "./coordinator";
 
 export type ObservedWorkerState = "running" | "completed" | "lost" | "unknown";
 
@@ -39,6 +44,8 @@ export interface LoopRuntimeOptions {
   codeMapInjection?: "off" | "scopes";
   /** G17 usage recorder for reported usage observations. */
   usageLedger?: UsageLedger;
+  /** Dispatch-scaling provider-selection bias; omitted = "cheapest" (configured default). */
+  computeSelection?: import("./compute-selection").ComputeSelection;
 }
 
 export interface StartRunInput {
@@ -73,6 +80,7 @@ export class LoopRuntime {
       codeMap: options.codeMap,
       codeMapInjection: options.codeMapInjection,
       usageLedger: options.usageLedger,
+      computeSelection: options.computeSelection,
     });
   }
 
@@ -151,12 +159,20 @@ export class LoopRuntime {
           sequence = Number(snapshot.lastSequence);
           listener(snapshot);
         }
-      } catch { /* The run may not exist until prepare commits. Retry on the next poll. */ }
-      finally { busy = false; }
+      } catch {
+        /* The run may not exist until prepare commits. Retry on the next poll. */
+      } finally {
+        busy = false;
+      }
     };
-    const timer = setInterval(() => { void poll(); }, 100);
+    const timer = setInterval(() => {
+      void poll();
+    }, 100);
     timer.unref();
     void poll();
-    return () => { stopped = true; clearInterval(timer); };
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
   }
 }

@@ -53,10 +53,7 @@ export interface RenderOptions {
  * Pure renderer: transforms raw ProviderEvents into human-readable lines
  * according to the provider family (codex JSONL, agy text deltas, pi, generic).
  */
-export function renderProviderEvent(
-  event: ProviderEvent,
-  options: RenderOptions = {},
-): string[] {
+export function renderProviderEvent(event: ProviderEvent, options: RenderOptions = {}): string[] {
   const lineTextLimit = options.lineTextLimit ?? 160;
   const family = options.family ?? "generic";
 
@@ -175,6 +172,8 @@ function renderGenericOutput(text: string): string[] {
 }
 
 function cleanLine(line: string, limit: number): string | null {
+  // ESC (\u001b) is exactly the control char being stripped: ANSI CSI sequences.
+  // oxlint-disable-next-line eslint/no-control-regex -- intentional control-char match
   const stripped = line.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "").trim();
   if (!stripped) return null;
   const redacted = redactProviderText(stripped);
@@ -359,7 +358,12 @@ export class PaneMirrorSink implements MirrorSink {
     record: { framed: boolean },
   ): Promise<void> {
     if (!this.#relay || !this.#host.runInPane) return;
-    const spec = this.#relay({ runId: info.runId, taskId: info.taskId, paneId: pane.paneId, tabId: pane.tabId });
+    const spec = this.#relay({
+      runId: info.runId,
+      taskId: info.taskId,
+      paneId: pane.paneId,
+      tabId: pane.tabId,
+    });
     if (!spec) return;
     try {
       await this.#host.runInPane(pane.paneId, spec.command, spec.args);
@@ -400,20 +404,17 @@ export class MirroringProvider implements AgentProvider {
   readonly #family: string;
   readonly #lineTextLimit: number;
 
-  constructor(
-    inner: AgentProvider,
-    sink: MirrorSinkInput,
-    options: RenderOptions = {},
-  ) {
+  constructor(inner: AgentProvider, sink: MirrorSinkInput, options: RenderOptions = {}) {
     this.#inner = inner;
     this.#sink = toMirrorSink(sink);
     this.#family = options.family ?? deriveFamily(inner.id);
     this.#lineTextLimit = options.lineTextLimit ?? 160;
-    if (inner.repair) this.repair = async (workerId, feedback) => {
-      const result = await inner.repair!(workerId, feedback);
-      this.#publishLines(workerId, [`[repair] ${result.summary}`]);
-      return result;
-    };
+    if (inner.repair)
+      this.repair = async (workerId, feedback) => {
+        const result = await inner.repair!(workerId, feedback);
+        this.#publishLines(workerId, [`[repair] ${result.summary}`]);
+        return result;
+      };
   }
 
   get id(): string {

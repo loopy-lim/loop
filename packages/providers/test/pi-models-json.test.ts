@@ -14,6 +14,13 @@ import {
   syncPiModelsJson,
 } from "../src";
 
+/** noUncheckedIndexedAccess 아래에서 필수 fixture 키를 명시적으로 좁힌다. */
+function must<T>(value: T | undefined): T {
+  if (value === undefined || value === null)
+    throw new Error("expected fixture value to be defined");
+  return value;
+}
+
 const repoRoot = resolve(import.meta.dir, "../../..");
 const modelsTomlPath = join(repoRoot, "config", "models.toml");
 
@@ -59,7 +66,10 @@ test("pi model patterns split into provider, id, and thinking suffix", () => {
     id: "glm-5.3-flashx",
   });
   // Bare id: the lead stanza resolves without a provider prefix.
-  expect(parsePiModelPattern("glm-5.3-flashx")).toEqual({ provider: undefined, id: "glm-5.3-flashx" });
+  expect(parsePiModelPattern("glm-5.3-flashx")).toEqual({
+    provider: undefined,
+    id: "glm-5.3-flashx",
+  });
   // Non-level suffixes stay part of the id (pi keeps them too).
   expect(parsePiModelPattern("zai/model:crunchy")).toEqual({
     provider: "zai",
@@ -74,7 +84,7 @@ test("pi catalog config derives flashx metadata deterministically from config/mo
   // Only ids missing from pi's built-in catalogs declare metadata; the
   // built-in glm-5.3-flash must not be re-provisioned.
   expect(Object.keys(catalog.models)).toEqual(["glm-5.3-flashx"]);
-  const flashx = catalog.models["glm-5.3-flashx"];
+  const flashx = must(catalog.models["glm-5.3-flashx"]);
   expect(flashx.name).toBe("GLM-5.3-FlashX");
   expect(flashx.reasoning).toBe(true);
   expect(flashx.contextWindow).toBe(1000000);
@@ -100,8 +110,8 @@ test("fragment registers exactly the provisioned id for the derived provider", (
     piCatalogSources(document),
   );
   expect(Object.keys(fragment.providers)).toEqual(["zai"]);
-  expect(fragment.providers.zai.models).toHaveLength(1);
-  const definition = fragment.providers.zai.models[0];
+  expect(must(fragment.providers.zai).models).toHaveLength(1);
+  const definition = must(must(fragment.providers.zai).models[0]);
   expect(definition.id).toBe("glm-5.3-flashx");
   expect(definition.contextWindow).toBe(1000000);
   expect(definition.reasoning).toBe(true);
@@ -137,7 +147,9 @@ provider = "pi"
 compute_class = "fast"
 `);
   expect(piCatalogSources(noMetadata)).toEqual([{ provider: "zai", id: "some-future-model" }]);
-  expect(buildModelsJsonFragment(piCatalogFromModelsToml(noMetadata), piCatalogSources(noMetadata))).toEqual({
+  expect(
+    buildModelsJsonFragment(piCatalogFromModelsToml(noMetadata), piCatalogSources(noMetadata)),
+  ).toEqual({
     providers: {},
   });
 
@@ -271,7 +283,7 @@ test("regression: provisioned patterns resolve exactly instead of pi's custom-mo
   );
   const mergedIds = [
     ...BUILT_IN_ZAI_IDS,
-    ...fragment.providers.zai.models.map((model) => model.id),
+    ...must(fragment.providers.zai).models.map((model) => model.id),
   ];
   const merged = zaiCatalog(mergedIds);
   expect(findExactCatalogMatch("glm-5.3-flashx", merged)).toEqual({
@@ -322,9 +334,9 @@ test("regression: provisioned patterns resolve exactly instead of pi's custom-mo
     "openai-codex": mergedCodex,
   };
   for (const source of piCatalogSources(document)) {
-    const catalog = mergedByProvider[source.provider];
+    const catalog = must(mergedByProvider[source.provider]);
     expect(catalog).toBeDefined();
-    expect(findExactCatalogMatch(`${source.provider}/${source.id}`, catalog)).toEqual({
+    expect(findExactCatalogMatch(`${source.provider}/${source.id}`, must(catalog))).toEqual({
       provider: source.provider,
       id: source.id,
     });

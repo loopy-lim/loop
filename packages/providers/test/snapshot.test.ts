@@ -12,6 +12,13 @@ import {
   type WorkspaceSnapshotRecord,
 } from "../src/snapshot";
 
+/** noUncheckedIndexedAccess 아래에서 테스트 배열의 첫/n번째 요소를 좁힌다. */
+function at<T>(items: readonly T[], index: number): T {
+  const item = items[index];
+  if (item === undefined) throw new Error(`expected item ${index} to be defined`);
+  return item;
+}
+
 const roots: string[] = [];
 
 afterEach(() => {
@@ -46,14 +53,20 @@ function makeRepo(root: string): string {
 }
 
 function gitOutput(workspace: string, args: string[]): string {
-  const result = spawnSync("git", args, { cwd: workspace, env: { ...process.env, ...GIT_IDENTITY } });
+  const result = spawnSync("git", args, {
+    cwd: workspace,
+    env: { ...process.env, ...GIT_IDENTITY },
+  });
   expect(result.status).toBe(0);
   return result.stdout.toString().trim();
 }
 
 test("workspace git snapshot creates a loop-owned commit without touching the working tree (G6)", async () => {
   const workspace = makeRepo(makeProject());
-  const store = new WorkspaceSnapshotStore({ projectRoot: join(workspace, ".."), env: GIT_IDENTITY });
+  const store = new WorkspaceSnapshotStore({
+    projectRoot: join(workspace, ".."),
+    env: GIT_IDENTITY,
+  });
 
   writeFileSync(join(workspace, "README.md"), "# changed\n");
   writeFileSync(join(workspace, "untracked.txt"), "new file\n");
@@ -75,7 +88,11 @@ test("workspace git snapshot creates a loop-owned commit without touching the wo
 
 test("snapshots are listed newest-last and pruned to the retention bound", async () => {
   const workspace = makeRepo(makeProject());
-  const store = new WorkspaceSnapshotStore({ projectRoot: join(workspace, ".."), keep: 2, env: GIT_IDENTITY });
+  const store = new WorkspaceSnapshotStore({
+    projectRoot: join(workspace, ".."),
+    keep: 2,
+    env: GIT_IDENTITY,
+  });
   expect(DEFAULT_SNAPSHOT_KEEP).toBe(3);
 
   const records: WorkspaceSnapshotRecord[] = [];
@@ -88,20 +105,27 @@ test("snapshots are listed newest-last and pruned to the retention bound", async
     `${SNAPSHOT_REF_PREFIX}run-1/0003`,
     `${SNAPSHOT_REF_PREFIX}run-1/0004`,
   ]);
-  expect(records[0].ref).toBe(`${SNAPSHOT_REF_PREFIX}run-1/0001`);
+  expect(at(records, 0).ref).toBe(`${SNAPSHOT_REF_PREFIX}run-1/0001`);
   // Pruning only ever removes loop refs; refs/heads stays intact.
-  expect(gitOutput(workspace, ["for-each-ref", "--format=%(refname)", "refs/heads"])).toContain("refs/heads/main");
+  expect(gitOutput(workspace, ["for-each-ref", "--format=%(refname)", "refs/heads"])).toContain(
+    "refs/heads/main",
+  );
 });
 
 test("restore refuses a dirty worktree and otherwise restores tracked content", async () => {
   const workspace = makeRepo(makeProject());
-  const store = new WorkspaceSnapshotStore({ projectRoot: join(workspace, ".."), env: GIT_IDENTITY });
+  const store = new WorkspaceSnapshotStore({
+    projectRoot: join(workspace, ".."),
+    env: GIT_IDENTITY,
+  });
   writeFileSync(join(workspace, "README.md"), "# snapshot state\n");
   const record = await store.create(workspace, { runId: "run-1" });
 
   // Dirty: the ADR's data-loss path is refused.
   writeFileSync(join(workspace, "README.md"), "# uncommitted work\n");
-  await expect(store.restore(workspace, record.ref)).rejects.toMatchObject({ refusal: "worktree_dirty" });
+  await expect(store.restore(workspace, record.ref)).rejects.toMatchObject({
+    refusal: "worktree_dirty",
+  });
 
   // Clean: restore brings snapshot content back; HEAD does not move.
   gitOutput(workspace, ["checkout", "--", "."]);
@@ -125,7 +149,9 @@ test("path and repo guards refuse unsafe targets with typed refusals", async () 
   // Not a git worktree.
   const plain = join(root, "plain");
   mkdirSync(plain);
-  await expect(store.create(plain, { runId: "run-1" })).rejects.toMatchObject({ refusal: "not_a_git_worktree" });
+  await expect(store.create(plain, { runId: "run-1" })).rejects.toMatchObject({
+    refusal: "not_a_git_worktree",
+  });
 
   await expect(store.list(plain, "run-1")).rejects.toMatchObject({ refusal: "not_a_git_worktree" });
 

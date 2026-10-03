@@ -58,7 +58,10 @@ test("derived prose covers the full legacy vocabulary (no id dropped or invented
   const description = taskSpecInputDescription(vocabulary);
 
   // Same pair set as the legacy mapping: nothing dropped, nothing invented.
-  const renderedPairs = (description.match(/Kind defaults: ([a-z]+→[a-z]+(?:, [a-z]+→[a-z]+)*)\./) ?? [])[1]?.split(", ") ?? [];
+  const renderedPairs =
+    (description.match(/Kind defaults: ([a-z]+→[a-z]+(?:, [a-z]+→[a-z]+)*)\./) ?? [])[1]?.split(
+      ", ",
+    ) ?? [];
   expect(renderedPairs).toHaveLength(LEGACY_KIND_DEFAULTS.length);
   expect([...renderedPairs].sort()).toEqual([...LEGACY_KIND_DEFAULTS].sort());
 });
@@ -69,12 +72,21 @@ test("taskSpecInputDescription reflects configured registry additions and kind-d
   // (module constants) would not track configuration — this is the regression
   // pin against reintroducing it.
   const configured = derivePersonaVocabulary(
-    { implementer: "IMPL", reviewer: "REV", debugger: "DBG", architect: "ARCH", designer: "DES", pirate: "YARR" },
+    {
+      implementer: "IMPL",
+      reviewer: "REV",
+      debugger: "DBG",
+      architect: "ARCH",
+      designer: "DES",
+      pirate: "YARR",
+    },
     { ...KIND_DEFAULT_PERSONAS, decision: "designer" },
   );
   const description = taskSpecInputDescription(configured);
 
-  expect(description).toContain("implementer | reviewer | debugger | designer | architect | pirate");
+  expect(description).toContain(
+    "implementer | reviewer | debugger | designer | architect | pirate",
+  );
   expect(description).toContain("decision→designer");
   expect(description).not.toContain("decision→architect");
   // Overridden kinds keep the floor for the rest.

@@ -26,10 +26,7 @@ interface ZaiApiProviderOptions {
   computeClasses: ComputeClass[];
 }
 
-type FetchLike = (
-  input: string | URL | Request,
-  init?: RequestInit,
-) => Promise<Response>;
+type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 interface Session {
   status: WorkerState;
@@ -127,30 +124,28 @@ export class ZaiApiProvider implements AgentProvider {
   }
 
   async #request(input: StartWorkerInput, signal: AbortSignal): Promise<WorkerResult> {
-    const path = this.#options.mode === "general"
-      ? (this.#options.generalPath ?? "/chat/completions")
-      : this.#options.codingPlanPath!;
-    const response = await this.#fetch(
-      `${this.#options.baseUrl.replace(/\/$/, "")}${path}`,
-      {
-        method: "POST",
-        signal,
-        headers: {
-          Authorization: `Bearer ${this.#options.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: this.#options.model,
-          messages: [
-            {
-              role: "user",
-              content: buildWorkerPrompt(input),
-            },
-          ],
-        }),
+    const path =
+      this.#options.mode === "general"
+        ? (this.#options.generalPath ?? "/chat/completions")
+        : this.#options.codingPlanPath!;
+    const response = await this.#fetch(`${this.#options.baseUrl.replace(/\/$/, "")}${path}`, {
+      method: "POST",
+      signal,
+      headers: {
+        Authorization: `Bearer ${this.#options.apiKey}`,
+        "Content-Type": "application/json",
       },
-    );
-    const payload = await response.json() as {
+      body: JSON.stringify({
+        model: this.#options.model,
+        messages: [
+          {
+            role: "user",
+            content: buildWorkerPrompt(input),
+          },
+        ],
+      }),
+    });
+    const payload = (await response.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
       error?: { message?: string };
       usage?: {
@@ -166,11 +161,12 @@ export class ZaiApiProvider implements AgentProvider {
         success: false,
         summary: redact(payload.error?.message ?? `Z.AI HTTP ${response.status}`),
         failure: {
-          kind: response.status === 401 || response.status === 403
-            ? "authentication"
-            : response.status === 429
-              ? "quota"
-              : "process_error",
+          kind:
+            response.status === 401 || response.status === 403
+              ? "authentication"
+              : response.status === 429
+                ? "quota"
+                : "process_error",
           retryable: response.status === 429 || response.status >= 500,
         },
       };
@@ -192,13 +188,17 @@ function redact(value: string): string {
 }
 
 /** G17: only upstream-reported axes are set; figures are observed, never estimated. */
-function reportedUsage(usage: {
-  prompt_tokens?: number;
-  completion_tokens?: number;
-  total_tokens?: number;
-  prompt_tokens_details?: { cached_tokens?: number };
-  cost?: number;
-} | undefined): UsageMetadata | undefined {
+function reportedUsage(
+  usage:
+    | {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+        prompt_tokens_details?: { cached_tokens?: number };
+        cost?: number;
+      }
+    | undefined,
+): UsageMetadata | undefined {
   if (!usage) return undefined;
   const inputTokens = count(usage.prompt_tokens);
   const outputTokens = count(usage.completion_tokens);
@@ -209,7 +209,10 @@ function reportedUsage(usage: {
     outputTokens,
     cacheReadTokens,
     basis: "observed",
-    cost: typeof usage.cost === "number" && Number.isFinite(usage.cost) && usage.cost >= 0 ? usage.cost.toString() : null,
+    cost:
+      typeof usage.cost === "number" && Number.isFinite(usage.cost) && usage.cost >= 0
+        ? usage.cost.toString()
+        : null,
     currency: null,
   };
 }

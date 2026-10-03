@@ -10,3 +10,4 @@ export * from "./ui/worker";
 export * from "./ui/summary";
 export * from "./ui/models";
 export * from "./ui/snapshot";
+export * from "./ui/files-viewer";

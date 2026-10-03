@@ -2,12 +2,7 @@ import { expect, test } from "bun:test";
 import { HerdrWorkerRuntime, type HerdrRunner } from "@loop/herdr";
 import { classifyFailure } from "../src/process-provider";
 
-import {
-  FakeProvider,
-  HerdrAgentProvider,
-  MirroringProvider,
-  type StartWorkerInput,
-} from "../src";
+import { FakeProvider, HerdrAgentProvider, MirroringProvider, type StartWorkerInput } from "../src";
 
 /**
  * Live conversation tab contracts (docs/decisions/2026-09-24-herdr-live-conversation-tabs.md):
@@ -38,10 +33,12 @@ interface LaunchScript {
  * working → done → readable transcript. Agent verbs can be flipped to
  * already-gone errors per test.
  */
-function liveRunner(script: LaunchScript & {
-  agentStatuses?: string[];
-  agentGoneAfter?: number;
-}): HerdrRunner & { calls: string[][] } {
+function liveRunner(
+  script: LaunchScript & {
+    agentStatuses?: string[];
+    agentGoneAfter?: number;
+  },
+): HerdrRunner & { calls: string[][] } {
   const calls: string[][] = [];
   let polls = 0;
   return {
@@ -49,7 +46,9 @@ function liveRunner(script: LaunchScript & {
     async run(_command, args) {
       calls.push(args);
       if (args[0] === "workspace") {
-        return ok({ result: { workspace: { workspace_id: "w1" }, root_pane: { pane_id: "w1:p1" } } });
+        return ok({
+          result: { workspace: { workspace_id: "w1" }, root_pane: { pane_id: "w1:p1" } },
+        });
       }
       if (args[0] === "tab" && args[1] === "create") {
         return ok({ result: { tab: { tab_id: "w1:t2" }, root_pane: { pane_id: "w1:p2" } } });
@@ -67,7 +66,9 @@ function liveRunner(script: LaunchScript & {
           return err("agent_not_found", "agent record pruned");
         }
         const statuses = script.agentStatuses ?? ["working", "done"];
-        return ok({ result: { agent: { agent_status: statuses[Math.min(poll, statuses.length - 1)] } } });
+        return ok({
+          result: { agent: { agent_status: statuses[Math.min(poll, statuses.length - 1)] } },
+        });
       }
       if (args[0] === "agent" && args[1] === "read") {
         // A pruned agent record fails reads too — the pane is the remaining
@@ -111,7 +112,12 @@ test.each([
     "--",
     ...script.args,
   ]);
-  expect(runner.calls).toContainEqual(["agent", "prompt", "loop-run-1-task-1", expect.stringContaining("task")]);
+  expect(runner.calls).toContainEqual([
+    "agent",
+    "prompt",
+    "loop-run-1-task-1",
+    expect.stringContaining("task"),
+  ]);
 });
 
 test("steer delivers one agent prompt call into the live conversation", async () => {
@@ -172,7 +178,11 @@ test("completed worker tab closes when its resources are released", async () => 
 });
 
 test("interactive Pi quota exhaustion is a provider failure, not a completed worker", async () => {
-  const runner = liveRunner({ kind: "pi", args: [], agentStatuses: ["working", "idle", "working", "idle"] });
+  const runner = liveRunner({
+    kind: "pi",
+    args: [],
+    agentStatuses: ["working", "idle", "working", "idle"],
+  });
   let reads = 0;
   const provider = new HerdrAgentProvider({
     id: "pi:quota",
@@ -182,8 +192,18 @@ test("interactive Pi quota exhaustion is a provider failure, not a completed wor
           if (args[0] === "agent" && args[1] === "read") {
             reads += 1;
             return reads === 1
-              ? { exitCode: 0, stdout: 'Error: 429: rate limit reached\n── Retrying (1/3) in 2s...\n/project (main)\n0.6%/1.0M (auto)\n🎭 implementer', stderr: "" }
-              : { exitCode: 0, stdout: 'Error: 429: rate limit reached\nError: Retry failed after 3 attempts: 429: rate limit reached\n/project (main)\n0.6%/1.0M (auto)\n🎭 implementer', stderr: "" };
+              ? {
+                  exitCode: 0,
+                  stdout:
+                    "Error: 429: rate limit reached\n── Retrying (1/3) in 2s...\n/project (main)\n0.6%/1.0M (auto)\n🎭 implementer",
+                  stderr: "",
+                }
+              : {
+                  exitCode: 0,
+                  stdout:
+                    "Error: 429: rate limit reached\nError: Retry failed after 3 attempts: 429: rate limit reached\n/project (main)\n0.6%/1.0M (auto)\n🎭 implementer",
+                  stderr: "",
+                };
           }
           return runner.run(command, args);
         },
@@ -195,7 +215,10 @@ test("interactive Pi quota exhaustion is a provider failure, not a completed wor
     pollIntervalMs: 0,
   });
   const handle = await provider.start(input);
-  expect(await provider.result(handle.id)).toMatchObject({ success: false, failure: { kind: "quota", retryable: true } });
+  expect(await provider.result(handle.id)).toMatchObject({
+    success: false,
+    failure: { kind: "quota", retryable: true },
+  });
   expect(reads).toBe(2);
   await provider.release(handle.id);
   expect(runner.calls).toContainEqual(["tab", "close", "w1:t2"]);
@@ -277,7 +300,9 @@ test("a fully vanished worker is termination-confirmed, not lost", async () => {
     runner: {
       async run(_cmd, args) {
         if (args[0] === "workspace") {
-          return ok({ result: { workspace: { workspace_id: "w1" }, root_pane: { pane_id: "w1:p1" } } });
+          return ok({
+            result: { workspace: { workspace_id: "w1" }, root_pane: { pane_id: "w1:p1" } },
+          });
         }
         if (args[0] === "tab" && args[1] === "create") {
           return ok({ result: { tab: { tab_id: "w1:t2" }, root_pane: { pane_id: "w1:p2" } } });
@@ -288,7 +313,7 @@ test("a fully vanished worker is termination-confirmed, not lost", async () => {
         if (args[0] === "agent" && (args[1] === "get" || args[1] === "read")) {
           return err("agent_not_found", "agent record pruned");
         }
-        if ((args[0] === "pane" && (args[1] === "get" || args[1] === "read"))) {
+        if (args[0] === "pane" && (args[1] === "get" || args[1] === "read")) {
           return err("tab_not_found", "tab closed");
         }
         return ok({ result: {} });
@@ -321,7 +346,9 @@ test("a live agent that lost interactive readiness surfaces as a retryable loss"
     runner: {
       async run(_cmd, args) {
         if (args[0] === "workspace") {
-          return ok({ result: { workspace: { workspace_id: "w1" }, root_pane: { pane_id: "w1:p1" } } });
+          return ok({
+            result: { workspace: { workspace_id: "w1" }, root_pane: { pane_id: "w1:p1" } },
+          });
         }
         if (args[0] === "tab" && args[1] === "create") {
           return ok({ result: { tab: { tab_id: "w1:t2" }, root_pane: { pane_id: "w1:p2" } } });

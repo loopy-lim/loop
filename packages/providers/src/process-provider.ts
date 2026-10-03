@@ -117,9 +117,13 @@ export abstract class ProcessProvider implements AgentProvider {
   }
 }
 
-export function normalizeProcessResult(result: ProcessResult, contract?: WorkerOutputContract): WorkerResult {
+export function normalizeProcessResult(
+  result: ProcessResult,
+  contract?: WorkerOutputContract,
+): WorkerResult {
   const parsed = extractMachineResult(result.stdout);
-  const summary = parsed.summary || redact(result.stderr) || "worker exited without a final response";
+  const summary =
+    parsed.summary || redact(result.stderr) || "worker exited without a final response";
   if (result.exitCode === 0 && !parsed.summary) {
     return {
       success: false,
@@ -238,8 +242,13 @@ export function classifyFailure(value: string): ProviderFailureKind {
   const normalized = value.toLowerCase();
   if (/cancel(?:led|ed)|aborted|interrupt/.test(normalized)) return "cancelled";
   if (/timed?\s*out|deadline/.test(normalized)) return "timeout";
-  if (/quota|rate.?limit|too many requests|resource_exhausted|\b429\b/.test(normalized)) return "quota";
-  if (/unauthorized|authorization\s*[:=]|forbidden|authentication|not logged in|login required|invalid.?key/.test(normalized)) {
+  if (/quota|rate.?limit|too many requests|resource_exhausted|\b429\b/.test(normalized))
+    return "quota";
+  if (
+    /unauthorized|authorization\s*[:=]|forbidden|authentication|not logged in|login required|invalid.?key/.test(
+      normalized,
+    )
+  ) {
     return "authentication";
   }
   if (/command not found|enoent|not installed/.test(normalized)) return "unavailable";

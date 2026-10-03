@@ -1,4 +1,9 @@
-import type { LifecycleHookOutcome, LifecycleHookPhase, RustraEventPayloads, SandboxCapabilityDeclaration } from "@loop/protocol";
+import type {
+  LifecycleHookOutcome,
+  LifecycleHookPhase,
+  RustraEventPayloads,
+  SandboxCapabilityDeclaration,
+} from "@loop/protocol";
 
 /** Wire shape of one hook observation (G13): the `loop.lifecycle_hook` event payload. */
 export type LifecycleHookEvent = RustraEventPayloads["loop.lifecycle_hook"];
@@ -6,8 +11,16 @@ export type LifecycleHookEvent = RustraEventPayloads["loop.lifecycle_hook"];
 import { defaultToolMediationPolicy, mediateToolCall, type ToolMediationPolicy } from "./mediation";
 import { noSandboxDeclaration } from "./sandbox";
 import { redactProviderText } from "./redact";
-import { NodeProcessRunner, type ProcessResult, type ProcessRunner } from "./process";
-import type { AgentProvider, ProviderCapabilities, ProviderEvent, StartWorkerInput, WorkerHandle, WorkerResult, WorkerState } from "./types";
+import { NodeProcessRunner, type ProcessResult } from "./process";
+import type {
+  AgentProvider,
+  ProviderCapabilities,
+  ProviderEvent,
+  StartWorkerInput,
+  WorkerHandle,
+  WorkerResult,
+  WorkerState,
+} from "./types";
 
 /**
  * Adapter lifecycle-hook event seam (gap analysis G13 — lifecycle 훅,
@@ -42,11 +55,19 @@ export interface LifecycleHookContext {
 
 /** Execution seam for hook processes; injectable for deterministic tests. */
 export interface HookExecutor {
-  run(command: string, args: string[], options: { cwd?: string; timeoutMs: number }): Promise<ProcessResult>;
+  run(
+    command: string,
+    args: string[],
+    options: { cwd?: string; timeoutMs: number },
+  ): Promise<ProcessResult>;
 }
 
 export class ProcessHookExecutor implements HookExecutor {
-  async run(command: string, args: string[], options: { cwd?: string; timeoutMs: number }): Promise<ProcessResult> {
+  async run(
+    command: string,
+    args: string[],
+    options: { cwd?: string; timeoutMs: number },
+  ): Promise<ProcessResult> {
     const runner = new NodeProcessRunner({ runTimeoutMs: options.timeoutMs, cancelGraceMs: 500 });
     const running = runner.start(command, args, { cwd: options.cwd });
     const timedOut = await Promise.race([
@@ -55,7 +76,10 @@ export class ProcessHookExecutor implements HookExecutor {
     ]);
     const result = await running.result;
     if (timedOut || /timed out/i.test(result.stderr)) {
-      return { ...result, stderr: `${result.stderr}\nhook timed out after ${options.timeoutMs}ms`.trim() };
+      return {
+        ...result,
+        stderr: `${result.stderr}\nhook timed out after ${options.timeoutMs}ms`.trim(),
+      };
     }
     return result;
   }
@@ -95,15 +119,26 @@ export class LifecycleHookRunner {
   }
 
   /** Fires every hook registered for the phase. Never throws: hook failures are evidence only. */
-  async run(phase: LifecycleHookPhase, context: LifecycleHookContext = {}): Promise<LifecycleHookEvent[]> {
+  async run(
+    phase: LifecycleHookPhase,
+    context: LifecycleHookContext = {},
+  ): Promise<LifecycleHookEvent[]> {
     const definitions = this.#definitions.filter((definition) => definition.phase === phase);
-    const events = await Promise.all(definitions.map((definition) => this.#execute(definition, context)));
+    const events = await Promise.all(
+      definitions.map((definition) => this.#execute(definition, context)),
+    );
     return events;
   }
 
-  async #execute(definition: LifecycleHookDefinition, context: LifecycleHookContext): Promise<LifecycleHookEvent> {
+  async #execute(
+    definition: LifecycleHookDefinition,
+    context: LifecycleHookContext,
+  ): Promise<LifecycleHookEvent> {
     const occurredAt = this.#clock().toISOString();
-    const mediation = mediateToolCall(this.#mediation, { tool: "hook", command: shellLine(definition) });
+    const mediation = mediateToolCall(this.#mediation, {
+      tool: "hook",
+      command: shellLine(definition),
+    });
     if (mediation.effect === "deny") {
       return this.#record(definition, context, {
         outcome: "skipped",
@@ -125,15 +160,22 @@ export class LifecycleHookRunner {
       const skipped = /enoent/i.test(message);
       return this.#record(definition, context, {
         outcome: skipped ? "skipped" : "failed",
-        output: redactProviderText(skipped ? `hook not runnable: ${message}` : `hook error: ${message}`, HOOK_OUTPUT_LIMIT),
+        output: redactProviderText(
+          skipped ? `hook not runnable: ${message}` : `hook error: ${message}`,
+          HOOK_OUTPUT_LIMIT,
+        ),
         truncated: false,
         exitCode: null,
         occurredAt,
       });
     }
     const timedOut = /hook timed out/i.test(result.stderr);
-    const outcome: LifecycleHookOutcome = timedOut || result.exitCode !== 0 ? "failed" : "completed";
-    const output = redactProviderText([result.stdout, result.stderr].filter(Boolean).join("\n").trim(), HOOK_OUTPUT_LIMIT);
+    const outcome: LifecycleHookOutcome =
+      timedOut || result.exitCode !== 0 ? "failed" : "completed";
+    const output = redactProviderText(
+      [result.stdout, result.stderr].filter(Boolean).join("\n").trim(),
+      HOOK_OUTPUT_LIMIT,
+    );
     return this.#record(definition, context, {
       outcome,
       output,
@@ -194,7 +236,9 @@ export class HookedProvider implements AgentProvider {
 
   async start(input: StartWorkerInput): Promise<WorkerHandle> {
     const handle = await this.#inner.start(input);
-    void this.#hooks.run("workerStarted", { runId: input.runId, taskId: input.taskId }).catch(() => {});
+    void this.#hooks
+      .run("workerStarted", { runId: input.runId, taskId: input.taskId })
+      .catch(() => {});
     return handle;
   }
 

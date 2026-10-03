@@ -34,36 +34,75 @@ test("a passing command cannot complete when it changed the scoped source", asyn
   const result = await orchestrator.run({
     ...input,
     workingDirectory: directory,
-    tasks: [{
-      id: "edit", title: "edit", kind: "implementation", dependencies: [],
-      readScope: ["owned.ts"], writeScope: ["owned.ts"], requirements: ["edit"],
-      completionChecks: [{ id: "check", command: "true", args: [], workingDirectory: null, timeoutMs: 1000 }],
-      preferredCompute: "fast", minimumCompute: "fast", maximumCompute: "fast", maxAttempts: 1,
-    }],
+    tasks: [
+      {
+        id: "edit",
+        title: "edit",
+        kind: "implementation",
+        dependencies: [],
+        readScope: ["owned.ts"],
+        writeScope: ["owned.ts"],
+        requirements: ["edit"],
+        completionChecks: [
+          { id: "check", command: "true", args: [], workingDirectory: null, timeoutMs: 1000 },
+        ],
+        preferredCompute: "fast",
+        minimumCompute: "fast",
+        maximumCompute: "fast",
+        maxAttempts: 1,
+      },
+    ],
   });
   expect(result.status).toBe("attention");
   const task = (await protocol.getSnapshot(input)).tasks[0];
   expect(task?.state).not.toBe("done");
   const context = await protocol.getTaskContext({ ...input, taskId: "edit" });
   expect(context.previousChecks[0]?.exitCode).toBe(0);
-  expect(context.previousChecks[0]?.source?.beforeFingerprint).not.toBe(context.previousChecks[0]?.source?.afterFingerprint);
+  expect(context.previousChecks[0]?.source?.beforeFingerprint).not.toBe(
+    context.previousChecks[0]?.source?.afterFingerprint,
+  );
   expect(context.previousFailure).toContain("Source changed during completion checks");
 });
 
 test("large check output is reachable from the durable receipt after successful storage", async () => {
   const directory = mkdtempSync(join(tmpdir(), "loop-output-check-"));
   const input = { databasePath: join(directory, "run.db"), runId: "output-check" };
-  const verifier = new CompletionVerifier({ run: async () => ({
-    exitCode: 0, stdout: `${"useful log\n".repeat(80)}token=private-value`, stderr: "", timedOut: false,
-  }) });
-  const orchestrator = new Orchestrator({ control: protocol,
+  const verifier = new CompletionVerifier({
+    run: async () => ({
+      exitCode: 0,
+      stdout: `${"useful log\n".repeat(80)}token=private-value`,
+      stderr: "",
+      timedOut: false,
+    }),
+  });
+  const orchestrator = new Orchestrator({
+    control: protocol,
     providers: new ProviderRegistry([new FakeProvider("fake", ["fast"])]),
-    maxWorkers: 1, completionVerifier: verifier });
-  const result = await orchestrator.run({ ...input, workingDirectory: directory, tasks: [{
-    id: "research", title: "research", kind: "research", dependencies: [], readScope: [], writeScope: [],
-    requirements: ["inspect"], completionChecks: [{ id: "check", command: "true", args: [], workingDirectory: null, timeoutMs: 1000 }],
-    preferredCompute: "fast", minimumCompute: "fast", maximumCompute: "fast", maxAttempts: 1,
-  }] });
+    maxWorkers: 1,
+    completionVerifier: verifier,
+  });
+  const result = await orchestrator.run({
+    ...input,
+    workingDirectory: directory,
+    tasks: [
+      {
+        id: "research",
+        title: "research",
+        kind: "research",
+        dependencies: [],
+        readScope: [],
+        writeScope: [],
+        requirements: ["inspect"],
+        completionChecks: [
+          { id: "check", command: "true", args: [], workingDirectory: null, timeoutMs: 1000 },
+        ],
+        preferredCompute: "fast",
+        minimumCompute: "fast",
+        maximumCompute: "fast",
+        maxAttempts: 1,
+      },
+    ],
+  });
   expect(result.status).toBe("completed");
   const context = await protocol.getTaskContext({ ...input, taskId: "research" });
   const path = context.previousChecks[0]?.outputArtifact;

@@ -40,7 +40,7 @@ export class FakeProvider implements AgentProvider {
     options: FakeOptions = {},
   ) {
     this.#delayMs = options.delayMs ?? 0;
-    this.#failures = { ...(options.failures ?? {}) };
+    this.#failures = { ...options.failures };
     this.#alwaysFail = options.alwaysFail === true;
   }
 
@@ -57,7 +57,10 @@ export class FakeProvider implements AgentProvider {
 
   /** G4a: the fake executes nothing, so there is no isolation to declare. */
   sandboxDeclaration() {
-    return noSandboxDeclaration(this.id, "fake provider executes no worker process; nothing to isolate");
+    return noSandboxDeclaration(
+      this.id,
+      "fake provider executes no worker process; nothing to isolate",
+    );
   }
 
   async start(input: StartWorkerInput): Promise<WorkerHandle> {
@@ -79,9 +82,7 @@ export class FakeProvider implements AgentProvider {
       resolve({
         success: !failed,
         summary: failed ? "scripted failure" : `${input.taskId} complete`,
-        ...(failed
-          ? { failure: { kind: "process_error" as const, retryable: true } }
-          : {}),
+        ...(failed ? { failure: { kind: "process_error" as const, retryable: true } } : {}),
       });
     }, this.#delayMs);
     return { id, sessionId: id };
@@ -125,7 +126,10 @@ export class SlowProvider implements AgentProvider {
   readonly #sessions = new Map<string, Session>();
   cancelled = 0;
 
-  constructor(readonly id: string, readonly computeClasses: ComputeClass[]) {}
+  constructor(
+    readonly id: string,
+    readonly computeClasses: ComputeClass[],
+  ) {}
 
   async capabilities(): Promise<ProviderCapabilities> {
     return {

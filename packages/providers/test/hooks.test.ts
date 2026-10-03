@@ -9,11 +9,20 @@ import {
   type LifecycleHookDefinition,
 } from "../src/hooks";
 import { defaultToolMediationPolicy } from "../src/mediation";
+
+/** noUncheckedIndexedAccess 아래에서 테스트가 첫 요소를 읽을 때 범위를 명시한다. */
+function first<T>(items: readonly T[]): T {
+  const item = items[0];
+  if (item === undefined) throw new Error("expected at least one item");
+  return item;
+}
 import { FakeProvider } from "../src/fake";
 import type { ProcessResult } from "../src/process";
 import type { StartWorkerInput } from "../src/types";
 
-function fakeExecutor(handler: (command: string, args: string[]) => Partial<ProcessResult> | Promise<never>): HookExecutor {
+function fakeExecutor(
+  handler: (command: string, args: string[]) => Partial<ProcessResult> | Promise<never>,
+): HookExecutor {
   return {
     async run(command, args) {
       const result = await handler(command, args);
@@ -67,9 +76,9 @@ describe("lifecycle hook runner (G13)", () => {
       clock,
     });
     const events = await runner.run("turnEnded");
-    expect(events[0].outcome).toBe("failed");
-    expect(events[0].exitCode).toBe(2);
-    expect(events[0].output).toContain("policy violation");
+    expect(first(events).outcome).toBe("failed");
+    expect(first(events).exitCode).toBe(2);
+    expect(first(events).output).toContain("policy violation");
   });
 
   test("unrunnable hooks are skipped and timed-out hooks fail", async () => {
@@ -81,7 +90,11 @@ describe("lifecycle hook runner (G13)", () => {
       executor: {
         run(_command, _args, options) {
           if (_command === "slow-hook") {
-            return Promise.resolve({ exitCode: 1, stdout: "", stderr: `hook timed out after ${options.timeoutMs}ms` });
+            return Promise.resolve({
+              exitCode: 1,
+              stdout: "",
+              stderr: `hook timed out after ${options.timeoutMs}ms`,
+            });
           }
           throw new Error("spawn definite-mismatch ENOENT");
         },
@@ -105,9 +118,9 @@ describe("lifecycle hook runner (G13)", () => {
       clock,
     });
     const events = await runner.run("workerEnded");
-    expect(events[0].outcome).toBe("skipped");
-    expect(events[0].output).toContain("mediation denied");
-    expect(events[0].output).toContain("deny");
+    expect(first(events).outcome).toBe("skipped");
+    expect(first(events).output).toContain("mediation denied");
+    expect(first(events).output).toContain("deny");
   });
 
   test("hook output is truncated at the frame bound", async () => {
@@ -115,13 +128,13 @@ describe("lifecycle hook runner (G13)", () => {
       definitions: [{ hookId: "chatty", phase: "workerEnded", command: "chatty" }],
       executor: fakeExecutor(() => ({
         exitCode: 0,
-        stdout: "filler line\n".repeat((HOOK_OUTPUT_LIMIT / 11) + 40),
+        stdout: "filler line\n".repeat(HOOK_OUTPUT_LIMIT / 11 + 40),
       })),
       clock,
     });
     const events = await runner.run("workerEnded");
-    expect(events[0].truncated).toBe(true);
-    expect(events[0].output.length).toBeLessThanOrEqual(HOOK_OUTPUT_LIMIT);
+    expect(first(events).truncated).toBe(true);
+    expect(first(events).output.length).toBeLessThanOrEqual(HOOK_OUTPUT_LIMIT);
   });
 
   test("hook output is redacted before it is recorded", async () => {
@@ -131,8 +144,8 @@ describe("lifecycle hook runner (G13)", () => {
       clock,
     });
     const events = await runner.run("workerEnded");
-    expect(events[0].output).toContain("[redacted]");
-    expect(events[0].output).not.toContain("supersecret-value");
+    expect(first(events).output).toContain("[redacted]");
+    expect(first(events).output).not.toContain("supersecret-value");
   });
 
   test("emission seam notifies subscribers synchronously per event", async () => {
@@ -189,7 +202,9 @@ describe("HookedProvider worker-boundary emission (G13)", () => {
 describe("ProcessHookExecutor", () => {
   test("runs a real process through the process runner", async () => {
     const executor = new ProcessHookExecutor();
-    const result = await executor.run(process.execPath, ["-e", "console.log('hook ran')"], { timeoutMs: 5_000 });
+    const result = await executor.run(process.execPath, ["-e", "console.log('hook ran')"], {
+      timeoutMs: 5_000,
+    });
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("hook ran");
   });
@@ -201,7 +216,13 @@ test("hook definitions are matched by the fixed v1 phase vocabulary", async () =
     { hookId: "tool-end", phase: "toolCallEnded", command: "noop" },
     { hookId: "turn-start", phase: "turnStarted", command: "noop" },
   ];
-  const runner = new LifecycleHookRunner({ definitions, executor: fakeExecutor(() => ({ exitCode: 0 })), clock });
-  expect((await runner.run("toolCallStarted")).map((event) => event.hookId)).toEqual(["tool-start"]);
-  expect((await runner.run("turnEnded"))).toEqual([]);
+  const runner = new LifecycleHookRunner({
+    definitions,
+    executor: fakeExecutor(() => ({ exitCode: 0 })),
+    clock,
+  });
+  expect((await runner.run("toolCallStarted")).map((event) => event.hookId)).toEqual([
+    "tool-start",
+  ]);
+  expect(await runner.run("turnEnded")).toEqual([]);
 });

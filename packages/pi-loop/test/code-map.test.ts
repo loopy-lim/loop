@@ -8,7 +8,10 @@ import { codeMap } from "../src/lead/code-map";
 test("code map lists only bounded file and exported symbol names", () => {
   const root = mkdtempSync(join(tmpdir(), "loop-code-map-"));
   mkdirSync(join(root, "src"));
-  writeFileSync(join(root, "src", "worker.ts"), "export function runWorker() {}\nconst secret = 'value';\nexport class Worker {}\n");
+  writeFileSync(
+    join(root, "src", "worker.ts"),
+    "export function runWorker() {}\nconst secret = 'value';\nexport class Worker {}\n",
+  );
   const result = codeMap(root, "src", 5);
   expect(result).toContain("src/worker.ts");
   expect(result).toContain("runWorker");

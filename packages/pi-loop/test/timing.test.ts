@@ -10,13 +10,21 @@ test("measures one request through confirmed handoff and final display", () => {
   timing.beginSubmission("run-a");
   now = 7_200;
   const handoff = timing.confirmHandoff("run-a");
-  expect(handoff).toMatchObject({ runId: "run-a", requestToHandoffMs: 7_200, submissionToHandoffMs: 200 });
+  expect(handoff).toMatchObject({
+    runId: "run-a",
+    requestToHandoffMs: 7_200,
+    submissionToHandoffMs: 200,
+  });
   expect(timing.confirmHandoff("run-a")).toEqual(handoff);
   expect(formatHandoffTiming(handoff)).toBe("요청→인계 7.2초");
 
   now = 20_000;
   const final = timing.finishDisplay("run-a");
-  expect(final).toMatchObject({ runId: "run-a", requestToResultMs: 20_000, handoffToResultMs: 12_800 });
+  expect(final).toMatchObject({
+    runId: "run-a",
+    requestToResultMs: 20_000,
+    handoffToResultMs: 12_800,
+  });
   expect(formatFinalTiming(final)).toBe("요청→결과 20.0초");
   expect(timing.finishDisplay("run-a")).toBeUndefined();
 });

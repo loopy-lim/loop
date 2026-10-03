@@ -1,4 +1,8 @@
-import type { RustraEventPayloads, SandboxCapabilityDeclaration, UsageMetadata } from "@loop/protocol";
+import type {
+  RustraEventPayloads,
+  SandboxCapabilityDeclaration,
+  UsageMetadata,
+} from "@loop/protocol";
 
 /** Wire shape of one usage observation (G17): the `loop.usage_recorded` event payload. */
 export type UsageRecordEvent = RustraEventPayloads["loop.usage_recorded"];
@@ -115,13 +119,18 @@ export function parseUsageMetadata(value: unknown): UsageMetadata | undefined {
   if (!record) return undefined;
   const usage: UsageMetadata = {
     inputTokens: readCount(record.input_tokens ?? record.prompt_tokens ?? record.inputTokens),
-    outputTokens: readCount(record.output_tokens ?? record.completion_tokens ?? record.outputTokens),
-    cacheReadTokens: readCount(record.cache_read_tokens ?? record.cache_read_input_tokens ?? record.cacheReadTokens),
+    outputTokens: readCount(
+      record.output_tokens ?? record.completion_tokens ?? record.outputTokens,
+    ),
+    cacheReadTokens: readCount(
+      record.cache_read_tokens ?? record.cache_read_input_tokens ?? record.cacheReadTokens,
+    ),
     basis: "observed",
     cost: readCost(record.cost ?? record.total_cost ?? record.total_cost_usd),
     currency: readCurrency(record.currency),
   };
-  const reported = usage.inputTokens !== null || usage.outputTokens !== null || usage.cacheReadTokens !== null;
+  const reported =
+    usage.inputTokens !== null || usage.outputTokens !== null || usage.cacheReadTokens !== null;
   return reported ? usage : undefined;
 }
 
@@ -143,8 +152,17 @@ function findUsageRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 function hasUsageKey(record: Record<string, unknown>): boolean {
-  return ["input_tokens", "prompt_tokens", "inputTokens", "output_tokens", "completion_tokens", "outputTokens", "cache_read_tokens", "cache_read_input_tokens", "cacheReadTokens"]
-    .some((key) => key in record);
+  return [
+    "input_tokens",
+    "prompt_tokens",
+    "inputTokens",
+    "output_tokens",
+    "completion_tokens",
+    "outputTokens",
+    "cache_read_tokens",
+    "cache_read_input_tokens",
+    "cacheReadTokens",
+  ].some((key) => key in record);
 }
 
 function readCount(value: unknown): number | null {

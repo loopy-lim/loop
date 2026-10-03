@@ -79,7 +79,11 @@ test("rejects completion working directories outside the project", async () => {
 test("cancellation stops verification and preserves redacted evidence", async () => {
   const root = mkdtempSync(join(tmpdir(), "loop-check-cancel-"));
   const stop = new AbortController();
-  const pending = new NodeCompletionRunner().run(process.execPath, ["--eval", "console.log('api_key=secret');setInterval(() => {}, 1000)"], { cwd: root, timeoutMs: 10000, signal: stop.signal });
+  const pending = new NodeCompletionRunner().run(
+    process.execPath,
+    ["--eval", "console.log('api_key=secret');setInterval(() => {}, 1000)"],
+    { cwd: root, timeoutMs: 10000, signal: stop.signal },
+  );
   setTimeout(() => stop.abort(), 80);
   const result = await pending;
   expect(result.exitCode).not.toBe(0);
@@ -89,12 +93,21 @@ test("cancellation stops verification and preserves redacted evidence", async ()
 
 test("completion checks do not inherit the Loop executable's private native bridge path", async () => {
   const root = mkdtempSync(join(tmpdir(), "loop-check-env-"));
-  const library = process.platform === "darwin" ? "libloop_bridge.dylib" : process.platform === "win32" ? "loop_bridge.dll" : "libloop_bridge.so";
+  const library =
+    process.platform === "darwin"
+      ? "libloop_bridge.dylib"
+      : process.platform === "win32"
+        ? "loop_bridge.dll"
+        : "libloop_bridge.so";
   const internal = join(dirname(process.execPath), library);
   const previous = process.env.RUSTRA_BUN_LIBRARY;
   try {
     process.env.RUSTRA_BUN_LIBRARY = internal;
-    const result = await new NodeCompletionRunner().run(process.execPath, ["--eval", "console.log(process.env.RUSTRA_BUN_LIBRARY ?? 'unset')"], { cwd: root, timeoutMs: 2_000 });
+    const result = await new NodeCompletionRunner().run(
+      process.execPath,
+      ["--eval", "console.log(process.env.RUSTRA_BUN_LIBRARY ?? 'unset')"],
+      { cwd: root, timeoutMs: 2_000 },
+    );
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("unset");
   } finally {
@@ -108,7 +121,11 @@ test("completion checks preserve a project-selected native bridge path", async (
   const previous = process.env.RUSTRA_BUN_LIBRARY;
   try {
     process.env.RUSTRA_BUN_LIBRARY = "/project/target/debug/libloop_bridge.dylib";
-    const result = await new NodeCompletionRunner().run(process.execPath, ["--eval", "console.log(process.env.RUSTRA_BUN_LIBRARY ?? 'unset')"], { cwd: root, timeoutMs: 2_000 });
+    const result = await new NodeCompletionRunner().run(
+      process.execPath,
+      ["--eval", "console.log(process.env.RUSTRA_BUN_LIBRARY ?? 'unset')"],
+      { cwd: root, timeoutMs: 2_000 },
+    );
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("/project/target/debug/libloop_bridge.dylib");
   } finally {

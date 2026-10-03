@@ -20,7 +20,9 @@ interface FakeRelay {
   failNext: boolean;
 }
 
-function fakeRelay(overrides: Partial<ConstructorParameters<typeof SteerRelaySession>[0]> = {}): FakeRelay {
+function fakeRelay(
+  overrides: Partial<ConstructorParameters<typeof SteerRelaySession>[0]> = {},
+): FakeRelay {
   const relay: FakeRelay = { deliveries: [], echoes: [], failNext: false } as unknown as FakeRelay;
   relay.session = new SteerRelaySession({
     runId: "run-1",
@@ -53,8 +55,14 @@ describe("parsePaneLine", () => {
 
   test("user-typed JSON that is not a display frame is steer input", () => {
     expect(parsePaneLine('{"a": 1}')).toEqual({ kind: "steer", text: '{"a": 1}' });
-    expect(parsePaneLine('{"loopDisplay": 1}')).toEqual({ kind: "steer", text: '{"loopDisplay": 1}' });
-    expect(parsePaneLine('{"loopDisplay":"x","extra":2}')).toEqual({ kind: "steer", text: '{"loopDisplay":"x","extra":2}' });
+    expect(parsePaneLine('{"loopDisplay": 1}')).toEqual({
+      kind: "steer",
+      text: '{"loopDisplay": 1}',
+    });
+    expect(parsePaneLine('{"loopDisplay":"x","extra":2}')).toEqual({
+      kind: "steer",
+      text: '{"loopDisplay":"x","extra":2}',
+    });
     expect(parsePaneLine("{not json}")).toEqual({ kind: "steer", text: "{not json}" });
   });
 });
@@ -93,7 +101,10 @@ describe("SteerRelaySession", () => {
     await relay.session.handleLine("   ");
     await relay.session.handleLine("second guidance");
 
-    expect(relay.deliveries.map((delivery) => delivery.message)).toEqual(["first guidance", "second guidance"]);
+    expect(relay.deliveries.map((delivery) => delivery.message)).toEqual([
+      "first guidance",
+      "second guidance",
+    ]);
     expect(relay.echoes).toHaveLength(2);
   });
 
@@ -112,7 +123,9 @@ describe("SteerRelaySession", () => {
     await relay.session.handleLine("first try api_key=abc123 fails");
     await relay.session.handleLine("second try works");
 
-    expect(relay.deliveries).toEqual([{ runId: "run-1", taskId: "t-1", message: "second try works" }]);
+    expect(relay.deliveries).toEqual([
+      { runId: "run-1", taskId: "t-1", message: "second try works" },
+    ]);
     expect(relay.echoes[0]).toContain("! steer not delivered:");
     expect(relay.echoes[0]).toContain("[credential]=[redacted]");
     expect(relay.echoes[0]).not.toContain("abc123");
@@ -145,7 +158,10 @@ describe("runSteerRelaySession", () => {
       redact: fakeRedact,
     });
 
-    expect(relay.deliveries.map((delivery) => delivery.message)).toEqual(["guidance one", "guidance two"]);
+    expect(relay.deliveries.map((delivery) => delivery.message)).toEqual([
+      "guidance one",
+      "guidance two",
+    ]);
     expect(relay.echoes).toEqual([
       "→ steer: guidance one",
       "[message] progress",

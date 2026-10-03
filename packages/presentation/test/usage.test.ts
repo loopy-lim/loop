@@ -53,9 +53,13 @@ test("worker lines carry task state and the latest activity (G18 요약 고도�
 
 test("worker lines clamp to the shared line-text budget", () => {
   const base = snapshot();
-  const output = renderSnapshot("workers", snapshot({
-    tasks: [{ ...base.tasks[0]!, activities: ["y".repeat(400)] }],
-  }), limits);
+  const output = renderSnapshot(
+    "workers",
+    snapshot({
+      tasks: [{ ...base.tasks[0]!, activities: ["y".repeat(400)] }],
+    }),
+    limits,
+  );
   const line = output.split("\n")[0]!;
   expect(line.length).toBeLessThanOrEqual(161); // singleLine clamps with an ellipsis
 });

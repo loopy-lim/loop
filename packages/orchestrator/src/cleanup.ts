@@ -89,10 +89,9 @@ export async function cleanupRun(
     }
   }
 
-  const requestedWorktrees = [...new Set([
-    ...(request.worktrees ?? []),
-    ...(request.worktree ? [request.worktree] : []),
-  ])];
+  const requestedWorktrees = [
+    ...new Set([...(request.worktrees ?? []), ...(request.worktree ? [request.worktree] : [])]),
+  ];
   const worktreePlans: WorktreePlan[] = [];
   if (requestedWorktrees.length > 0) {
     const projectRoot = request.projectRoot ?? process.cwd();
@@ -127,43 +126,73 @@ export async function cleanupRun(
     try {
       const result = await request.herdr.closeWorkspace(request.runId);
       if (!result.closed) {
-        return report(removedArtifacts, [{
-          artifact: surfaceId,
-          reason: result.reason ?? "surface teardown did not confirm closure",
-        }], reasons);
+        return report(
+          removedArtifacts,
+          [
+            {
+              artifact: surfaceId,
+              reason: result.reason ?? "surface teardown did not confirm closure",
+            },
+          ],
+          reasons,
+        );
       }
       removedArtifacts.push(surfaceId);
       if (result.reason) reasons[surfaceId] = result.reason;
     } catch (error) {
-      return report(removedArtifacts, [{
-        artifact: surfaceId,
-        reason: `failed to close surface: ${errorMessage(error)}`,
-      }], reasons);
+      return report(
+        removedArtifacts,
+        [
+          {
+            artifact: surfaceId,
+            reason: `failed to close surface: ${errorMessage(error)}`,
+          },
+        ],
+        reasons,
+      );
     }
   }
 
   for (const plan of worktreePlans) {
     const current = await inspectWorktree(control, plan.projectRoot, plan.requestedPath);
     if ("reason" in current) {
-      return report(removedArtifacts, [{
-        artifact: plan.requestedPath,
-        reason: `worktree changed after cleanup preflight: ${current.reason}`,
-      }], reasons);
+      return report(
+        removedArtifacts,
+        [
+          {
+            artifact: plan.requestedPath,
+            reason: `worktree changed after cleanup preflight: ${current.reason}`,
+          },
+        ],
+        reasons,
+      );
     }
     if (!sameWorktreePlan(plan, current)) {
-      return report(removedArtifacts, [{
-        artifact: plan.requestedPath,
-        reason: "worktree changed after cleanup preflight; removal refused",
-      }], reasons);
+      return report(
+        removedArtifacts,
+        [
+          {
+            artifact: plan.requestedPath,
+            reason: "worktree changed after cleanup preflight; removal refused",
+          },
+        ],
+        reasons,
+      );
     }
     try {
       await git(plan.projectRoot, ["worktree", "remove", "--", plan.canonicalPath]);
       removedArtifacts.push(plan.requestedPath);
     } catch (error) {
-      return report(removedArtifacts, [{
-        artifact: plan.requestedPath,
-        reason: `failed to remove Git worktree: ${errorMessage(error)}`,
-      }], reasons);
+      return report(
+        removedArtifacts,
+        [
+          {
+            artifact: plan.requestedPath,
+            reason: `failed to remove Git worktree: ${errorMessage(error)}`,
+          },
+        ],
+        reasons,
+      );
     }
   }
 
@@ -213,7 +242,9 @@ async function inspectWorktree(
 
   let registered: RegisteredWorktree[];
   try {
-    registered = parseWorktreeList((await git(canonicalRoot, ["worktree", "list", "--porcelain"])).stdout);
+    registered = parseWorktreeList(
+      (await git(canonicalRoot, ["worktree", "list", "--porcelain"])).stdout,
+    );
   } catch (error) {
     return { reason: `cannot inspect Git worktree registration: ${errorMessage(error)}` };
   }
@@ -245,7 +276,8 @@ async function inspectWorktree(
   let head: string;
   let mainHead: string;
   try {
-    status = (await git(canonicalWorktree, ["status", "--porcelain=v1", "--untracked-files=all"])).stdout;
+    status = (await git(canonicalWorktree, ["status", "--porcelain=v1", "--untracked-files=all"]))
+      .stdout;
     head = (await git(canonicalWorktree, ["rev-parse", "HEAD"])).stdout.trim();
     mainHead = (await git(canonicalRoot, ["rev-parse", "HEAD"])).stdout.trim();
   } catch (error) {
@@ -314,12 +346,12 @@ function parseWorktreeList(output: string): RegisteredWorktree[] {
 
 function sameWorktreePlan(left: WorktreePlan, right: WorktreePlan): boolean {
   return (
-    left.canonicalPath === right.canonicalPath
-    && left.projectRoot === right.projectRoot
-    && left.candidateHead === right.candidateHead
-    && left.mainHead === right.mainHead
-    && left.candidateRegistration === right.candidateRegistration
-    && left.mainRegistration === right.mainRegistration
+    left.canonicalPath === right.canonicalPath &&
+    left.projectRoot === right.projectRoot &&
+    left.candidateHead === right.candidateHead &&
+    left.mainHead === right.mainHead &&
+    left.candidateRegistration === right.candidateRegistration &&
+    left.mainRegistration === right.mainRegistration
   );
 }
 

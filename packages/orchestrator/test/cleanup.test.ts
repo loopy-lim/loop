@@ -1,21 +1,10 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdtempSync,
-  mkdirSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import {
-  HerdrWorkerRuntime,
-  type CloseWorkspaceResult,
-  type HerdrRunner,
-} from "@loop/herdr";
+import { HerdrWorkerRuntime, type CloseWorkspaceResult, type HerdrRunner } from "@loop/herdr";
 import * as protocol from "@loop/protocol";
 
 import { cleanupRun } from "../src/cleanup";

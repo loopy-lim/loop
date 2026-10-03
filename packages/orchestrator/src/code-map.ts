@@ -29,7 +29,8 @@ export const CODE_MAP_ENTRY_ID = "loop_code_map";
 export const CODE_MAP_CHAR_LIMIT = 1_200;
 const DEFAULT_FILE_LIMIT = 60;
 const MAX_FILE_BYTES = 256 * 1024;
-const declaration = /^\s*(?:export\s+(?:default\s+)?(?:async\s+)?(?:class|function|interface|type|const|enum)|pub(?:\([^)]*\))?\s+(?:async\s+)?(?:fn|struct|enum|trait|mod))\s+([A-Za-z_][A-Za-z0-9_]*)/;
+const declaration =
+  /^\s*(?:export\s+(?:default\s+)?(?:async\s+)?(?:class|function|interface|type|const|enum)|pub(?:\([^)]*\))?\s+(?:async\s+)?(?:fn|struct|enum|trait|mod))\s+([A-Za-z_][A-Za-z0-9_]*)/;
 
 export interface CodeMapRequest {
   task: TaskSpecInput;
@@ -52,7 +53,7 @@ export interface CodeMapOptions {
 export function scopeRoots(scopes: readonly string[]): string[] {
   const roots: string[] = [];
   for (const scope of scopes) {
-    const literal = scope.split("*")[0]!.replace(/\/+$/, "");
+    const literal = (scope.split("*")[0] ?? "").replace(/\/+$/, "");
     if (!literal || literal.endsWith("/") || literal.includes("..")) continue;
     if (!roots.includes(literal)) roots.push(literal);
   }
@@ -66,11 +67,18 @@ export function scopeRoots(scopes: readonly string[]): string[] {
  * scope root resolves or the file listing is unavailable — the map is
  * advisory and must never fail a dispatch.
  */
-export function buildScopeCodeMap(request: CodeMapRequest, options: CodeMapOptions = {}): string | undefined {
+export function buildScopeCodeMap(
+  request: CodeMapRequest,
+  options: CodeMapOptions = {},
+): string | undefined {
   const fileLimit = options.fileLimit ?? DEFAULT_FILE_LIMIT;
   const charLimit = options.charLimit ?? CODE_MAP_CHAR_LIMIT;
   let root: string;
-  try { root = realpathSync(request.workingDirectory); } catch { return undefined; }
+  try {
+    root = realpathSync(request.workingDirectory);
+  } catch {
+    return undefined;
+  }
   const roots = scopeRoots([...request.task.readScope, ...request.task.writeScope]);
   if (roots.length === 0) return undefined;
 
@@ -80,7 +88,11 @@ export function buildScopeCodeMap(request: CodeMapRequest, options: CodeMapOptio
     const candidate = resolve(root, scopeRoot);
     if (!candidate.startsWith(`${root}${sep}`)) continue;
     let target: string;
-    try { target = realpathSync(candidate); } catch { continue; }
+    try {
+      target = realpathSync(candidate);
+    } catch {
+      continue;
+    }
     if (!target.startsWith(`${root}${sep}`) || !statSync(target).isDirectory()) continue;
     const files = listFiles(target);
     for (const file of files) {
@@ -88,11 +100,16 @@ export function buildScopeCodeMap(request: CodeMapRequest, options: CodeMapOptio
       if (seen.has(file)) continue;
       seen.add(file);
       let canonical: string;
-      try { canonical = realpathSync(file); } catch { continue; }
+      try {
+        canonical = realpathSync(file);
+      } catch {
+        continue;
+      }
       if (!canonical.startsWith(`${root}${sep}`) || !statSync(canonical).isFile()) continue;
       if (statSync(canonical).size > MAX_FILE_BYTES) continue;
-      const symbols = readFileSync(canonical, "utf8").split(/\r?\n/)
-        .map(line => declaration.exec(line)?.[1])
+      const symbols = readFileSync(canonical, "utf8")
+        .split(/\r?\n/)
+        .map((line) => declaration.exec(line)?.[1])
         .filter((name): name is string => Boolean(name))
         .slice(0, 3);
       lines.push(`${relative(root, canonical)}${symbols.length ? ` · ${symbols.join(", ")}` : ""}`);
@@ -104,13 +121,32 @@ export function buildScopeCodeMap(request: CodeMapRequest, options: CodeMapOptio
 }
 
 function listFiles(directory: string): string[] {
-  const result = spawnSync("rg", ["--files", "--hidden", "-g", "!.git", "-g", "!node_modules", "-g", "!target", "-g", "!dist", "."], {
-    cwd: directory,
-    encoding: "utf8",
-    maxBuffer: 4 * 1024 * 1024,
-  });
+  const result = spawnSync(
+    "rg",
+    [
+      "--files",
+      "--hidden",
+      "-g",
+      "!.git",
+      "-g",
+      "!node_modules",
+      "-g",
+      "!target",
+      "-g",
+      "!dist",
+      ".",
+    ],
+    {
+      cwd: directory,
+      encoding: "utf8",
+      maxBuffer: 4 * 1024 * 1024,
+    },
+  );
   if (result.error || (result.status !== 0 && result.status !== 1)) return [];
-  return result.stdout.split(/\r?\n/).filter(Boolean).map(path => resolve(directory, path));
+  return result.stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((path) => resolve(directory, path));
 }
 
 /**
@@ -118,7 +154,10 @@ function listFiles(directory: string): string[] {
  * advisory dependency result. Returns the context unchanged when the map is
  * empty; the input object is never mutated.
  */
-export function withCodeMapEntry(context: TaskContextOutput, map: string | undefined): TaskContextOutput {
+export function withCodeMapEntry(
+  context: TaskContextOutput,
+  map: string | undefined,
+): TaskContextOutput {
   const summary = map?.trim();
   if (!summary) return context;
   return {
@@ -128,7 +167,8 @@ export function withCodeMapEntry(context: TaskContextOutput, map: string | undef
       {
         taskId: CODE_MAP_ENTRY_ID,
         title: "Repository code map (advisory)",
-        summary: summary.length > CODE_MAP_CHAR_LIMIT ? byteHead(summary, CODE_MAP_CHAR_LIMIT) : summary,
+        summary:
+          summary.length > CODE_MAP_CHAR_LIMIT ? byteHead(summary, CODE_MAP_CHAR_LIMIT) : summary,
       },
     ],
   };

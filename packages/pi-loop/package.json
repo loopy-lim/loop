@@ -5,6 +5,7 @@
   "type": "module",
   "exports": "./src/index.ts",
   "dependencies": {
+    "@earendil-works/pi-tui": "0.99.1",
     "@loop/herdr": "workspace:*",
     "@loop/orchestrator": "workspace:*",
     "@loop/presentation": "workspace:*",

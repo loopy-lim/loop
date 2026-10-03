@@ -19,7 +19,7 @@ const limits = {
   findingsLineLimit: 5,
   listLineLimit: 8,
   lineTextLimit: 160,
-  workerVisibility: "off" as "off",
+  workerVisibility: "off" as const,
   workerActivityLines: 5,
   workerPaneLimit: 4,
 };
@@ -46,7 +46,7 @@ test("loop_run forwards a per-task persona into the submitted plan", async () =>
     {
       intent: "Implement feature X",
       runId: "run-persona",
-      tasksJson: JSON.stringify([
+      tasksJson: planJson([
         task("decision", "decision", [], ["docs/adr.md"], "architect"),
         task("implementation", "implementation", ["decision"], ["src/**"]),
       ]),
@@ -58,8 +58,8 @@ test("loop_run forwards a per-task persona into the submitted plan", async () =>
 
   expect(submitted).toHaveLength(1);
   expect(submitted[0]).toHaveLength(2);
-  expect(submitted[0][0].persona).toBe("architect");
-  expect(submitted[0][1].persona).toBeNull();
+  expect(submitted[0]?.[0]?.persona).toBe("architect");
+  expect(submitted[0]?.[1]?.persona ?? null).toBeNull();
 });
 
 test("loop_run rejects unknown persona ids at submission and lists the valid ids", async () => {
@@ -78,9 +78,7 @@ test("loop_run rejects unknown persona ids at submission and lists the valid ids
     {
       intent: "Implement feature X",
       runId: "run-persona-invalid",
-      tasksJson: JSON.stringify([
-        task("implementation", "implementation", [], ["src/**"], "wizard"),
-      ]),
+      tasksJson: planJson([task("implementation", "implementation", [], ["src/**"], "wizard")]),
     },
     new AbortController().signal,
     undefined,
@@ -109,7 +107,7 @@ test("absent, blank, and unpadded persona values forward as null or the trimmed 
     {
       intent: "Implement feature X",
       runId: "run-persona-absent",
-      tasksJson: JSON.stringify([
+      tasksJson: planJson([
         task("research", "research", [], []),
         { ...task("review", "verification", ["research"], []), persona: "" },
         { ...task("impl", "implementation", ["research"], ["src/**"]), persona: "  " },
@@ -121,12 +119,7 @@ test("absent, blank, and unpadded persona values forward as null or the trimmed 
     context(),
   );
 
-  expect(submitted[0]?.map((value) => value.persona)).toEqual([
-    null,
-    null,
-    null,
-    "reviewer",
-  ]);
+  expect(submitted[0]?.map((value) => value.persona)).toEqual([null, null, null, "reviewer"]);
 });
 
 test("loop_run tool description documents the optional persona field and kind defaults", () => {
@@ -176,7 +169,7 @@ test("loop_run validation and prose reflect a configured persona vocabulary", as
     {
       intent: "Implement feature X",
       runId: "run-persona-vocabulary",
-      tasksJson: JSON.stringify([
+      tasksJson: planJson([
         task("decision", "decision", [], ["docs/adr.md"], "pirate"),
         task("implementation", "implementation", ["decision"], ["src/**"]),
       ]),
@@ -192,9 +185,7 @@ test("loop_run validation and prose reflect a configured persona vocabulary", as
     {
       intent: "Implement feature X",
       runId: "run-persona-vocabulary-invalid",
-      tasksJson: JSON.stringify([
-        task("implementation", "implementation", [], ["src/**"], "wizard"),
-      ]),
+      tasksJson: planJson([task("implementation", "implementation", [], ["src/**"], "wizard")]),
     },
     new AbortController().signal,
     undefined,
@@ -213,7 +204,9 @@ test("loop_run validation and prose reflect a configured persona vocabulary", as
   expect(tool.description).not.toContain("designer is explicit-request only");
 
   const tasksDescription = tool.parameters.properties.tasksJson.description as string;
-  expect(tasksDescription).toContain("implementer | reviewer | debugger | designer | architect | pirate");
+  expect(tasksDescription).toContain(
+    "implementer | reviewer | debugger | designer | architect | pirate",
+  );
   expect(tasksDescription).toContain("decision→designer");
 });
 
@@ -221,17 +214,20 @@ test("runLoopPlan serializes persona into the SubmitPlanInput stdin payload", as
   const directory = mkdtempSync(join(tmpdir(), "loop-persona-stdin-"));
   const executable = join(directory, "fake-loop");
   const stdinCapture = join(directory, "stdin.json");
-  writeFileSync(executable, [
-    "#!/usr/bin/env bun",
-    "import { writeFileSync } from 'node:fs';",
-    "let input = '';",
-    "process.stdin.setEncoding('utf8');",
-    "process.stdin.on('data', (chunk) => (input += chunk));",
-    "process.stdin.on('end', () => {",
-    "  writeFileSync(process.env.OUT, input);",
-    "  console.log(JSON.stringify({ runId: 'run-persona-stdin', state: 'active', ownerPid: 42 }));",
-    "});",
-  ].join("\n"));
+  writeFileSync(
+    executable,
+    [
+      "#!/usr/bin/env bun",
+      "import { writeFileSync } from 'node:fs';",
+      "let input = '';",
+      "process.stdin.setEncoding('utf8');",
+      "process.stdin.on('data', (chunk) => (input += chunk));",
+      "process.stdin.on('end', () => {",
+      "  writeFileSync(process.env.OUT, input);",
+      "  console.log(JSON.stringify({ runId: 'run-persona-stdin', state: 'active', ownerPid: 42 }));",
+      "});",
+    ].join("\n"),
+  );
   chmodSync(executable, 0o755);
   const previousBin = process.env.LOOP_BIN;
   const previousOut = process.env.OUT;
@@ -258,8 +254,8 @@ test("runLoopPlan serializes persona into the SubmitPlanInput stdin payload", as
     };
     expect(payload.intent).toBe("Implement feature X");
     expect(payload.runId).toBe("run-persona-stdin");
-    expect(payload.tasks[0].persona).toBe("architect");
-    expect(payload.tasks[1].persona).toBeNull();
+    expect(payload.tasks[0]?.persona).toBe("architect");
+    expect(payload.tasks[1]?.persona ?? null).toBeNull();
   } finally {
     if (previousBin === undefined) delete process.env.LOOP_BIN;
     else process.env.LOOP_BIN = previousBin;
@@ -283,20 +279,40 @@ function task(
     dependencies,
     readScope: [],
     writeScope,
-    requirements: [],
+    requirements: [id],
     ...(persona === undefined ? {} : { persona }),
-    completionChecks: [{
-      id: "tests",
-      command: "bun",
-      args: ["test"],
-      workingDirectory: null,
-      timeoutMs: 120_000,
-    }],
+    completionChecks: [
+      {
+        id: "tests",
+        command: "bun",
+        args: ["test"],
+        workingDirectory: null,
+        timeoutMs: 120_000,
+      },
+    ],
     preferredCompute: "fast",
     minimumCompute: "tiny",
     maximumCompute: "strong",
+    routing: {
+      risk: "low",
+      required: { coding: 1, reasoning: 1, tools: 1, vision: 0, long_context: 1 },
+    },
     maxAttempts: 3,
   };
+}
+
+function planJson(tasks: TaskSpecInput[]): string {
+  return JSON.stringify({
+    tasks,
+    criteria: tasks.flatMap((task) =>
+      task.requirements.map((description, index) => ({
+        id: `${task.id}:${index + 1}`,
+        taskId: task.id,
+        description,
+        checkIds: task.completionChecks.map((check) => check.id),
+      })),
+    ),
+  });
 }
 
 function fakePi() {

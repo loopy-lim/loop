@@ -24,37 +24,43 @@ function contextualInput(): StartWorkerInput {
         readScope: ["packages/providers/**"],
         writeScope: ["packages/providers/src/prompt.ts"],
         requirements: ["Keep adapters thin"],
-        completionChecks: [{
-          id: "providers",
-          command: "bun",
-          args: ["test", "packages/providers"],
-          workingDirectory: "/project",
-          timeoutMs: 5_000,
-        }],
+        completionChecks: [
+          {
+            id: "providers",
+            command: "bun",
+            args: ["test", "packages/providers"],
+            workingDirectory: "/project",
+            timeoutMs: 5_000,
+          },
+        ],
         preferredCompute: "strong",
         minimumCompute: "fast",
         maximumCompute: "frontier",
         maxAttempts: 3,
       },
       attempt: 2,
-      dependencyResults: [{
-        taskId: "research",
-        title: "Research provider seams",
-        summary: "Use one shared formatter",
-      }],
+      dependencyResults: [
+        {
+          taskId: "research",
+          title: "Research provider seams",
+          summary: "Use one shared formatter",
+        },
+      ],
       resultSummary: "Previous worker output",
       previousFailure: "token=previous-secret process stopped",
-      previousChecks: [{
-        id: "providers",
-        command: "bun",
-        args: ["test", "packages/providers", "--token=current-secret"],
-        workingDirectory: "/project",
-        exitCode: 1,
-        stdout: "API_KEY=stdout-secret rejected",
-        stderr: "authorization: Bearer stderr-secret",
-        timedOut: false,
-        durationMs: 42,
-      }],
+      previousChecks: [
+        {
+          id: "providers",
+          command: "bun",
+          args: ["test", "packages/providers", "--token=current-secret"],
+          workingDirectory: "/project",
+          exitCode: 1,
+          stdout: "API_KEY=stdout-secret rejected",
+          stderr: "authorization: Bearer stderr-secret",
+          timedOut: false,
+          durationMs: 42,
+        },
+      ],
       guidance: ["Preserve the public provider contract"],
     },
   };
@@ -120,9 +126,15 @@ Previous check receipts:
 
 test("large evidence cannot remove the worker's scope and completion contract", () => {
   const input = contextualInput();
-  input.context!.dependencyResults = Array.from({ length: 30 }, (_, index) => ({ taskId: `dependency-${index}`, title: "Context", summary: "x".repeat(1200) }));
+  input.context!.dependencyResults = Array.from({ length: 30 }, (_, index) => ({
+    taskId: `dependency-${index}`,
+    title: "Context",
+    summary: "x".repeat(6000),
+  }));
   input.context!.previousChecks = Array.from({ length: 30 }, (_, index) => ({
-    ...input.context!.previousChecks[0]!, id: `check-${index}`, stdout: "y".repeat(1200),
+    ...input.context!.previousChecks[0]!,
+    id: `check-${index}`,
+    stdout: "y".repeat(6000),
   }));
   const prompt = buildWorkerPrompt(input);
   expect(prompt.length).toBeLessThanOrEqual(16_000);
@@ -134,7 +146,10 @@ test("large evidence cannot remove the worker's scope and completion contract", 
 
 test("oversized required guidance fails before a worker receives an incomplete brief", () => {
   const input = contextualInput();
-  input.context!.guidance = Array.from({ length: 30 }, (_, index) => `guidance-${index}: ${"z".repeat(1200)}`);
+  input.context!.guidance = Array.from(
+    { length: 30 },
+    (_, index) => `guidance-${index}: ${"z".repeat(6000)}`,
+  );
   expect(() => buildWorkerPrompt(input)).toThrow(/essential contract (field )?exceeds/);
 });
 
@@ -155,15 +170,17 @@ test("a read-only verification prompt keeps guidance from expanding its write sc
 });
 
 test("buildWorkerPrompt keeps fallback inputs useful when durable context is unavailable", () => {
-  expect(buildWorkerPrompt({
-    runId: "run-1",
-    taskId: "task-1",
-    title: "Investigate failure",
-    kind: "research",
-    computeClass: "fast",
-    attempt: 0,
-    requirements: ["Return evidence"],
-  })).toBe(`Loop worker task
+  expect(
+    buildWorkerPrompt({
+      runId: "run-1",
+      taskId: "task-1",
+      title: "Investigate failure",
+      kind: "research",
+      computeClass: "fast",
+      attempt: 0,
+      requirements: ["Return evidence"],
+    }),
+  ).toBe(`Loop worker task
 
 title=Investigate failure
 kind=research
@@ -179,7 +196,11 @@ test("buildWorkerPrompt rejects oversized required context without exposing cred
   input.context!.guidance = [`--token also-secret ${"y".repeat(50_000)}`];
 
   let error = "";
-  try { buildWorkerPrompt(input); } catch (caught) { error = String(caught); }
+  try {
+    buildWorkerPrompt(input);
+  } catch (caught) {
+    error = String(caught);
+  }
   expect(error).toContain("essential contract field exceeds");
   expect(error).not.toContain("do-not-leak");
   expect(error).not.toContain("also-secret");

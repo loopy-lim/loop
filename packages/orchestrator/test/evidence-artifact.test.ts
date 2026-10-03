@@ -20,5 +20,7 @@ test("large check output is saved privately after redaction and only then gets a
 
 test("small output stays inline without creating an artifact", async () => {
   const root = mkdtempSync(join(tmpdir(), "loop-check-artifact-"));
-  expect(await storeCheckOutput(join(root, "run.db"), "run", "task", "check", "ok", "")).toBeUndefined();
+  expect(
+    await storeCheckOutput(join(root, "run.db"), "run", "task", "check", "ok", ""),
+  ).toBeUndefined();
 });

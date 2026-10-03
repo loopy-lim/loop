@@ -82,16 +82,22 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("renderProviderEvent", () => {
   test("codex JSONL items render as human lines", () => {
-    const lines = renderProviderEvent({
-      type: "output",
-      stream: "stdout",
-      text: [
-        JSON.stringify({ type: "thread.started", thread_id: "thread-1" }),
-        JSON.stringify({ type: "item.started", item: { type: "command_execution" } }),
-        JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "done" } }),
-        JSON.stringify({ type: "item.completed", item: { type: "command_execution", command: "bun test", exit_code: 0 } }),
-      ].join("\n"),
-    }, { family: "codex" });
+    const lines = renderProviderEvent(
+      {
+        type: "output",
+        stream: "stdout",
+        text: [
+          JSON.stringify({ type: "thread.started", thread_id: "thread-1" }),
+          JSON.stringify({ type: "item.started", item: { type: "command_execution" } }),
+          JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "done" } }),
+          JSON.stringify({
+            type: "item.completed",
+            item: { type: "command_execution", command: "bun test", exit_code: 0 },
+          }),
+        ].join("\n"),
+      },
+      { family: "codex" },
+    );
     expect(lines).toEqual([
       "[thread] started: thread-1",
       "[item] started: command_execution",
@@ -101,18 +107,30 @@ describe("renderProviderEvent", () => {
   });
 
   test("codex non-JSON lines pass through", () => {
-    const lines = renderProviderEvent({ type: "output", stream: "stdout", text: "plain progress" }, { family: "codex" });
+    const lines = renderProviderEvent(
+      { type: "output", stream: "stdout", text: "plain progress" },
+      { family: "codex" },
+    );
     expect(lines).toEqual(["plain progress"]);
   });
 
   test("agy deltas render as trimmed lines", () => {
-    const lines = renderProviderEvent({ type: "output", stream: "stdout", text: "  step one  \nstep two\n" }, { family: "antigravity" });
+    const lines = renderProviderEvent(
+      { type: "output", stream: "stdout", text: "  step one  \nstep two\n" },
+      { family: "antigravity" },
+    );
     expect(lines).toEqual(["step one", "step two"]);
   });
 
   test("pi output is suppressed: lifecycle + final only (D2)", () => {
-    const output = renderProviderEvent({ type: "output", stream: "stdout", text: "final text" }, { family: "pi" });
-    const lifecycle = renderProviderEvent({ type: "lifecycle", status: "running" }, { family: "pi" });
+    const output = renderProviderEvent(
+      { type: "output", stream: "stdout", text: "final text" },
+      { family: "pi" },
+    );
+    const lifecycle = renderProviderEvent(
+      { type: "lifecycle", status: "running" },
+      { family: "pi" },
+    );
     const final = renderProviderEvent({ type: "final", summary: "all done" }, { family: "pi" });
     expect(output).toEqual([]);
     expect(lifecycle).toEqual(["[lifecycle] running"]);
@@ -120,11 +138,14 @@ describe("renderProviderEvent", () => {
   });
 
   test("lines are ANSI-stripped, redacted, and clamped", () => {
-    const lines = renderProviderEvent({
-      type: "output",
-      stream: "stdout",
-      text: "\u001b[31mapi_key = super-secret-value\u001b[0m",
-    }, { lineTextLimit: 12 });
+    const lines = renderProviderEvent(
+      {
+        type: "output",
+        stream: "stdout",
+        text: "\u001b[31mapi_key = super-secret-value\u001b[0m",
+      },
+      { lineTextLimit: 12 },
+    );
     expect(lines).toEqual(["[credential…"]);
   });
 });
@@ -138,7 +159,14 @@ describe("MirroringProvider", () => {
 
     const seen: ProviderEvent[] = [];
     provider.subscribe(handle.id, (event) => seen.push(event));
-    const event: ProviderEvent = { type: "output", stream: "stdout", text: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "done" } }) };
+    const event: ProviderEvent = {
+      type: "output",
+      stream: "stdout",
+      text: JSON.stringify({
+        type: "item.completed",
+        item: { type: "agent_message", text: "done" },
+      }),
+    };
     inner.emit(event);
 
     expect(seen).toEqual([event]);
@@ -153,7 +181,15 @@ describe("MirroringProvider", () => {
     const handle = await provider.start(startInput());
     await sleep(0);
 
-    expect(sink.starts).toEqual([{ providerId: "codex:test", workerId: handle.id, runId: "run-1", taskId: "t-1", worktree: "/tmp/worktree" }]);
+    expect(sink.starts).toEqual([
+      {
+        providerId: "codex:test",
+        workerId: handle.id,
+        runId: "run-1",
+        taskId: "t-1",
+        worktree: "/tmp/worktree",
+      },
+    ]);
     expect(sink.lines[0]).toEqual({ workerId: handle.id, line: "[lifecycle] starting t-1" });
   });
 
@@ -187,7 +223,7 @@ describe("MirroringProvider", () => {
     expect(sink.finishes).toEqual([]);
     expect(await provider.repair?.(handle.id, "Fix the check")).toMatchObject({ success: true });
     await sleep(0);
-    expect(sink.lines.map(entry => entry.line)).toContain("[repair] fixed the check");
+    expect(sink.lines.map((entry) => entry.line)).toContain("[repair] fixed the check");
     expect(sink.finishes).toEqual([]);
 
     await provider.release(handle.id);
@@ -232,8 +268,6 @@ describe("MirroringProvider", () => {
 });
 
 describe("PaneMirrorSink", () => {
-  interface PaneCall { args: string[] }
-
   function fakeHost() {
     const created: Array<{ tabId: string; paneId: string; label: string; worktree: string }> = [];
     const callers: Array<HerdrCaller | undefined> = [];
@@ -252,10 +286,24 @@ describe("PaneMirrorSink", () => {
       setFailRunInPane(value: boolean) {
         failRunInPane = value;
       },
-      async createPane(runId: string, taskId: string, projectRoot: string, worktree: string, label: string, caller?: HerdrCaller) {
+      async createPane(
+        runId: string,
+        taskId: string,
+        projectRoot: string,
+        worktree: string,
+        label: string,
+        caller?: HerdrCaller,
+      ) {
         callers.push(caller);
-        const pane = { tabId: `tab-${created.length + 1}`, paneId: `pane-${created.length + 1}`, label, worktree };
-        void runId; void taskId; void projectRoot;
+        const pane = {
+          tabId: `tab-${created.length + 1}`,
+          paneId: `pane-${created.length + 1}`,
+          label,
+          worktree,
+        };
+        void runId;
+        void taskId;
+        void projectRoot;
         created.push(pane);
         return pane;
       },
@@ -289,7 +337,12 @@ describe("PaneMirrorSink", () => {
       environment: { HERDR_PANE_ID: "ws-lead:p-9" },
       intervalMs: 5,
     });
-    await sink.onWorkerStart({ providerId: "codex:x", workerId: "w1", runId: "run", taskId: "t-1" });
+    await sink.onWorkerStart({
+      providerId: "codex:x",
+      workerId: "w1",
+      runId: "run",
+      taskId: "t-1",
+    });
 
     expect(host.callers).toEqual([{ workspaceId: "ws-lead", paneId: "ws-lead:p-9" }]);
     expect(host.created).toHaveLength(1);
@@ -304,7 +357,12 @@ describe("PaneMirrorSink", () => {
       environment: { HERDR_WORKSPACE_ID: "ws-1" },
       intervalMs: 5,
     });
-    await sink.onWorkerStart({ providerId: "codex:x", workerId: "w1", runId: "run", taskId: "t-1" });
+    await sink.onWorkerStart({
+      providerId: "codex:x",
+      workerId: "w1",
+      runId: "run",
+      taskId: "t-1",
+    });
 
     expect(host.callers).toEqual([undefined]);
     expect(host.created).toHaveLength(1);
@@ -313,7 +371,12 @@ describe("PaneMirrorSink", () => {
   test("headless environments never create panes (fail-open)", async () => {
     const host = fakeHost();
     const sink = new PaneMirrorSink({ host, projectRoot: "/project", environment: {} });
-    await sink.onWorkerStart({ providerId: "codex:x", workerId: "w1", runId: "run", taskId: "t-1" });
+    await sink.onWorkerStart({
+      providerId: "codex:x",
+      workerId: "w1",
+      runId: "run",
+      taskId: "t-1",
+    });
     await sink.publish("w1", "[lifecycle] starting t-1");
     await sink.onWorkerFinish("w1");
     expect(host.created).toEqual([]);
@@ -323,9 +386,22 @@ describe("PaneMirrorSink", () => {
 
   test("pane is created on start, receives flushed lines, and closes on finish", async () => {
     const host = fakeHost();
-    const sink = new PaneMirrorSink({ host, projectRoot: "/project", environment: herdrEnv, intervalMs: 5 });
-    await sink.onWorkerStart({ providerId: "codex:x", workerId: "w1", runId: "run", taskId: "t-1", worktree: "/project/wt" });
-    expect(host.created).toEqual([{ tabId: "tab-1", paneId: "pane-1", label: "t-1", worktree: "/project/wt" }]);
+    const sink = new PaneMirrorSink({
+      host,
+      projectRoot: "/project",
+      environment: herdrEnv,
+      intervalMs: 5,
+    });
+    await sink.onWorkerStart({
+      providerId: "codex:x",
+      workerId: "w1",
+      runId: "run",
+      taskId: "t-1",
+      worktree: "/project/wt",
+    });
+    expect(host.created).toEqual([
+      { tabId: "tab-1", paneId: "pane-1", label: "t-1", worktree: "/project/wt" },
+    ]);
 
     await sink.publish("w1", "[message] hello");
     await sink.publish("w1", "[message] world");
@@ -341,9 +417,24 @@ describe("PaneMirrorSink", () => {
 
   test("workers beyond the pane limit fall back to watch-only (first-come-first-served)", async () => {
     const host = fakeHost();
-    const sink = new PaneMirrorSink({ host, projectRoot: "/project", environment: herdrEnv, paneLimit: 1 });
-    await sink.onWorkerStart({ providerId: "codex:x", workerId: "w1", runId: "run", taskId: "t-1" });
-    await sink.onWorkerStart({ providerId: "codex:x", workerId: "w2", runId: "run", taskId: "t-2" });
+    const sink = new PaneMirrorSink({
+      host,
+      projectRoot: "/project",
+      environment: herdrEnv,
+      paneLimit: 1,
+    });
+    await sink.onWorkerStart({
+      providerId: "codex:x",
+      workerId: "w1",
+      runId: "run",
+      taskId: "t-1",
+    });
+    await sink.onWorkerStart({
+      providerId: "codex:x",
+      workerId: "w2",
+      runId: "run",
+      taskId: "t-2",
+    });
     expect(host.created).toHaveLength(1);
 
     await sink.publish("w2", "[message] unseen");
@@ -354,9 +445,19 @@ describe("PaneMirrorSink", () => {
 
   test("excluded (interactive) providers never receive panes", async () => {
     const host = fakeHost();
-    const sink = new PaneMirrorSink({ host, projectRoot: "/project", environment: herdrEnv, excluded: new Set(["pi:tui"]) });
+    const sink = new PaneMirrorSink({
+      host,
+      projectRoot: "/project",
+      environment: herdrEnv,
+      excluded: new Set(["pi:tui"]),
+    });
     await sink.onWorkerStart({ providerId: "pi:tui", workerId: "w1", runId: "run", taskId: "t-1" });
-    await sink.onWorkerStart({ providerId: "codex:exec", workerId: "w2", runId: "run", taskId: "t-2" });
+    await sink.onWorkerStart({
+      providerId: "codex:exec",
+      workerId: "w2",
+      runId: "run",
+      taskId: "t-2",
+    });
     expect(host.created).toHaveLength(1);
     expect(host.created[0]?.label).toBe("t-2");
   });
@@ -366,15 +467,26 @@ describe("PaneMirrorSink", () => {
     const inner = fakeHost();
     const slowHost: PaneMirrorHost = {
       createPane: async (runId, taskId, projectRoot, worktree, label) => {
-        await new Promise<void>((resolve) => { releaseCreate = resolve; });
+        await new Promise<void>((resolve) => {
+          releaseCreate = resolve;
+        });
         return inner.createPane(runId, taskId, projectRoot, worktree, label);
       },
       closePane: inner.closePane.bind(inner),
       sendText: inner.sendText.bind(inner),
     };
     void releaseCreate;
-    const sink = new PaneMirrorSink({ host: slowHost, projectRoot: "/project", environment: herdrEnv });
-    const starting = sink.onWorkerStart({ providerId: "codex:x", workerId: "w1", runId: "run", taskId: "t-1" });
+    const sink = new PaneMirrorSink({
+      host: slowHost,
+      projectRoot: "/project",
+      environment: herdrEnv,
+    });
+    const starting = sink.onWorkerStart({
+      providerId: "codex:x",
+      workerId: "w1",
+      runId: "run",
+      taskId: "t-1",
+    });
     const finishing = sink.onWorkerFinish("w1");
     releaseCreate();
     await Promise.all([starting, finishing]);
@@ -396,7 +508,12 @@ describe("PaneMirrorSink", () => {
       },
     });
 
-    await sink.onWorkerStart({ providerId: "codex:x", workerId: "w1", runId: "run-9", taskId: "t-1" });
+    await sink.onWorkerStart({
+      providerId: "codex:x",
+      workerId: "w1",
+      runId: "run-9",
+      taskId: "t-1",
+    });
     expect(host.hosted).toEqual([
       { paneId: "pane-1", command: "loop", args: ["__steer-relay", "run-9", "t-1"] },
     ]);
@@ -409,7 +526,10 @@ describe("PaneMirrorSink", () => {
     const flushed = host.sent.map((entry) => entry.text).join("");
     expect(flushed).toContain(encodeDisplayFrame("[message] hello"));
     // Every framed line decodes back to the rendered mirror line.
-    const decoded = flushed.trim().split("\n").map((line) => parsePaneLine(line));
+    const decoded = flushed
+      .trim()
+      .split("\n")
+      .map((line) => parsePaneLine(line));
     expect(decoded).toContainEqual({ kind: "display", text: "[message] hello" });
   });
 
@@ -424,7 +544,12 @@ describe("PaneMirrorSink", () => {
       relay: () => ({ command: "loop", args: ["__steer-relay"] }),
     });
 
-    await sink.onWorkerStart({ providerId: "codex:x", workerId: "w1", runId: "run", taskId: "t-1" });
+    await sink.onWorkerStart({
+      providerId: "codex:x",
+      workerId: "w1",
+      runId: "run",
+      taskId: "t-1",
+    });
     await sink.publish("w1", "[message] plain");
     await sink.onWorkerFinish("w1");
 
@@ -443,7 +568,12 @@ describe("PaneMirrorSink", () => {
       relay: () => ({ command: "loop", args: ["__steer-relay", "run", "t-1"] }),
     });
 
-    await sink.onWorkerStart({ providerId: "codex:x", workerId: "w1", runId: "run", taskId: "t-1" });
+    await sink.onWorkerStart({
+      providerId: "codex:x",
+      workerId: "w1",
+      runId: "run",
+      taskId: "t-1",
+    });
     expect(host.relays).toEqual([{ paneId: "pane-1", exited: false }]);
 
     await sink.onWorkerFinish("w1");
@@ -452,8 +582,18 @@ describe("PaneMirrorSink", () => {
 
   test("without a relay builder the pane stays plain and nothing is hosted (v1 identical)", async () => {
     const host = fakeHost();
-    const sink = new PaneMirrorSink({ host, projectRoot: "/project", environment: herdrEnv, intervalMs: 5 });
-    await sink.onWorkerStart({ providerId: "codex:x", workerId: "w1", runId: "run", taskId: "t-1" });
+    const sink = new PaneMirrorSink({
+      host,
+      projectRoot: "/project",
+      environment: herdrEnv,
+      intervalMs: 5,
+    });
+    await sink.onWorkerStart({
+      providerId: "codex:x",
+      workerId: "w1",
+      runId: "run",
+      taskId: "t-1",
+    });
     await sink.publish("w1", "[message] plain");
     await sink.onWorkerFinish("w1");
 
@@ -471,7 +611,12 @@ describe("PaneMirrorSink", () => {
       environment: {},
       relay: () => ({ command: "loop", args: ["__steer-relay"] }),
     });
-    await sink.onWorkerStart({ providerId: "codex:x", workerId: "w1", runId: "run", taskId: "t-1" });
+    await sink.onWorkerStart({
+      providerId: "codex:x",
+      workerId: "w1",
+      runId: "run",
+      taskId: "t-1",
+    });
     await sink.publish("w1", "[lifecycle] starting t-1");
     await sink.onWorkerFinish("w1");
     expect(host.created).toEqual([]);
@@ -511,8 +656,18 @@ describe("HerdrWorkerRuntime pane surface", () => {
 
   test("createPane, sendText, and closePane drive the passive mirror tab lifecycle", async () => {
     const responses = new Map<string, string>([
-      ["workspace create --cwd /project --label loop-run-9 --no-focus", JSON.stringify({ result: { workspace: { workspace_id: "ws-9" }, root_pane: { pane_id: "ws-9:p-root" } } })],
-      ["tab create --workspace ws-9 --cwd /project/wt --label mirror·t-1 --no-focus", JSON.stringify({ result: { tab: { tab_id: "ws-9:t-1" }, root_pane: { pane_id: "ws-9:p-1" } } })],
+      [
+        "workspace create --cwd /project --label loop-run-9 --no-focus",
+        JSON.stringify({
+          result: { workspace: { workspace_id: "ws-9" }, root_pane: { pane_id: "ws-9:p-root" } },
+        }),
+      ],
+      [
+        "tab create --workspace ws-9 --cwd /project/wt --label mirror·t-1 --no-focus",
+        JSON.stringify({
+          result: { tab: { tab_id: "ws-9:t-1" }, root_pane: { pane_id: "ws-9:p-1" } },
+        }),
+      ],
       ["pane rename ws-9:p-1 mirror·t-1", "{}"],
       ["pane send-text ws-9:p-1 hello\n", "{}"],
       ["tab close ws-9:t-1", "{}"],
@@ -521,7 +676,12 @@ describe("HerdrWorkerRuntime pane surface", () => {
     const runtime = new HerdrWorkerRuntime({ runner });
 
     const pane = await runtime.createPane("run-9", "t-1", "/project", "/project/wt", "t-1");
-    expect(pane).toMatchObject({ workspaceId: "ws-9", tabId: "ws-9:t-1", paneId: "ws-9:p-1", taskId: "t-1" });
+    expect(pane).toMatchObject({
+      workspaceId: "ws-9",
+      tabId: "ws-9:t-1",
+      paneId: "ws-9:p-1",
+      taskId: "t-1",
+    });
 
     await runtime.sendText(pane.paneId, "hello\n");
     await runtime.closePane(pane.tabId);

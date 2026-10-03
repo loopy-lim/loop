@@ -249,8 +249,9 @@ function reportRun(db: Database, runId: string): RunReport {
   const { tasks, createdSeqs, firstStartSeq } = scanTasks(db, runId);
   const createdBeforeFirstWorkerStart =
     firstStartSeq === null ? createdSeqs.length : createdSeqs.filter((seq) => seq < firstStartSeq).length;
-  const creationSpreadEvents =
-    createdSeqs.length === 0 ? 0 : createdSeqs[createdSeqs.length - 1] - createdSeqs[0];
+  const firstSeq = createdSeqs[0];
+  const lastSeq = createdSeqs[createdSeqs.length - 1];
+  const creationSpreadEvents = firstSeq === undefined || lastSeq === undefined ? 0 : lastSeq - firstSeq;
   return {
     runId,
     summary,
@@ -375,7 +376,11 @@ function median(values: number[]): number | null {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1 ? sorted[middle] : Math.round((sorted[middle - 1] + sorted[middle]) / 2);
+  const upper = sorted[middle];
+  const lower = sorted[middle - 1];
+  if (upper === undefined) return null;
+  if (sorted.length % 2 === 1) return upper;
+  return lower === undefined ? null : Math.round((lower + upper) / 2);
 }
 
 function renderReport(report: RunReport): string {

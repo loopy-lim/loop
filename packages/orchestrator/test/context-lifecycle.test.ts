@@ -11,7 +11,9 @@ import {
 } from "../src/context-lifecycle";
 import { resolveContextPolicy } from "../src/config";
 
-function receipt(overrides: Partial<TaskContextOutput["previousChecks"][number]> = {}): TaskContextOutput["previousChecks"][number] {
+function receipt(
+  overrides: Partial<TaskContextOutput["previousChecks"][number]> = {},
+): TaskContextOutput["previousChecks"][number] {
   return {
     id: "check-1",
     command: "bun",
@@ -67,7 +69,12 @@ test("advisory measurement counts passed-check bodies and result summary only", 
 
 test("fold replaces passed-check bodies with bounded heads and keeps every preserved set verbatim", () => {
   const passed = receipt({ id: "big", stdout: "x".repeat(4_000) });
-  const failed = receipt({ id: "broken", exitCode: 1, stdout: "f".repeat(4_000), stderr: "e".repeat(4_000) });
+  const failed = receipt({
+    id: "broken",
+    exitCode: 1,
+    stdout: "f".repeat(4_000),
+    stderr: "e".repeat(4_000),
+  });
   const source = context({
     previousChecks: [passed, failed],
     resultSummary: "attempt zero: wrote the wrong module".repeat(50),
@@ -81,10 +88,10 @@ test("fold replaces passed-check bodies with bounded heads and keeps every prese
   expect(folded.task).toBe(source.task);
   expect(folded.guidance).toEqual(["preserve guidance"]);
   expect(folded.dependencyResults).toEqual(source.dependencyResults);
-  expect(folded.previousChecks.find(check => check.id === "broken")).toEqual(failed);
+  expect(folded.previousChecks.find((check) => check.id === "broken")).toEqual(failed);
 
   // Advisory bodies are folded to bounded heads.
-  const foldedPassed = folded.previousChecks.find(check => check.id === "big")!;
+  const foldedPassed = folded.previousChecks.find((check) => check.id === "big")!;
   expect(foldedPassed.stdout.length).toBeLessThanOrEqual(400);
   expect(foldedPassed.stdout).toBe("x".repeat(400));
   expect(folded.resultSummary!.length).toBeLessThanOrEqual(400);
@@ -103,17 +110,31 @@ test("fold replaces passed-check bodies with bounded heads and keeps every prese
 test("within-budget and disabled policies return the context unchanged", () => {
   const source = context({ resultSummary: "small", previousChecks: [receipt({ stdout: "tiny" })] });
   expect(summarizeTaskContext(source, DEFAULT_CONTEXT_LIFECYCLE_POLICY).fold).toBeUndefined();
-  expect(summarizeTaskContext(source, { advisoryByteBudget: 0, summaryEntryBytes: 400, summaryByteCap: 4_000 }).fold).toBeUndefined();
-  expect(summarizeTaskContext(source, { advisoryByteBudget: 0, summaryEntryBytes: 400, summaryByteCap: 4_000 }).context).toBe(source);
+  expect(
+    summarizeTaskContext(source, {
+      advisoryByteBudget: 0,
+      summaryEntryBytes: 400,
+      summaryByteCap: 4_000,
+    }).fold,
+  ).toBeUndefined();
+  expect(
+    summarizeTaskContext(source, {
+      advisoryByteBudget: 0,
+      summaryEntryBytes: 400,
+      summaryByteCap: 4_000,
+    }).context,
+  ).toBe(source);
 });
 
 test("oversized summary text is cut at the byte cap and flagged", () => {
   const receipts = Array.from({ length: 40 }, (_, index) =>
-    receipt({ id: `check-${index}`, stdout: `out ${index} `.padEnd(600, "y") }));
-  const { context: folded, fold } = summarizeTaskContext(
-    context({ previousChecks: receipts }),
-    { advisoryByteBudget: 500, summaryEntryBytes: 100, summaryByteCap: 2_000 },
+    receipt({ id: `check-${index}`, stdout: `out ${index} `.padEnd(600, "y") }),
   );
+  const { context: folded, fold } = summarizeTaskContext(context({ previousChecks: receipts }), {
+    advisoryByteBudget: 500,
+    summaryEntryBytes: 100,
+    summaryByteCap: 2_000,
+  });
   expect(fold).toBeDefined();
   expect(fold!.truncated).toBe(true);
   for (const receipt of folded.previousChecks) {

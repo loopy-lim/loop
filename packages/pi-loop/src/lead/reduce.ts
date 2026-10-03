@@ -11,12 +11,10 @@ export type CompactFinding =
   | { kind: "finding"; value: ReviewFinding }
   | { kind: "overflow"; omitted: number; text: string };
 
-export function compactFindings(
-  findings: ReviewFinding[],
-  limits: OutputLimits,
-): CompactFinding[] {
-  const sorted = [...findings]
-    .sort((left, right) => severityRank(left.severity) - severityRank(right.severity));
+export function compactFindings(findings: ReviewFinding[], limits: OutputLimits): CompactFinding[] {
+  const sorted = [...findings].sort(
+    (left, right) => severityRank(left.severity) - severityRank(right.severity),
+  );
   const compacted = compactItems(sorted, limits.findingsLineLimit);
   const visible = compacted.items.map((value) => ({ kind: "finding" as const, value }));
   if (compacted.omitted === 0) return visible;

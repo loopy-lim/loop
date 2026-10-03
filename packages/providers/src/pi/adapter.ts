@@ -58,7 +58,10 @@ export class PiProvider extends ProcessProvider {
 
   /** G4a: headless pi runs with the caller's authority; write scope is advisory. */
   sandboxDeclaration() {
-    return noSandboxDeclaration(this.id, "headless pi runs with the caller's authority; write scope is advisory only");
+    return noSandboxDeclaration(
+      this.id,
+      "headless pi runs with the caller's authority; write scope is advisory only",
+    );
   }
 
   protected launch(input: StartWorkerInput) {

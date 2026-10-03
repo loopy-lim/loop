@@ -1,5 +1,10 @@
 import { expect, test, afterEach } from "bun:test";
-import { HerdrWorkerRuntime, workerRunMarker, type HerdrRunner, type HerdrResult } from "@loop/herdr";
+import {
+  HerdrWorkerRuntime,
+  workerRunMarker,
+  type HerdrRunner,
+  type HerdrResult,
+} from "@loop/herdr";
 import { HerdrAgentProvider } from "../src/herdr-agent";
 
 function scriptedRunner(): HerdrRunner & { calls: string[][] } {
@@ -11,7 +16,12 @@ function scriptedRunner(): HerdrRunner & { calls: string[][] } {
       if (args[0] === "tab" && args[1] === "create") {
         return {
           exitCode: 0,
-          stdout: JSON.stringify({ result: { tab: { tab_id: "caller-ws:t-new" }, root_pane: { pane_id: "caller-ws:p-new" } } }),
+          stdout: JSON.stringify({
+            result: {
+              tab: { tab_id: "caller-ws:t-new" },
+              root_pane: { pane_id: "caller-ws:p-new" },
+            },
+          }),
           stderr: "",
         };
       }
@@ -56,7 +66,7 @@ afterEach(() => {
 test("pi worker routes to caller workspace instead of creating a headless one", async () => {
   process.env.HERDR_WORKSPACE_ID = "caller-ws";
   process.env.HERDR_PANE_ID = "caller-ws:p1";
-  
+
   const runner = scriptedRunner();
   const runtime = new HerdrWorkerRuntime({ runner });
   const provider = new HerdrAgentProvider({
@@ -82,12 +92,27 @@ test("pi worker routes to caller workspace instead of creating a headless one", 
   const label = `task-test·task·a0·${workerRunMarker("run-test")}`;
 
   expect(runner.calls.slice(0, 4)).toEqual([
-    ["tab", "create", "--workspace", "caller-ws", "--cwd", "/project", "--label", label, "--no-focus"],
+    [
+      "tab",
+      "create",
+      "--workspace",
+      "caller-ws",
+      "--cwd",
+      "/project",
+      "--label",
+      label,
+      "--no-focus",
+    ],
     ["pane", "rename", "caller-ws:p-new", label],
     ["agent", "start", "loop-run-test-task-test", "--kind", "pi", "--pane", "caller-ws:p-new"],
-    ["agent", "prompt", "loop-run-test-task-test", "Loop worker task\n\ntitle=Test Task\nkind=task\nattempt=0"]
+    [
+      "agent",
+      "prompt",
+      "loop-run-test-task-test",
+      "Loop worker task\n\ntitle=Test Task\nkind=task\nattempt=0",
+    ],
   ]);
-  
+
   await provider.release!(worker.id);
   expect(runner.calls.at(-1)).toEqual(["tab", "close", "caller-ws:t-new"]);
 });

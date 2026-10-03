@@ -4,7 +4,12 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { captureSourceState, changedSourcePaths, scopeContainsPath, scopedFingerprint } from "../src/source-state";
+import {
+  captureSourceState,
+  changedSourcePaths,
+  scopeContainsPath,
+  scopedFingerprint,
+} from "../src/source-state";
 
 function repository() {
   const root = mkdtempSync(join(tmpdir(), "loop-source-state-"));

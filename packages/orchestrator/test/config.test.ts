@@ -22,8 +22,11 @@ test("loads the repository configuration into typed runtime data", () => {
 
   expect(config.databasePath).toBe("/tmp/loop-config-test.sqlite");
   expect(config.scheduler.maxWorkers).toBe(6);
-  expect(config.scheduler.maxFrontierWorkers).toBe(1);
+  // Dispatch scaling: the frontier cap no longer serializes frontier-effective
+  // tasks behind one worker; it matches max_parallel.
+  expect(config.scheduler.maxFrontierWorkers).toBe(6);
   expect(config.routing.defaultComputeClass).toBe("balanced");
+  expect(config.routing.computeSelection).toBe("cheapest");
   expect(config.output).toEqual({
     statusLineLimit: 8,
     attentionLineLimit: 6,
@@ -113,9 +116,9 @@ test("resolves explicit, environment, XDG, then home configuration directories",
       homeDirectory: "/home/test",
     }),
   ).toBe("/xdg/loop");
-  expect(
-    resolveConfigDirectory({ environment: {}, homeDirectory: "/home/test" }),
-  ).toBe("/home/test/.config/loop");
+  expect(resolveConfigDirectory({ environment: {}, homeDirectory: "/home/test" })).toBe(
+    "/home/test/.config/loop",
+  );
 });
 
 test.each([
@@ -149,16 +152,18 @@ test("reports missing required configuration files with a stable error code", ()
 });
 
 test("preserves custom output limits", () => {
-  const directory = configurationDirectory(policy(2, 1, {
-    statusLineLimit: 9,
-    attentionLineLimit: 7,
-    findingsLineLimit: 4,
-    listLineLimit: 6,
-    lineTextLimit: 120,
-    workerVisibility: "panes",
-    workerActivityLines: 3,
-    workerPaneLimit: 2,
-  }));
+  const directory = configurationDirectory(
+    policy(2, 1, {
+      statusLineLimit: 9,
+      attentionLineLimit: 7,
+      findingsLineLimit: 4,
+      listLineLimit: 6,
+      lineTextLimit: 120,
+      workerVisibility: "panes",
+      workerActivityLines: 3,
+      workerPaneLimit: 2,
+    }),
+  );
 
   expect(loadLoopConfig({ configDirectory: directory }).output).toEqual({
     statusLineLimit: 9,
@@ -173,6 +178,17 @@ test("preserves custom output limits", () => {
   });
 });
 
+test("routing compute selection defaults to cheapest and accepts the strongest bias", () => {
+  const omitted = configurationDirectory(policy(2, 1));
+  expect(loadLoopConfig({ configDirectory: omitted }).routing.computeSelection).toBe("cheapest");
+  const strongest = configurationDirectory(
+    policy(2, 1, undefined, { computeSelection: "strongest" }),
+  );
+  expect(loadLoopConfig({ configDirectory: strongest }).routing.computeSelection).toBe("strongest");
+  const invalid = configurationDirectory(policy(2, 1, undefined, { computeSelection: "maximum" }));
+  expect(() => loadLoopConfig({ configDirectory: invalid })).toThrow(/compute_selection/);
+});
+
 test("worker visibility defaults to watch and clamps the activity budget to the stored cap", () => {
   const directory = configurationDirectory(policy(2, 1));
   const output = loadLoopConfig({ configDirectory: directory }).output;
@@ -181,21 +197,23 @@ test("worker visibility defaults to watch and clamps the activity budget to the 
   expect(output.workerActivityLines).toBe(5);
   expect(output.workerPaneLimit).toBe(4);
 
-  const overclamped = configurationDirectory(policy(2, 1, {
-    statusLineLimit: 8,
-    attentionLineLimit: 6,
-    findingsLineLimit: 5,
-    listLineLimit: 8,
-    lineTextLimit: 160,
-    workerVisibility: "watch",
-    workerActivityLines: 99,
-    workerPaneLimit: 4,
-  }));
+  const overclamped = configurationDirectory(
+    policy(2, 1, {
+      statusLineLimit: 8,
+      attentionLineLimit: 6,
+      findingsLineLimit: 5,
+      listLineLimit: 8,
+      lineTextLimit: 160,
+      workerVisibility: "watch",
+      workerActivityLines: 99,
+      workerPaneLimit: 4,
+    }),
+  );
   expect(loadLoopConfig({ configDirectory: overclamped }).output.workerActivityLines).toBe(8);
 });
 
- test.each([
-  ["worker_visibility", "\"both\""],
+test.each([
+  ["worker_visibility", '"both"'],
   ["worker_activity_lines", "0"],
   ["worker_pane_limit", "-3"],
 ])("rejects invalid worker visibility policy %s=%s", (field, value) => {
@@ -207,7 +225,9 @@ test("worker visibility defaults to watch and clamps the activity budget to the 
     "line_text_limit = 160",
     `${field} = ${value}`,
   ];
-  const directory = configurationDirectory(`${policy(2, 1).split("[output]")[0]}[output]\n${output.join("\n")}\n`);
+  const directory = configurationDirectory(
+    `${policy(2, 1).split("[output]")[0]}[output]\n${output.join("\n")}\n`,
+  );
 
   expect(() => loadLoopConfig({ configDirectory: directory })).toThrow();
 });
@@ -228,7 +248,9 @@ test.each([
     "line_text_limit = 160",
   ].filter((line) => !line.startsWith(`${field} =`));
   if (value !== undefined) output.push(`${field} = ${value}`);
-  const directory = configurationDirectory(`${policy(2, 1).split("[output]")[0]}[output]\n${output.join("\n")}\n`);
+  const directory = configurationDirectory(
+    `${policy(2, 1).split("[output]")[0]}[output]\n${output.join("\n")}\n`,
+  );
 
   expect(() => loadLoopConfig({ configDirectory: directory })).toThrow(/positive integer/);
 });
@@ -244,7 +266,10 @@ test("persona kind defaults stay at the compile-time floor without the optional 
 test("persona kind defaults merge per key over the compile-time floor", () => {
   const directory = configurationDirectory(policy(2, 1));
   mkdirSync(join(directory, "personas"), { recursive: true });
-  writeFileSync(join(directory, "personas", "defaults.toml"), '[kind_defaults]\ndecision = "designer"\n');
+  writeFileSync(
+    join(directory, "personas", "defaults.toml"),
+    '[kind_defaults]\ndecision = "designer"\n',
+  );
 
   expect(loadPersonaKindDefaults(directory)).toEqual({ decision: "designer" });
   expect(loadLoopConfig({ configDirectory: directory }).personaKindDefaults).toEqual({
@@ -264,7 +289,10 @@ test("a defaults.toml without a kind_defaults table yields no overrides", () => 
 test("rejects unknown task kinds in personas/defaults.toml with a stable error code", () => {
   const directory = configurationDirectory(policy(2, 1));
   mkdirSync(join(directory, "personas"), { recursive: true });
-  writeFileSync(join(directory, "personas", "defaults.toml"), '[kind_defaults]\nplanning = "architect"\n');
+  writeFileSync(
+    join(directory, "personas", "defaults.toml"),
+    '[kind_defaults]\nplanning = "architect"\n',
+  );
 
   try {
     loadLoopConfig({ configDirectory: directory });
@@ -322,6 +350,7 @@ function policy(
     listLineLimit: 8,
     lineTextLimit: 160,
   },
+  routing: { computeSelection?: string } = {},
 ): string {
   return `
 [scheduler]
@@ -333,6 +362,12 @@ default_compute_class = "fast"
 high_risk_floor = "strong"
 critical_risk_floor = "frontier"
 escalation = ["deterministic", "typed_decision", "tiny", "fast", "balanced", "strong", "frontier"]
+${
+  routing.computeSelection === undefined
+    ? ""
+    : `compute_selection = "${routing.computeSelection}"
+`
+}
 
 [output]
 status_line_limit = ${output.statusLineLimit}
@@ -340,10 +375,22 @@ attention_line_limit = ${output.attentionLineLimit}
 findings_line_limit = ${output.findingsLineLimit}
 list_line_limit = ${output.listLineLimit}
 line_text_limit = ${output.lineTextLimit}
-${output.workerVisibility === undefined ? "" : `worker_visibility = "${output.workerVisibility}"
-`}${output.workerActivityLines === undefined ? "" : `worker_activity_lines = ${output.workerActivityLines}
-`}${output.workerPaneLimit === undefined ? "" : `worker_pane_limit = ${output.workerPaneLimit}
-`}`;
+${
+  output.workerVisibility === undefined
+    ? ""
+    : `worker_visibility = "${output.workerVisibility}"
+`
+}${
+    output.workerActivityLines === undefined
+      ? ""
+      : `worker_activity_lines = ${output.workerActivityLines}
+`
+  }${
+    output.workerPaneLimit === undefined
+      ? ""
+      : `worker_pane_limit = ${output.workerPaneLimit}
+`
+  }`;
 }
 
 function configurationDirectory(policyText: string): string {

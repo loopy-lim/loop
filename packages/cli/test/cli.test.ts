@@ -59,16 +59,13 @@ test("status reads persisted Rust state and emits machine-readable JSON", async 
 test("doctor checks installed commands without invoking a model", async () => {
   const capture = output();
   const probed: Array<[string, string[]]> = [];
-  const exitCode = await runCli(
-    ["doctor", "--config", join(root, "config"), "--json"],
-    {
-      io: capture.io,
-      probe: async (command, args) => {
-        probed.push([command, args]);
-        return { exitCode: command === "pi" ? 1 : 0, output: `${command} test-version` };
-      },
+  const exitCode = await runCli(["doctor", "--config", join(root, "config"), "--json"], {
+    io: capture.io,
+    probe: async (command, args) => {
+      probed.push([command, args]);
+      return { exitCode: command === "pi" ? 1 : 0, output: `${command} test-version` };
     },
-  );
+  });
 
   expect(exitCode).toBe(1);
   const report = JSON.parse(capture.stdout()) as { checks: Array<{ name: string; ok: boolean }> };
@@ -93,27 +90,29 @@ test("loop run starts the interactive Loop agent in the current terminal", async
   );
 
   expect(exitCode).toBe(0);
-  expect(invocations).toEqual([{
-    command: "pi",
-    args: [
-      "--no-extensions",
-      "--extension",
-      "/opt/loop/loop-pi-extension.js",
-      "--provider",
-      "openai-codex",
-      "--model",
-      "gpt-6-sol",
-      "--",
-      "Implement feature X",
-    ],
-    cwd: process.cwd(),
-    configDirectory: join(root, "config"),
-  }]);
+  expect(invocations).toEqual([
+    {
+      command: "pi",
+      args: [
+        "--no-extensions",
+        "--extension",
+        "/opt/loop/loop-pi-extension.js",
+        "--provider",
+        "openai-codex",
+        "--model",
+        "gpt-6.1-sol",
+        "--",
+        "Implement feature X",
+      ],
+      cwd: process.cwd(),
+      configDirectory: join(root, "config"),
+    },
+  ]);
   expect(capture.stdout()).toBe("");
 });
 
 test("interactive Loop agent loads only its adjacent extension", async () => {
-  const cli = await import("../src/main") as typeof import("../src/main") & {
+  const cli = (await import("../src/main")) as typeof import("../src/main") & {
     buildInteractiveLeadInvocation?: (input: {
       command: string;
       provider: string;
@@ -125,15 +124,17 @@ test("interactive Loop agent loads only its adjacent extension", async () => {
     }) => { command: string; args: string[]; cwd: string };
   };
 
-  expect(cli.buildInteractiveLeadInvocation?.({
-    command: "pi",
-    provider: "zai",
-    model: "glm-5.3-flashx",
-    intent: "",
-    cwd: "/project",
-    executablePath: "/usr/local/bin/loop",
-    environment: { LOOP_PI_EXTENSION: "/tmp/override.js" },
-  })).toEqual({
+  expect(
+    cli.buildInteractiveLeadInvocation?.({
+      command: "pi",
+      provider: "zai",
+      model: "glm-5.3-flashx",
+      intent: "",
+      cwd: "/project",
+      executablePath: "/usr/local/bin/loop",
+      environment: { LOOP_PI_EXTENSION: "/tmp/override.js" },
+    }),
+  ).toEqual({
     command: "pi",
     args: [
       "--no-extensions",
@@ -152,33 +153,32 @@ test("interactive Loop agent loads only its adjacent extension", async () => {
 test("bare loop starts the interactive Loop agent without launching or attaching Herdr", async () => {
   const capture = output();
   const invocations: unknown[] = [];
-  const exitCode = await runCli(
-    ["--config", join(root, "config")],
-    {
-      io: capture.io,
-      leadRunner: async (input: unknown) => {
-        invocations.push(input);
-        return 0;
-      },
-      executablePath: "/opt/loop/loop",
+  const exitCode = await runCli(["--config", join(root, "config")], {
+    io: capture.io,
+    leadRunner: async (input: unknown) => {
+      invocations.push(input);
+      return 0;
     },
-  );
+    executablePath: "/opt/loop/loop",
+  });
 
   expect(exitCode).toBe(0);
-  expect(invocations).toEqual([{
-    command: "pi",
-    args: [
-      "--no-extensions",
-      "--extension",
-      "/opt/loop/loop-pi-extension.js",
-      "--provider",
-      "openai-codex",
-      "--model",
-      "gpt-6-sol",
-    ],
-    cwd: process.cwd(),
-    configDirectory: join(root, "config"),
-  }]);
+  expect(invocations).toEqual([
+    {
+      command: "pi",
+      args: [
+        "--no-extensions",
+        "--extension",
+        "/opt/loop/loop-pi-extension.js",
+        "--provider",
+        "openai-codex",
+        "--model",
+        "gpt-6.1-sol",
+      ],
+      cwd: process.cwd(),
+      configDirectory: join(root, "config"),
+    },
+  ]);
   expect(capture.stdout()).toBe("");
   expect(capture.stderr()).toBe("");
 });
@@ -186,16 +186,13 @@ test("bare loop starts the interactive Loop agent without launching or attaching
 test("doctor auth checks native stores without requesting or printing credentials", async () => {
   const capture = output();
   const probed: Array<[string, string[]]> = [];
-  const exitCode = await runCli(
-    ["doctor", "--auth", "--config", join(root, "config"), "--json"],
-    {
-      io: capture.io,
-      probe: async (command, args) => {
-        probed.push([command, args]);
-        return { exitCode: 0, output: `${command} ready` };
-      },
+  const exitCode = await runCli(["doctor", "--auth", "--config", join(root, "config"), "--json"], {
+    io: capture.io,
+    probe: async (command, args) => {
+      probed.push([command, args]);
+      return { exitCode: 0, output: `${command} ready` };
     },
-  );
+  });
 
   expect(exitCode).toBe(0);
   expect(probed).toContainEqual([
@@ -206,7 +203,7 @@ test("doctor auth checks native stores without requesting or printing credential
       "--provider",
       "openai-codex",
       "--model",
-      "gpt-6-sol",
+      "gpt-6.1-sol",
       "--json",
       "--no-refresh",
     ],
@@ -215,7 +212,7 @@ test("doctor auth checks native stores without requesting or printing credential
   // Native auth probes are read-only; doctor must never trigger an
   // interactive login or read credential material. The codex-exec lane was
   // removed (2026-09), so only antigravity gets a native probe.
-  expect(probed.filter(([command, args]) => args.includes("login"))).toEqual([]);
+  expect(probed.filter(([_command, args]) => args.includes("login"))).toEqual([]);
   expect(probed.flat(2)).not.toContain("--credentials");
   const report = JSON.parse(capture.stdout()) as {
     checks: Array<{ name: string; ok: boolean; auth?: string }>;
@@ -223,9 +220,7 @@ test("doctor auth checks native stores without requesting or printing credential
   expect(report.checks).toContainEqual(
     expect.objectContaining({ name: "pi", ok: true, auth: "ready" }),
   );
-  expect(report.checks).toContainEqual(
-    expect.objectContaining({ name: "antigravity", ok: true }),
-  );
+  expect(report.checks).toContainEqual(expect.objectContaining({ name: "antigravity", ok: true }));
   expect(report.checks.find((check) => check.name === "codex")).toBeUndefined();
 });
 
@@ -251,10 +246,27 @@ test("human CLI renderers share line limits and exact overflow summaries", () =>
     lineTextLimit: 160,
   };
   const snapshot: protocol.SnapshotOutput = {
-    intent: "", workingDirectory: "/project", guidance: [], attention: [], lastSequence: 1,
+    intent: "",
+    workingDirectory: "/project",
+    guidance: [],
+    goalCriteria: [],
+    attention: [],
+    lastSequence: 1,
     runId: "render-run",
     state: "active",
-    tasks: Array.from({ length: 7 }, (_, index) => ({ id: `task-${index + 1}`, title: "task", kind: "research", state: "ready", preferredCompute: "fast", attempt: 0, dependencies: [], readScope: [], writeScope: [], blockedBy: [], activities: [] })),
+    tasks: Array.from({ length: 7 }, (_, index) => ({
+      id: `task-${index + 1}`,
+      title: "task",
+      kind: "research",
+      state: "ready",
+      preferredCompute: "fast",
+      attempt: 0,
+      dependencies: [],
+      readScope: [],
+      writeScope: [],
+      blockedBy: [],
+      activities: [],
+    })),
     activeWorkers: Array.from({ length: 7 }, (_, index) => ({
       id: `worker-${index + 1}`,
       taskId: `task-${index + 1}`,
@@ -268,29 +280,38 @@ test("human CLI renderers share line limits and exact overflow summaries", () =>
     "task-3 ← root · ready · r: - · w: -",
     "… 4 more tasks",
   ]);
-  expect(formatSnapshot("workers", snapshot, limits).trim().split("\n").at(-1))
-    .toBe("… 4 more workers");
+  expect(formatSnapshot("workers", snapshot, limits).trim().split("\n").at(-1)).toBe(
+    "… 4 more workers",
+  );
   expect(formatSnapshot("attention", snapshot, limits).trim().split("\n")).toEqual([
     "Attention: 7 open",
     "attention-1",
     "… 6 more attention items",
     "Next: loop resolve render-run attention-1 <resolution>",
   ]);
-  expect(formatModelList(
-    Array.from({ length: 7 }, (_, index) => ({
-      computeClass: "fast" as const,
-      id: `model-${index + 1}`,
-    })),
-    limits,
-  ).trim().split("\n").at(-1)).toBe("… 4 more models");
+  expect(
+    formatModelList(
+      Array.from({ length: 7 }, (_, index) => ({
+        computeClass: "fast" as const,
+        id: `model-${index + 1}`,
+      })),
+      limits,
+    )
+      .trim()
+      .split("\n")
+      .at(-1),
+  ).toBe("… 4 more models");
 
-  const doctor = formatDoctorChecks([
-    { name: "pass-1", ok: true, detail: "ready" },
-    { name: "fail-1", ok: false, detail: "missing" },
-    { name: "pass-2", ok: true, detail: "ready" },
-    { name: "fail-2", ok: false, detail: "missing" },
-    { name: "pass-3", ok: true, detail: "ready" },
-  ], limits);
+  const doctor = formatDoctorChecks(
+    [
+      { name: "pass-1", ok: true, detail: "ready" },
+      { name: "fail-1", ok: false, detail: "missing" },
+      { name: "pass-2", ok: true, detail: "ready" },
+      { name: "fail-2", ok: false, detail: "missing" },
+      { name: "pass-3", ok: true, detail: "ready" },
+    ],
+    limits,
+  );
   expect(doctor.trim().split("\n")).toEqual([
     "Loop doctor",
     "! fail-1: missing",
@@ -308,13 +329,25 @@ test("watch feed renders bounded per-worker activity history while status stays 
     lineTextLimit: 160,
   };
   const snapshot: protocol.SnapshotOutput = {
-    intent: "", workingDirectory: "/project", guidance: [], attention: [], lastSequence: 4,
+    intent: "",
+    workingDirectory: "/project",
+    guidance: [],
+    goalCriteria: [],
+    attention: [],
+    lastSequence: 4,
     runId: "feed-run",
     state: "active",
     tasks: [
       {
-        id: "t-live", title: "Live task", kind: "research", state: "running",
-        preferredCompute: "fast", attempt: 0, dependencies: [], readScope: [], writeScope: [],
+        id: "t-live",
+        title: "Live task",
+        kind: "research",
+        state: "running",
+        preferredCompute: "fast",
+        attempt: 0,
+        dependencies: [],
+        readScope: [],
+        writeScope: [],
         blockedBy: [],
         activities: [
           "[lifecycle] starting t-live",
@@ -324,8 +357,15 @@ test("watch feed renders bounded per-worker activity history while status stays 
         ],
       },
       {
-        id: "t-done", title: "Done task", kind: "research", state: "done",
-        preferredCompute: "fast", attempt: 0, dependencies: [], readScope: [], writeScope: [],
+        id: "t-done",
+        title: "Done task",
+        kind: "research",
+        state: "done",
+        preferredCompute: "fast",
+        attempt: 0,
+        dependencies: [],
+        readScope: [],
+        writeScope: [],
         blockedBy: [],
         activities: ["[lifecycle] starting t-done", "[result] finished"],
         resultSummary: "finished",
@@ -361,15 +401,16 @@ test("human models output is a bounded list while JSON remains complete", async 
   const json = output();
 
   expect(await runCli(["models", "--config", join(root, "config")], { io: human.io })).toBe(0);
-  expect(await runCli(["models", "--config", join(root, "config"), "--json"], { io: json.io }))
-    .toBe(0);
+  expect(
+    await runCli(["models", "--config", join(root, "config"), "--json"], { io: json.io }),
+  ).toBe(0);
   // Human output must never leak JSON payloads; pi pattern syntax lets model
   // ids legitimately contain brackets or colons, so assert on JSON-ish
   // sequences rather than a bare bracket.
   expect(human.stdout()).not.toContain("[{");
   expect(human.stdout()).not.toContain("}]");
   expect(human.stdout()).toContain("fast · zai/glm-5.3-flashx");
-  expect(JSON.parse(json.stdout())).toHaveLength(13);
+  expect(JSON.parse(json.stdout())).toHaveLength(15);
 });
 
 function output(): {
@@ -400,10 +441,21 @@ test("runs, pause, guidance and attention resolution operate on durable state", 
   expect(JSON.parse(list.stdout())).toContainEqual({ runId: "controls", state: "active" });
   expect(await runCli(["pause", "controls", ...flags], { io: output().io })).toBe(0);
   expect((await protocol.getSnapshot(input)).state).toBe("paused");
-  expect(await runCli(["steer", "controls", "all", "Preserve compatibility", ...flags], { io: output().io })).toBe(0);
+  expect(
+    await runCli(["steer", "controls", "all", "Preserve compatibility", ...flags], {
+      io: output().io,
+    }),
+  ).toBe(0);
   expect((await protocol.getSnapshot(input)).guidance).toEqual(["Preserve compatibility"]);
-  await protocol.requestAttention({ ...input, attentionId: "approval", kind: "approval", summary: "Approve change" });
-  expect(await runCli(["resolve", "controls", "approval", "approved", ...flags], { io: output().io })).toBe(0);
+  await protocol.requestAttention({
+    ...input,
+    attentionId: "approval",
+    kind: "approval",
+    summary: "Approve change",
+  });
+  expect(
+    await runCli(["resolve", "controls", "approval", "approved", ...flags], { io: output().io }),
+  ).toBe(0);
   expect((await protocol.getSnapshot(input)).openAttentionIds).toEqual([]);
   expect((await protocol.getSnapshot(input)).state).toBe("paused");
 });
@@ -414,31 +466,83 @@ test("resolving attention starts an owner for ready or pending work", async () =
     const directory = mkdtempSync(join(tmpdir(), "loop-cli-resolve-owner-"));
     const databasePath = join(directory, "loop.sqlite");
     const runId = initiallyReady ? "resolve-ready" : "resolve-pending";
-    await protocol.prepareRun({ databasePath, runId, intent: "Finish verification", workingDirectory: directory, tasks: [{
-      id: "verify", title: "Verify", kind: "verification", dependencies: [],
-      readScope: ["src/**"], writeScope: [], requirements: ["Return check evidence"],
-      completionChecks: [{ id: "check", command: "true", args: [], timeoutMs: 1_000 }],
-      preferredCompute: "fast", minimumCompute: "tiny", maximumCompute: "strong", maxAttempts: 1,
-    }] });
+    await protocol.prepareRun({
+      databasePath,
+      runId,
+      intent: "Finish verification",
+      workingDirectory: directory,
+      tasks: [
+        {
+          id: "verify",
+          title: "Verify",
+          kind: "verification",
+          dependencies: [],
+          readScope: ["src/**"],
+          writeScope: [],
+          requirements: ["Return check evidence"],
+          completionChecks: [{ id: "check", command: "true", args: [], timeoutMs: 1_000 }],
+          preferredCompute: "fast",
+          minimumCompute: "tiny",
+          maximumCompute: "strong",
+          maxAttempts: 1,
+        },
+      ],
+    });
     if (initiallyReady) {
-      await protocol.claimRunnableTasks({ databasePath, runId, runningTaskIds: [], maxWorkers: 1, maxFrontierWorkers: 1 });
+      await protocol.claimRunnableTasks({
+        databasePath,
+        runId,
+        runningTaskIds: [],
+        maxWorkers: 1,
+        maxFrontierWorkers: 1,
+      });
     }
-    await protocol.requestAttention({ databasePath, runId, attentionId: "failure", kind: "failure", summary: "Retry verification", taskId: "verify" });
+    await protocol.requestAttention({
+      databasePath,
+      runId,
+      attentionId: "failure",
+      kind: "failure",
+      summary: "Retry verification",
+      taskId: "verify",
+    });
 
     const marker = join(directory, "owner-started");
     const executablePath = join(directory, "fake-owner.sh");
-    writeFileSync(executablePath, '#!/bin/sh\nprintf "%s" "$$" > "$LOOP_TEST_OWNER_MARKER"\nsleep 2\n');
+    writeFileSync(
+      executablePath,
+      '#!/bin/sh\nprintf "%s" "$$" > "$LOOP_TEST_OWNER_MARKER"\nsleep 2\n',
+    );
     chmodSync(executablePath, 0o700);
     const previous = process.env.LOOP_TEST_OWNER_MARKER;
     process.env.LOOP_TEST_OWNER_MARKER = marker;
     try {
-      const pending = runCli(["resolve", runId, "failure", "retry", "--config", join(root, "config"), "--database", databasePath, "--json"], {
-        io: output().io, executablePath,
-      });
+      const pending = runCli(
+        [
+          "resolve",
+          runId,
+          "failure",
+          "retry",
+          "--config",
+          join(root, "config"),
+          "--database",
+          databasePath,
+          "--json",
+        ],
+        {
+          io: output().io,
+          executablePath,
+        },
+      );
       for (let attempt = 0; attempt < 100 && !existsSync(marker); attempt++) await Bun.sleep(10);
       expect(existsSync(marker)).toBe(true);
       const ownerPid = readFileSync(marker, "utf8").trim();
-      await protocol.claimExecution({ databasePath, runId, owner: `${ownerPid}:test`, nowMs: Date.now(), ttlMs: 5_000 });
+      await protocol.claimExecution({
+        databasePath,
+        runId,
+        owner: `${ownerPid}:test`,
+        nowMs: Date.now(),
+        ttlMs: 5_000,
+      });
       expect(await pending).toBe(0);
       expect((await protocol.getSnapshot({ databasePath, runId })).state).toBe("active");
     } finally {
@@ -453,17 +557,48 @@ test("guidance status exposes delivery stage without revealing correction text",
   const databasePath = join(mkdtempSync(join(tmpdir(), "loop-cli-guidance-")), "loop.sqlite");
   const runId = "guidance-status-run";
   await protocol.createRun({ databasePath, runId });
-  await protocol.addTask({ databasePath, runId, task: {
-    id: "impl", title: "Implement", kind: "implementation", dependencies: [],
-    readScope: [], writeScope: ["src/**"], requirements: ["Return evidence"],
-    completionChecks: [{ id: "test", command: "bun", args: ["test"], timeoutMs: 1000 }],
-    preferredCompute: "fast", minimumCompute: "tiny", maximumCompute: "strong", maxAttempts: 1,
-  } });
-  await protocol.steerRun({ databasePath, runId, taskId: "impl", message: "private correction text" });
+  await protocol.addTask({
+    databasePath,
+    runId,
+    task: {
+      id: "impl",
+      title: "Implement",
+      kind: "implementation",
+      dependencies: [],
+      readScope: [],
+      writeScope: ["src/**"],
+      requirements: ["Return evidence"],
+      completionChecks: [{ id: "test", command: "bun", args: ["test"], timeoutMs: 1000 }],
+      preferredCompute: "fast",
+      minimumCompute: "tiny",
+      maximumCompute: "strong",
+      maxAttempts: 1,
+    },
+  });
+  await protocol.steerRun({
+    databasePath,
+    runId,
+    taskId: "impl",
+    message: "private correction text",
+  });
   const capture = output();
-  const code = await runCli(["guidance", runId, "impl", "--config", join(root, "config"), "--database", databasePath, "--json"], { io: capture.io });
+  const code = await runCli(
+    [
+      "guidance",
+      runId,
+      "impl",
+      "--config",
+      join(root, "config"),
+      "--database",
+      databasePath,
+      "--json",
+    ],
+    { io: capture.io },
+  );
   expect(code).toBe(0);
-  expect(JSON.parse(capture.stdout())).toEqual([{ sequence: expect.any(Number), taskId: "impl", state: "recorded" }]);
+  expect(JSON.parse(capture.stdout())).toEqual([
+    { sequence: expect.any(Number), taskId: "impl", state: "recorded" },
+  ]);
   expect(capture.stdout()).not.toContain("private correction text");
 });
 
@@ -474,35 +609,112 @@ test("add-task accepts generated task JSON and reports graph rejection", async (
   await protocol.createRun(input);
   const flags = ["--config", join(root, "config"), "--database", databasePath, "--json"];
   const task: protocol.TaskSpecInput = {
-    id: "fix", title: "Fix", kind: "implementation", dependencies: [], readScope: ["src/**"], writeScope: ["src/fix.ts"], requirements: ["Return test evidence"],
-    completionChecks: [{ id: "test", command: "true", args: [], timeoutMs: 1000 }], preferredCompute: "fast", minimumCompute: "tiny", maximumCompute: "strong", maxAttempts: 1,
+    id: "fix",
+    title: "Fix",
+    kind: "implementation",
+    dependencies: [],
+    readScope: ["src/**"],
+    writeScope: ["src/fix.ts"],
+    requirements: ["Return test evidence"],
+    completionChecks: [{ id: "test", command: "true", args: [], timeoutMs: 1000 }],
+    preferredCompute: "fast",
+    minimumCompute: "tiny",
+    maximumCompute: "strong",
+    maxAttempts: 1,
   };
   const accepted = output();
-  expect(await runCli(["add-task", input.runId, ...flags], { io: accepted.io, stdin: JSON.stringify(task) })).toBe(0);
+  expect(
+    await runCli(["add-task", input.runId, ...flags], {
+      io: accepted.io,
+      stdin: JSON.stringify(task),
+    }),
+  ).toBe(0);
   expect(JSON.parse(accepted.stdout())).toMatchObject({ accepted: true });
-  expect((await protocol.getSnapshot(input)).tasks.map(value => value.id)).toEqual(["fix"]);
+  expect((await protocol.getSnapshot(input)).tasks.map((value) => value.id)).toEqual(["fix"]);
   const rejected = output();
-  expect(await runCli(["add-task", input.runId, ...flags], { io: rejected.io, stdin: JSON.stringify({ ...task, id: "next", dependencies: ["missing"] }) })).toBe(1);
-  expect((await protocol.getSnapshot(input)).tasks.map(value => value.id)).toEqual(["fix"]);
+  expect(
+    await runCli(["add-task", input.runId, ...flags], {
+      io: rejected.io,
+      stdin: JSON.stringify({ ...task, id: "next", dependencies: ["missing"] }),
+    }),
+  ).toBe(1);
+  expect((await protocol.getSnapshot(input)).tasks.map((value) => value.id)).toEqual(["fix"]);
+});
+
+test("add-goal-task persists a correction and criterion atomically", async () => {
+  await protocol.rustra.ready();
+  const databasePath = join(mkdtempSync(join(tmpdir(), "loop-cli-goal-task-")), "loop.sqlite");
+  const runId = "goal-task-run";
+  await protocol.createRun({ databasePath, runId });
+  const flags = ["--config", join(root, "config"), "--database", databasePath, "--json"];
+  const task: protocol.TaskSpecInput = {
+    id: "correction",
+    title: "Apply correction",
+    kind: "implementation",
+    dependencies: [],
+    readScope: [],
+    writeScope: ["src/correction.ts"],
+    requirements: ["correction works"],
+    completionChecks: [{ id: "focused", command: "bun", args: ["test"], timeoutMs: 1_000 }],
+    preferredCompute: "fast",
+    minimumCompute: "tiny",
+    maximumCompute: "strong",
+    maxAttempts: 2,
+  };
+  const criterion = {
+    id: "correction",
+    description: "correction works",
+    taskId: task.id,
+    checkIds: ["focused"],
+  };
+  const rejected = output();
+  expect(
+    await runCli(["add-goal-task", runId, ...flags], {
+      io: rejected.io,
+      stdin: JSON.stringify({ task, criteria: [{ ...criterion, checkIds: ["missing"] }] }),
+    }),
+  ).toBe(1);
+  expect((await protocol.getSnapshot({ databasePath, runId })).tasks).toHaveLength(0);
+  const accepted = output();
+  expect(
+    await runCli(["add-goal-task", runId, ...flags], {
+      io: accepted.io,
+      stdin: JSON.stringify({ task, criteria: [criterion] }),
+    }),
+  ).toBe(0);
+  expect((await protocol.getSnapshot({ databasePath, runId })).goalCriteria).toMatchObject([
+    { id: "correction", state: "pending" },
+  ]);
 });
 
 test("steer relay process command mirrors the owner spawn layout", () => {
-  expect(buildSteerRelayCommand({
-    executablePath: "/usr/bin/bun",
-    sourceEntry: "/repo/packages/cli/src/main.ts",
-    databasePath: "/tmp/loop.sqlite",
-    runId: "run-9",
-    taskId: "t-1",
-  })).toEqual({
+  expect(
+    buildSteerRelayCommand({
+      executablePath: "/usr/bin/bun",
+      sourceEntry: "/repo/packages/cli/src/main.ts",
+      databasePath: "/tmp/loop.sqlite",
+      runId: "run-9",
+      taskId: "t-1",
+    }),
+  ).toEqual({
     command: "/usr/bin/bun",
-    args: ["/repo/packages/cli/src/main.ts", "__steer-relay", "run-9", "t-1", "--database", "/tmp/loop.sqlite"],
+    args: [
+      "/repo/packages/cli/src/main.ts",
+      "__steer-relay",
+      "run-9",
+      "t-1",
+      "--database",
+      "/tmp/loop.sqlite",
+    ],
   });
-  expect(buildSteerRelayCommand({
-    executablePath: "/usr/local/bin/loop",
-    databasePath: "/tmp/loop.sqlite",
-    runId: "run-9",
-    taskId: "t-1",
-  })).toEqual({
+  expect(
+    buildSteerRelayCommand({
+      executablePath: "/usr/local/bin/loop",
+      databasePath: "/tmp/loop.sqlite",
+      runId: "run-9",
+      taskId: "t-1",
+    }),
+  ).toEqual({
     command: "/usr/local/bin/loop",
     args: ["__steer-relay", "run-9", "t-1", "--database", "/tmp/loop.sqlite"],
   });

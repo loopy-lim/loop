@@ -1,13 +1,28 @@
-import type { TaskContextOutput } from "@loop/protocol";
-import type { AgentProvider, RouteSelection, StartWorkerInput, WorkerHandle, WorkerResult } from "@loop/providers";
+import type { GoalCriterionInput, TaskContextOutput } from "@loop/protocol";
+import type {
+  AgentProvider,
+  RouteSelection,
+  StartWorkerInput,
+  WorkerHandle,
+  WorkerResult,
+} from "@loop/providers";
 import type { ComputeClass } from "@loop/protocol";
 import type { CompletionVerifier } from "./completion";
 import type { OrchestrationControl } from "./control";
+import {
+  criteriaCheckIdsForTask,
+  receiptsBlockCriteria,
+  rerunCriteriaChecksOnStableSource,
+} from "./criteria-self-heal";
 import { resolvePersona, type PersonaKindDefaults, type PersonaRegistry } from "./persona";
 import { redact } from "./redact";
 import { storeCheckOutput } from "./evidence-artifact";
 import { captureSourceState, changedSourcePaths, scopedFingerprint } from "./source-state";
-import { summarizeTaskContext, DEFAULT_CONTEXT_LIFECYCLE_POLICY, type ContextLifecyclePolicy } from "./context-lifecycle";
+import {
+  summarizeTaskContext,
+  DEFAULT_CONTEXT_LIFECYCLE_POLICY,
+  type ContextLifecyclePolicy,
+} from "./context-lifecycle";
 import { withCodeMapEntry, type CodeMapProvider } from "./code-map";
 
 export interface TaskExecution {
@@ -31,7 +46,9 @@ interface Options {
   provider: AgentProvider;
   computeClass?: ComputeClass;
   /** Runs only after the failed handle is released; reservation stays owned. */
-  selectFallback?: (excludedProviderIds: ReadonlySet<string>) => Promise<RouteSelection | undefined>;
+  selectFallback?: (
+    excludedProviderIds: ReadonlySet<string>,
+  ) => Promise<RouteSelection | undefined>;
   control: OrchestrationControl;
   verifier: CompletionVerifier;
   personas?: PersonaRegistry;
@@ -53,18 +70,60 @@ interface Options {
    * The map rides the start context as one bounded advisory entry.
    */
   codeMap?: CodeMapProvider;
+  /**
+   * §D run resilience: declared goal criteria for the run. When this task's
+   * passing evidence would keep its criteria pending (unstable source,
+   * out-of-scope observation), the verification flow re-runs the declared
+   * checks once on stable source before recording verification.
+   */
+  goalCriteria?: GoalCriterionInput[];
 }
 export function executeTask(options: Options): TaskExecution {
   const controller = new AbortController();
-  const execution: TaskExecution = { done: Promise.resolve(), settled: false, abort: () => controller.abort() };
-  execution.done = run(options, controller.signal, execution).catch(error => { execution.error = error; }).finally(() => { execution.settled = true; });
+  const execution: TaskExecution = {
+    done: Promise.resolve(),
+    settled: false,
+    abort: () => controller.abort(),
+  };
+  execution.done = run(options, controller.signal, execution)
+    .catch((error) => {
+      execution.error = error;
+    })
+    .finally(() => {
+      execution.settled = true;
+    });
   return execution;
 }
-async function run({ input, context, workerId, provider, computeClass, selectFallback, control, verifier, personas, personaKindDefaults, recordRawActivity = true, contextPolicy, codeMap }: Options, signal: AbortSignal, execution: TaskExecution): Promise<void> {
+async function run(
+  {
+    input,
+    context,
+    workerId,
+    provider,
+    computeClass,
+    selectFallback,
+    control,
+    verifier,
+    personas,
+    personaKindDefaults,
+    recordRawActivity = true,
+    contextPolicy,
+    codeMap,
+    goalCriteria,
+  }: Options,
+  signal: AbortSignal,
+  execution: TaskExecution,
+): Promise<void> {
   const taskId = context.task.id;
   const workerInput = { ...input, taskId, workerId };
-  const persona = resolvePersona({ requested: context.task.persona, kind: context.task.kind, registry: personas ?? {}, defaults: personaKindDefaults });
-  const withPersonaWarning = (summary: string) => (persona.warning ? `${persona.warning}\n${summary}` : summary);
+  const persona = resolvePersona({
+    requested: context.task.persona,
+    kind: context.task.kind,
+    registry: personas ?? {},
+    defaults: personaKindDefaults,
+  });
+  const withPersonaWarning = (summary: string) =>
+    persona.warning ? `${persona.warning}\n${summary}` : summary;
   let handleId: string | undefined;
   let workerFinished = false;
   let unsubscribe: (() => void) | undefined;
@@ -75,29 +134,66 @@ async function run({ input, context, workerId, provider, computeClass, selectFal
     releaseAttempted = true;
     let failure: unknown;
     for (let attempt = 0; attempt < 2; attempt++) {
-      try { await bounded(provider.release(handleId), 5000, "Worker cleanup did not respond"); return; }
-      catch (error) { failure = error; if (error instanceof LifecycleTimeout) break; }
-      await new Promise(resolve => setTimeout(resolve, 100));
+      try {
+        await bounded(provider.release(handleId), 5000, "Worker cleanup did not respond");
+        return;
+      } catch (error) {
+        failure = error;
+        if (error instanceof LifecycleTimeout) break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
     const summary = `Worker cleanup requires attention (${provider.id}, ${handleId}): ${redact(failure, 500)}. Inspect and close only this worker's resources before reconciling.`;
-    await control.requestAttention({ ...input, taskId, attentionId: `cleanup-${workerId}`, kind: "failure", summary });
+    await control.requestAttention({
+      ...input,
+      taskId,
+      attentionId: `cleanup-${workerId}`,
+      kind: "failure",
+      summary,
+    });
     throw new CleanupFailed(summary);
   };
   try {
-    if (signal.aborted) { await control.recordWorkerStopped(workerInput); return; }
+    if (signal.aborted) {
+      await control.recordWorkerStopped(workerInput);
+      return;
+    }
     // G1 context lifecycle: fold advisory history (passed-check bodies, retry
     // summary) once per dispatch when over budget. Preserved sets — completion
     // contract, guidance, failure evidence, dependency/decision results — pass
     // through verbatim. Opt out with `advisoryByteBudget: 0`. G2: the optional
     // code map rides the same start context as one bounded advisory entry.
-    const summarized = summarizeTaskContext(context, contextPolicy ?? DEFAULT_CONTEXT_LIFECYCLE_POLICY);
+    const summarized = summarizeTaskContext(
+      context,
+      contextPolicy ?? DEFAULT_CONTEXT_LIFECYCLE_POLICY,
+    );
     if (summarized.fold) {
       const fold = summarized.fold;
-      await control.recordActivity({ ...input, taskId, activity: `[context] folded ${fold.summarizedEntryCount} advisory entries (${fold.advisoryBytesBefore} → ${fold.advisoryBytesAfter} bytes); preserved ${fold.preservedEntryCount} entries${fold.truncated ? "; summary truncated" : ""}` });
+      await control.recordActivity({
+        ...input,
+        taskId,
+        activity: `[context] folded ${fold.summarizedEntryCount} advisory entries (${fold.advisoryBytesBefore} → ${fold.advisoryBytesAfter} bytes); preserved ${fold.preservedEntryCount} entries${fold.truncated ? "; summary truncated" : ""}`,
+      });
     }
-    const startContext = withCodeMapEntry(summarized.context, codeMap?.({ task: context.task, workingDirectory: context.workingDirectory }));
-    const sourceBeforeWorker = await captureSourceState(context.workingDirectory, [input.databasePath]);
-    const startInput: StartWorkerInput = { runId: input.runId, taskId, title: context.task.title, kind: context.task.kind, computeClass: computeClass ?? context.task.preferredCompute, attempt: context.attempt, requirements: context.task.requirements, workingDirectory: context.workingDirectory, context: startContext, ...(persona.instructions ? { personaInstructions: persona.instructions } : {}) };
+    const startContext = withCodeMapEntry(
+      summarized.context,
+      codeMap?.({ task: context.task, workingDirectory: context.workingDirectory }),
+    );
+    const sourceBeforeWorker = await captureSourceState(context.workingDirectory, [
+      input.databasePath,
+    ]);
+    const startInput: StartWorkerInput = {
+      runId: input.runId,
+      taskId,
+      title: context.task.title,
+      kind: context.task.kind,
+      computeClass: computeClass ?? context.task.preferredCompute,
+      attempt: context.attempt,
+      requirements: context.task.requirements,
+      workingDirectory: context.workingDirectory,
+      context: startContext,
+      ...(persona.instructions ? { personaInstructions: persona.instructions } : {}),
+    };
     const excludedProviderIds = new Set<string>();
     let result: WorkerResult;
     // One durable reservation spans these sequential handles. Never release
@@ -109,26 +205,44 @@ async function run({ input, context, workerId, provider, computeClass, selectFal
     while (true) {
       const starting = provider.start(startInput);
       let handle: WorkerHandle;
-      try { handle = await startup(starting, signal); }
-      catch (error) {
+      try {
+        handle = await startup(starting, signal);
+      } catch (error) {
         if (error instanceof StartupUncertain) {
           // If startup eventually yields a handle while this owner remains alive,
           // stop it. The durable reservation remains until explicit reconciliation.
-          void starting.then(async late => { await provider.cancel(late.id); await provider.release?.(late.id); }).catch(() => {});
+          void starting
+            .then(async (late) => {
+              await provider.cancel(late.id);
+              await provider.release?.(late.id);
+            })
+            .catch(() => {});
         }
         throw error;
       }
       handleId = handle.id;
       // Bind the live steer channel to this handle so the mailbox (which
       // only knows the durable worker id) reaches the provider session.
-      execution.steer = provider.steer
-        ? message => provider.steer!(handleId!, message)
-        : undefined;
+      const steer = provider.steer;
+      const activeHandleId = handleId;
+      execution.steer =
+        steer && activeHandleId !== undefined
+          ? (message) => steer.call(provider, activeHandleId, message)
+          : undefined;
       // The subscription must stay attached even when raw recording is
       // suppressed: the mirroring layer renders sink lines from these events.
-      unsubscribe = provider.subscribe?.(handle.id, event => {
-        if (event.type !== "output" || !recordRawActivity || Date.now() - lastActivity < 1000) return;
-        const activity = redact(event.text.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "").trim().split(/\r?\n/).at(-1) ?? "", 300);
+      unsubscribe = provider.subscribe?.(handle.id, (event) => {
+        if (event.type !== "output" || !recordRawActivity || Date.now() - lastActivity < 1000)
+          return;
+        const activity = redact(
+          event.text
+            // oxlint-disable-next-line eslint/no-control-regex -- intentional control-char match
+            .replace(/\u001b\[[0-9;]*[A-Za-z]/g, "")
+            .trim()
+            .split(/\r?\n/)
+            .at(-1) ?? "",
+          300,
+        );
         if (!activity) return;
         lastActivity = Date.now();
         void control.recordActivity({ ...input, taskId, activity }).catch(() => {});
@@ -142,17 +256,29 @@ async function run({ input, context, workerId, provider, computeClass, selectFal
       }
       result = received;
       const failureKind = result.failure?.kind;
-      const fallbackEligible = result.failure !== undefined && (result.failure.retryable || failureKind === "quota");
+      const fallbackEligible =
+        result.failure !== undefined && (result.failure.retryable || failureKind === "quota");
       if (result.success || !fallbackEligible || !selectFallback) break;
       await release();
       unsubscribe?.();
       unsubscribe = undefined;
       excludedProviderIds.add(provider.id);
-      await control.recordActivity({ ...input, taskId, activity: redact(`Provider failure (${provider.id}, ${failureKind}); released worker and selecting an untried provider. ${result.summary}`, 500) });
+      await control.recordActivity({
+        ...input,
+        taskId,
+        activity: redact(
+          `Provider failure (${provider.id}, ${failureKind}); released worker and selecting an untried provider. ${result.summary}`,
+          500,
+        ),
+      });
       let next: RouteSelection | undefined;
-      try { next = await selectFallback(excludedProviderIds); }
-      catch (error) {
-        result = { ...result, summary: `${result.summary}\nProvider fallback exhausted or unavailable: ${redact(error)}` };
+      try {
+        next = await selectFallback(excludedProviderIds);
+      } catch (error) {
+        result = {
+          ...result,
+          summary: `${result.summary}\nProvider fallback exhausted or unavailable: ${redact(error)}`,
+        };
         break;
       }
       if (!next || signal.aborted) {
@@ -166,53 +292,170 @@ async function run({ input, context, workerId, provider, computeClass, selectFal
       releaseAttempted = false;
       lastActivity = 0;
     }
-    const exhaustedTimeout = !result.success
-      && result.failure?.kind === "timeout"
-      && result.failure.retryable
-      && context.attempt + 1 >= context.task.maxAttempts;
-    if (!result.success && (exhaustedTimeout || result.failure?.retryable === false || ["authentication", "quota"].includes(result.failure?.kind ?? ""))) {
+    const exhaustedTimeout =
+      !result.success &&
+      result.failure?.kind === "timeout" &&
+      result.failure.retryable &&
+      context.attempt + 1 >= context.task.maxAttempts;
+    if (
+      !result.success &&
+      (exhaustedTimeout ||
+        result.failure?.retryable === false ||
+        ["authentication", "quota"].includes(result.failure?.kind ?? ""))
+    ) {
       await control.requestAttention({
         ...input,
         taskId,
         attentionId: `failure-${input.runId}-${taskId}-${context.attempt}-${exhaustedTimeout ? "timeout-exhausted" : "environment"}`,
         kind: "failure",
-        summary: exhaustedTimeout ? `Worker timeout retry budget exhausted: ${redact(result.summary)}` : redact(result.summary),
+        summary: exhaustedTimeout
+          ? `Worker timeout retry budget exhausted: ${redact(result.summary)}`
+          : redact(result.summary),
       });
     }
-    await control.recordWorkerResult({ ...workerInput, success: result.success, summary: withPersonaWarning(redact(result.summary)) });
+    await control.recordWorkerResult({
+      ...workerInput,
+      success: result.success,
+      summary: withPersonaWarning(redact(result.summary)),
+    });
     workerFinished = true;
-    if (!result.success) { await release(); return; }
+    if (!result.success) {
+      await release();
+      return;
+    }
+    // §D: the self-heal pass fires at most once per task execution.
+    let criteriaHealed = false;
     for (let focusedRepair = 0; focusedRepair <= 1; focusedRepair++) {
-      const sourceBeforeChecks = await captureSourceState(context.workingDirectory, [input.databasePath]);
-      const observedChangedPaths = sourceBeforeWorker && sourceBeforeChecks
-        ? changedSourcePaths(sourceBeforeWorker, sourceBeforeChecks) : [];
-      const evidence = await verifier.verify(context.task.completionChecks, context.workingDirectory, signal);
-      if (signal.aborted) { await control.stopVerification({ ...input, taskId }); return; }
-      const sourceAfterChecks = await captureSourceState(context.workingDirectory, [input.databasePath], [...context.task.readScope, ...context.task.writeScope]);
-      const source = sourceBeforeChecks && sourceAfterChecks ? {
-        beforeFingerprint: scopedFingerprint(sourceBeforeChecks, [...context.task.readScope, ...context.task.writeScope]),
-        afterFingerprint: scopedFingerprint(sourceAfterChecks, [...context.task.readScope, ...context.task.writeScope]),
-        observedChangedPaths,
-        observedOutsideWriteScope: [],
-      } : undefined;
-      const receipts = await Promise.all(evidence.map(async check => {
-        const artifact = await storeCheckOutput(input.databasePath, input.runId, taskId, check.id, check.stdout, check.stderr);
-        return { id: check.id, command: check.command, args: check.args, workingDirectory: check.workingDirectory,
-          exitCode: check.exitCode, stdout: redact(check.stdout), stderr: redact(check.stderr), timedOut: check.timedOut,
-          durationMs: check.durationMs, ...(artifact ? { outputArtifact: artifact.path } : {}), ...(source ? { source } : {}) };
-      }));
+      const sourceBeforeChecks = await captureSourceState(context.workingDirectory, [
+        input.databasePath,
+      ]);
+      const observedChangedPaths =
+        sourceBeforeWorker && sourceBeforeChecks
+          ? changedSourcePaths(sourceBeforeWorker, sourceBeforeChecks)
+          : [];
+      const evidence = await verifier.verify(
+        context.task.completionChecks,
+        context.workingDirectory,
+        signal,
+      );
+      if (signal.aborted) {
+        await control.stopVerification({ ...input, taskId });
+        return;
+      }
+      const sourceAfterChecks = await captureSourceState(
+        context.workingDirectory,
+        [input.databasePath],
+        [...context.task.readScope, ...context.task.writeScope],
+      );
+      const source =
+        sourceBeforeChecks && sourceAfterChecks
+          ? {
+              beforeFingerprint: scopedFingerprint(sourceBeforeChecks, [
+                ...context.task.readScope,
+                ...context.task.writeScope,
+              ]),
+              afterFingerprint: scopedFingerprint(sourceAfterChecks, [
+                ...context.task.readScope,
+                ...context.task.writeScope,
+              ]),
+              observedChangedPaths,
+              observedOutsideWriteScope: [],
+            }
+          : undefined;
+      const receipts = await Promise.all(
+        evidence.map(async (check) => {
+          const artifact = await storeCheckOutput(
+            input.databasePath,
+            input.runId,
+            taskId,
+            check.id,
+            check.stdout,
+            check.stderr,
+          );
+          return {
+            id: check.id,
+            command: check.command,
+            args: check.args,
+            workingDirectory: check.workingDirectory,
+            exitCode: check.exitCode,
+            stdout: redact(check.stdout),
+            stderr: redact(check.stderr),
+            timedOut: check.timedOut,
+            durationMs: check.durationMs,
+            ...(artifact ? { outputArtifact: artifact.path } : {}),
+            ...(source ? { source } : {}),
+          };
+        }),
+      );
       await control.recordCheckReceipts({ ...input, taskId, checks: receipts });
       const checks = evidence.map(({ id, passed }) => ({ id, passed }));
-      const passed = checks.every(check => check.passed);
-      let reason = evidence.filter(check => !check.passed).map(check => `${check.id}: exit ${check.exitCode}${check.timedOut ? " (timeout)" : ""}\n${check.stderr || check.stdout}`).join("\n");
+      const passed = checks.every((check) => check.passed);
+      let reason = evidence
+        .filter((check) => !check.passed)
+        .map(
+          (check) =>
+            `${check.id}: exit ${check.exitCode}${check.timedOut ? " (timeout)" : ""}\n${check.stderr || check.stdout}`,
+        )
+        .join("\n");
+      if (passed && !criteriaHealed && !signal.aborted) {
+        // §D self-heal: passing evidence that would still leave this task's
+        // goal criteria pending gets exactly one stable-source re-run. A
+        // clean replacement replaces the receipts; a failed or unstable pass
+        // keeps the original evidence and the blocked-goal attention decides.
+        const criteriaCheckIds = criteriaCheckIdsForTask(goalCriteria, taskId);
+        if (
+          criteriaCheckIds.length > 0 &&
+          receiptsBlockCriteria(receipts, context.task.writeScope)
+        ) {
+          criteriaHealed = true;
+          try {
+            await rerunCriteriaChecksOnStableSource({
+              input,
+              control,
+              verifier,
+              taskId,
+              checkIds: criteriaCheckIds,
+              completionChecks: context.task.completionChecks,
+              readScope: context.task.readScope,
+              writeScope: context.task.writeScope,
+              workingDirectory: context.workingDirectory,
+              signal,
+            });
+          } catch {
+            /* degrade to the blocked-goal attention with the original evidence */
+          }
+        }
+      }
       if (!passed && focusedRepair === 0 && provider.repair && handleId && !signal.aborted) {
         try {
-          await control.recordActivity({ ...input, taskId, activity: "Focused checks failed; returning evidence to the same worker session once." });
-          const repaired = await untilAborted(provider.repair(handleId, `Fix the failed completion checks, then report the change. Loop will rerun them independently.\n${redact(reason, 4_000)}`), signal);
-          if (signal.aborted || !repaired) { await provider.cancel(handleId); await control.stopVerification({ ...input, taskId }); return; }
+          await control.recordActivity({
+            ...input,
+            taskId,
+            activity: "Focused checks failed; returning evidence to the same worker session once.",
+          });
+          const repaired = await untilAborted(
+            provider.repair(
+              handleId,
+              `Fix the failed completion checks, then report the change. Loop will rerun them independently.\n${redact(reason, 4_000)}`,
+            ),
+            signal,
+          );
+          if (signal.aborted || !repaired) {
+            await provider.cancel(handleId);
+            await control.stopVerification({ ...input, taskId });
+            return;
+          }
           if (repaired.success) {
-            await control.recordTaskOutput({ ...input, taskId, summary: withPersonaWarning(redact(repaired.summary)) });
-            await control.recordActivity({ ...input, taskId, activity: `Same-session repair returned: ${redact(repaired.summary, 300)}` });
+            await control.recordTaskOutput({
+              ...input,
+              taskId,
+              summary: withPersonaWarning(redact(repaired.summary)),
+            });
+            await control.recordActivity({
+              ...input,
+              taskId,
+              activity: `Same-session repair returned: ${redact(repaired.summary, 300)}`,
+            });
             continue;
           }
           reason += `\nSame-session repair failed: ${redact(repaired.summary)}`;
@@ -221,13 +464,25 @@ async function run({ input, context, workerId, provider, computeClass, selectFal
         }
       }
       await release();
-      await control.recordVerification({ ...input, taskId, checks, passed, reason: redact(reason) });
+      await control.recordVerification({
+        ...input,
+        taskId,
+        checks,
+        passed,
+        reason: redact(reason),
+      });
       break;
     }
   } catch (error) {
     if (error instanceof CleanupFailed) return;
     if (error instanceof StartupUncertain) {
-      await control.requestAttention({ ...input, taskId, attentionId: `startup-${workerId}`, kind: "failure", summary: `Worker startup outcome is unknown: ${redact(error)}. Confirm the worker stopped before using loop reconcile ${input.runId} ${taskId} stopped.` });
+      await control.requestAttention({
+        ...input,
+        taskId,
+        attentionId: `startup-${workerId}`,
+        kind: "failure",
+        summary: `Worker startup outcome is unknown: ${redact(error)}. Confirm the worker stopped before using loop reconcile ${input.runId} ${taskId} stopped.`,
+      });
       return;
     }
     // A failed start or check is durable evidence, not an unhandled owner exit.
@@ -240,20 +495,48 @@ async function run({ input, context, workerId, provider, computeClass, selectFal
     }
     if (handleId && !workerFinished) await provider.cancel(handleId);
     await release();
-    if (!workerFinished) await control.recordWorkerResult({ ...workerInput, success: false, summary: withPersonaWarning(redact(error)) });
-    else await control.recordVerification({ ...input, taskId, passed: false, checks: [], reason: redact(error) });
+    if (!workerFinished)
+      await control.recordWorkerResult({
+        ...workerInput,
+        success: false,
+        summary: withPersonaWarning(redact(error)),
+      });
+    else
+      await control.recordVerification({
+        ...input,
+        taskId,
+        passed: false,
+        checks: [],
+        reason: redact(error),
+      });
   } finally {
     execution.steer = undefined;
     unsubscribe?.();
-    try { await release(); } catch (error) { if (!(error instanceof CleanupFailed)) throw error; }
+    // Deliberate: swallow the idempotent-release CleanupFailed backstop, but
+    // surface unexpected release() failures even from finally.
+    try {
+      await release();
+    } catch (error) {
+      // oxlint-disable-next-line eslint/no-unsafe-finally -- intentional rethrow, see above
+      if (!(error instanceof CleanupFailed)) throw error;
+    }
   }
 }
-async function untilAborted(result: Promise<WorkerResult>, signal: AbortSignal): Promise<WorkerResult | undefined> {
+async function untilAborted(
+  result: Promise<WorkerResult>,
+  signal: AbortSignal,
+): Promise<WorkerResult | undefined> {
   if (signal.aborted) return undefined;
   let abort!: () => void;
-  const cancelled = new Promise<undefined>(resolve => { abort = () => resolve(undefined); signal.addEventListener("abort", abort, { once: true }); });
-  try { return await Promise.race([result, cancelled]); }
-  finally { signal.removeEventListener("abort", abort); }
+  const cancelled = new Promise<undefined>((resolve) => {
+    abort = () => resolve(undefined);
+    signal.addEventListener("abort", abort, { once: true });
+  });
+  try {
+    return await Promise.race([result, cancelled]);
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
 }
 
 class LifecycleTimeout extends Error {}
@@ -261,18 +544,31 @@ class StartupUncertain extends Error {}
 class CleanupFailed extends Error {}
 async function bounded<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
   let timer!: ReturnType<typeof setTimeout>;
-  try { return await Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new LifecycleTimeout(message)), milliseconds); })]); }
-  finally { clearTimeout(timer); }
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new LifecycleTimeout(message)), milliseconds);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 async function startup(promise: Promise<WorkerHandle>, signal: AbortSignal): Promise<WorkerHandle> {
   let abort!: () => void;
   let timer!: ReturnType<typeof setTimeout>;
   const interrupted = new Promise<never>((_, reject) => {
-    abort = () => reject(new StartupUncertain("control interrupted startup before a handle was returned"));
+    abort = () =>
+      reject(new StartupUncertain("control interrupted startup before a handle was returned"));
     timer = setTimeout(() => reject(new StartupUncertain("worker startup timed out")), 30000);
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
   });
-  try { return await Promise.race([promise, interrupted]); }
-  finally { clearTimeout(timer); signal.removeEventListener("abort", abort); }
+  try {
+    return await Promise.race([promise, interrupted]);
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", abort);
+  }
 }

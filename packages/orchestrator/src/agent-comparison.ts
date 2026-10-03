@@ -45,16 +45,32 @@ export interface AgentComparisonReport {
 }
 
 /** Compare providers on the same committed source and identical goal contract. */
-export async function runAgentComparison(request: AgentComparisonRequest): Promise<AgentComparisonReport> {
-  if (!request.name.trim() || !request.intent.trim() || request.tasks.length === 0 || request.criteria.length === 0) throw new Error("comparison needs a name, intent, tasks, and explicit criteria");
-  if (!Number.isInteger(request.iterations) || request.iterations < 1 || request.iterations > 20) throw new Error("comparison iterations must be between 1 and 20");
-  if (request.candidateIds.length < 2 || new Set(request.candidateIds).size !== request.candidateIds.length) throw new Error("comparison needs at least two distinct provider IDs");
+export async function runAgentComparison(
+  request: AgentComparisonRequest,
+): Promise<AgentComparisonReport> {
+  if (
+    !request.name.trim() ||
+    !request.intent.trim() ||
+    request.tasks.length === 0 ||
+    request.criteria.length === 0
+  )
+    throw new Error("comparison needs a name, intent, tasks, and explicit criteria");
+  if (!Number.isInteger(request.iterations) || request.iterations < 1 || request.iterations > 20)
+    throw new Error("comparison iterations must be between 1 and 20");
+  if (
+    request.candidateIds.length < 2 ||
+    new Set(request.candidateIds).size !== request.candidateIds.length
+  )
+    throw new Error("comparison needs at least two distinct provider IDs");
   const source = realpathSync(request.sourceDirectory);
   const root = realpathSync(request.workspaceRoot);
-  if (root === source || root.startsWith(`${source}${sep}`)) throw new Error("comparison workspaces must be outside the source repository");
+  if (root === source || root.startsWith(`${source}${sep}`))
+    throw new Error("comparison workspaces must be outside the source repository");
   const top = git(source, "rev-parse", "--show-toplevel");
-  if (realpathSync(top) !== source) throw new Error("comparison source must be the Git repository root");
-  if (git(source, "status", "--porcelain")) throw new Error("comparison source must be clean so every provider sees one committed state");
+  if (realpathSync(top) !== source)
+    throw new Error("comparison source must be the Git repository root");
+  if (git(source, "status", "--porcelain"))
+    throw new Error("comparison source must be clean so every provider sees one committed state");
   const sourceCommit = git(source, "rev-parse", "HEAD");
   const rows: AgentComparisonRow[] = [];
   for (let iteration = 1; iteration <= request.iterations; iteration++) {
@@ -63,26 +79,55 @@ export async function runAgentComparison(request: AgentComparisonRequest): Promi
       const workspace = join(trial, "repo");
       command("git", ["clone", "--quiet", "--no-hardlinks", source, workspace]);
       git(workspace, "checkout", "--quiet", "--detach", sourceCommit);
-      const provider = (typeof request.providers === "function" ? request.providers(workspace) : request.providers).only(providerId);
+      const provider = (
+        typeof request.providers === "function" ? request.providers(workspace) : request.providers
+      ).only(providerId);
       const runId = `agent-${request.name.replace(/[^a-zA-Z0-9._-]/g, "-")}-${iteration}-${randomUUID().slice(0, 8)}`;
-      const orchestrator = new Orchestrator({ control: request.control, providers: provider, maxWorkers: 1 });
+      const orchestrator = new Orchestrator({
+        control: request.control,
+        providers: provider,
+        maxWorkers: 1,
+      });
       const started = Date.now();
       const result = await orchestrator.run({
-        databasePath: resolve(request.databasePath), runId, intent: request.intent,
-        workingDirectory: workspace, tasks: request.tasks, criteria: request.criteria,
+        databasePath: resolve(request.databasePath),
+        runId,
+        intent: request.intent,
+        workingDirectory: workspace,
+        tasks: request.tasks,
+        criteria: request.criteria,
       });
       const elapsedMs = Date.now() - started;
-      const snapshot = await request.control.getSnapshot({ databasePath: request.databasePath, runId });
+      const snapshot = await request.control.getSnapshot({
+        databasePath: request.databasePath,
+        runId,
+      });
       const trace = await request.control.getTrace({ databasePath: request.databasePath, runId });
       const scopeViolations = new Set<string>();
       for (const task of request.tasks) {
-        const context = await request.control.getTaskContext({ databasePath: request.databasePath, runId, taskId: task.id });
-        for (const check of context.previousChecks) for (const path of check.source?.observedOutsideWriteScope ?? []) scopeViolations.add(path);
+        const context = await request.control.getTaskContext({
+          databasePath: request.databasePath,
+          runId,
+          taskId: task.id,
+        });
+        for (const check of context.previousChecks)
+          for (const path of check.source?.observedOutsideWriteScope ?? [])
+            scopeViolations.add(path);
       }
-      rows.push({ runId, providerId, iteration, sourceCommit, workspace, status: result.status,
-        verifiedCriteria: snapshot.goalCriteria.filter(item => item.state === "verified").length,
-        totalCriteria: snapshot.goalCriteria.length, scopeViolations: [...scopeViolations].sort(), elapsedMs,
-        summary: trace.summary, score: trace.score });
+      rows.push({
+        runId,
+        providerId,
+        iteration,
+        sourceCommit,
+        workspace,
+        status: result.status,
+        verifiedCriteria: snapshot.goalCriteria.filter((item) => item.state === "verified").length,
+        totalCriteria: snapshot.goalCriteria.length,
+        scopeViolations: [...scopeViolations].sort(),
+        elapsedMs,
+        summary: trace.summary,
+        score: trace.score,
+      });
     }
   }
   return { name: request.name, sourceCommit, rows, costMeasured: false };
@@ -94,6 +139,7 @@ function git(directory: string, ...args: string[]): string {
 
 function command(executable: string, args: string[]): string {
   const result = spawnSync(executable, args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
-  if (result.status !== 0) throw new Error(`${executable} command failed: ${result.stderr.trim().slice(0, 300)}`);
+  if (result.status !== 0)
+    throw new Error(`${executable} command failed: ${result.stderr.trim().slice(0, 300)}`);
   return result.stdout.trim();
 }

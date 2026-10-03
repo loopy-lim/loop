@@ -47,9 +47,10 @@ export class CodexProvider extends ProcessProvider {
 
   async capabilities(): Promise<ProviderCapabilities> {
     const appServer = await this.runner.probe(this.#command, ["app-server", "--help"]);
-    const executable = appServer.exitCode === 0
-      ? appServer
-      : await this.runner.probe(this.#command, ["exec", "--help"]);
+    const executable =
+      appServer.exitCode === 0
+        ? appServer
+        : await this.runner.probe(this.#command, ["exec", "--help"]);
     return {
       available: executable.exitCode === 0,
       models: this.#model ? [this.#model] : undefined,
@@ -69,7 +70,8 @@ export class CodexProvider extends ProcessProvider {
         isolation: "none",
         filesystemScoped: false,
         networkIsolated: false,
-        detail: "approve-for-me mode launches codex without --sandbox; commands run with the caller's authority",
+        detail:
+          "approve-for-me mode launches codex without --sandbox; commands run with the caller's authority",
       });
     }
     if (this.#sandbox === "danger-full-access") {

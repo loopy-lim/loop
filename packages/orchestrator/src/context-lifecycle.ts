@@ -130,10 +130,12 @@ export function summarizeTaskContext(
     summaryBytes += byteLength(bounded) + 1;
   };
 
-  const previousChecks = context.previousChecks.map(receipt => {
+  const previousChecks = context.previousChecks.map((receipt) => {
     if (isFailureEvidence(receipt)) return receipt;
     summarizedEntryCount += 1;
-    appendLine(`check ${receipt.id}: exit ${receipt.exitCode} · ${receipt.stdout.trim() || receipt.stderr.trim() || "(empty output)"}`);
+    appendLine(
+      `check ${receipt.id}: exit ${receipt.exitCode} · ${receipt.stdout.trim() || receipt.stderr.trim() || "(empty output)"}`,
+    );
     return {
       ...receipt,
       stdout: byteHead(receipt.stdout, policy.summaryEntryBytes),
@@ -147,10 +149,14 @@ export function summarizeTaskContext(
     resultSummary = byteHead(resultSummary, policy.summaryEntryBytes);
   }
 
-  const passedReceipts = context.previousChecks.filter(receipt => !isFailureEvidence(receipt)).length;
-  const preservedEntryCount = (context.previousChecks.length - passedReceipts)
-    + context.guidance.length
-    + context.dependencyResults.length;
+  const passedReceipts = context.previousChecks.filter(
+    (receipt) => !isFailureEvidence(receipt),
+  ).length;
+  const preservedEntryCount =
+    context.previousChecks.length -
+    passedReceipts +
+    context.guidance.length +
+    context.dependencyResults.length;
   const fold: ContextFold = {
     reason: options.reason ?? "budgetThreshold",
     summarizedEntryCount,
@@ -158,10 +164,17 @@ export function summarizeTaskContext(
     summary: summaryLines.join("\n"),
     truncated,
     advisoryBytesBefore,
-    advisoryBytesAfter: measureAdvisoryContext({ ...context, previousChecks, resultSummary: resultSummary ?? null }),
+    advisoryBytesAfter: measureAdvisoryContext({
+      ...context,
+      previousChecks,
+      resultSummary: resultSummary ?? null,
+    }),
     occurredAt: options.occurredAt ?? new Date().toISOString(),
   };
-  return { context: { ...context, previousChecks, resultSummary: resultSummary ?? context.resultSummary }, fold };
+  return {
+    context: { ...context, previousChecks, resultSummary: resultSummary ?? context.resultSummary },
+    fold,
+  };
 }
 
 /**

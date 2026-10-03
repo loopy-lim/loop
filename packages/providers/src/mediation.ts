@@ -55,7 +55,10 @@ export interface ToolMediationVerdict {
 const UNLISTED: ToolMediationDecision = "allow";
 const ASK_FALLBACK: "allow" | "deny" = "deny";
 
-export function mediateToolCall(policy: ToolMediationPolicy, request: ToolRequest): ToolMediationVerdict {
+export function mediateToolCall(
+  policy: ToolMediationPolicy,
+  request: ToolRequest,
+): ToolMediationVerdict {
   for (const rule of policy.rules) {
     if (!matchesTool(rule.tools, request.tool)) continue;
     if (rule.commands && !matchesCommand(rule.commands, request.command)) continue;
@@ -65,13 +68,18 @@ export function mediateToolCall(policy: ToolMediationPolicy, request: ToolReques
     return {
       effect,
       decision,
-      reason: effect === decision
-        ? `${rule.label}: ${decision}${detail}`
-        : `${rule.label}: ${decision}${detail} -> ${effect} (headless adapter, askFallback=${policy.askFallback ?? ASK_FALLBACK})`,
+      reason:
+        effect === decision
+          ? `${rule.label}: ${decision}${detail}`
+          : `${rule.label}: ${decision}${detail} -> ${effect} (headless adapter, askFallback=${policy.askFallback ?? ASK_FALLBACK})`,
     };
   }
   const unlisted = policy.unlisted ?? UNLISTED;
-  return { effect: resolveDecision(unlisted, policy), decision: unlisted, reason: `unlisted: ${unlisted}` };
+  return {
+    effect: resolveDecision(unlisted, policy),
+    decision: unlisted,
+    reason: `unlisted: ${unlisted}`,
+  };
 }
 
 /**
@@ -135,7 +143,10 @@ function matchesCommand(patterns: string[], command: string | undefined): boolea
   return patterns.some((pattern) => new RegExp(pattern).test(command));
 }
 
-function resolveDecision(decision: ToolMediationDecision, policy: ToolMediationPolicy): ToolMediationEffect {
+function resolveDecision(
+  decision: ToolMediationDecision,
+  policy: ToolMediationPolicy,
+): ToolMediationEffect {
   if (decision === "ask") return policy.askFallback ?? ASK_FALLBACK;
   return decision;
 }

@@ -1,11 +1,7 @@
 import type { ComputeClass } from "@loop/protocol";
 
 import { herdrCallerFromEnvironment } from "@loop/herdr";
-import type {
-  HerdrExecution,
-  HerdrWorkerHandle,
-  HerdrWorkerRuntime,
-} from "@loop/herdr";
+import type { HerdrExecution, HerdrWorkerHandle, HerdrWorkerRuntime } from "@loop/herdr";
 
 import type {
   AgentProvider,
@@ -100,9 +96,10 @@ export class HerdrAgentProvider implements AgentProvider {
     // worker tabs land in the Lead's workspace when HERDR_PANE_ID is set,
     // with the loop-<runId> workspace as the documented fallback.
     const caller = herdrCallerFromEnvironment(process.env);
-    const args = this.#kind === "pi" && input.context?.task.writeScope.length === 0
-      ? [...this.#args, "--tools", "read,grep,find,ls"]
-      : this.#args;
+    const args =
+      this.#kind === "pi" && input.context?.task.writeScope.length === 0
+        ? [...this.#args, "--tools", "read,grep,find,ls"]
+        : this.#args;
 
     const handle = await this.#runtime.start({
       projectRoot: this.#projectRoot,
@@ -181,7 +178,8 @@ export class HerdrAgentProvider implements AgentProvider {
 
   async repair(workerId: string, feedback: string): Promise<WorkerResult> {
     const session = this.#require(workerId);
-    if (session.status !== "completed") throw new Error(`worker ${workerId} cannot repair from ${session.status}`);
+    if (session.status !== "completed")
+      throw new Error(`worker ${workerId} cannot repair from ${session.status}`);
     if (!feedback.trim()) throw new Error("repair feedback is required");
     session.status = "running";
     try {
@@ -191,12 +189,18 @@ export class HerdrAgentProvider implements AgentProvider {
       throw error;
     }
     let resolveCancellation!: (result: WorkerResult) => void;
-    const cancellation = new Promise<WorkerResult>(resolve => { resolveCancellation = resolve; });
+    const cancellation = new Promise<WorkerResult>((resolve) => {
+      resolveCancellation = resolve;
+    });
     session.resolveCancellation = resolveCancellation;
-    session.result = Promise.race([this.#wait(session), cancellation]).catch(error => {
+    session.result = Promise.race([this.#wait(session), cancellation]).catch((error) => {
       session.status = session.cancelRequested ? "cancelled" : "lost";
-      return { success: false, summary: redact(error instanceof Error ? error.message : String(error)), sessionId: session.handle.agentName,
-        failure: { kind: "process_error" as const, retryable: true } };
+      return {
+        success: false,
+        summary: redact(error instanceof Error ? error.message : String(error)),
+        sessionId: session.handle.agentName,
+        failure: { kind: "process_error" as const, retryable: true },
+      };
     });
     return session.result;
   }
@@ -232,7 +236,8 @@ export class HerdrAgentProvider implements AgentProvider {
 
   async #wait(session: Session): Promise<WorkerResult> {
     const startDeadline = Date.now() + this.#startGraceMs;
-    const runDeadline = this.#runDeadlineMs > 0 ? Date.now() + this.#runDeadlineMs : Number.POSITIVE_INFINITY;
+    const runDeadline =
+      this.#runDeadlineMs > 0 ? Date.now() + this.#runDeadlineMs : Number.POSITIVE_INFINITY;
     let observedWorking = false;
     for (;;) {
       const observed = await this.#runtime.status(session.handle);
@@ -312,8 +317,9 @@ export class HerdrAgentProvider implements AgentProvider {
         return { success: true, summary, sessionId: session.handle.agentName };
       }
       session.status = "lost";
-      const summary = redact((await this.#runtime.read(session.handle)).trim())
-        || `Herdr worker became ${observed}`;
+      const summary =
+        redact((await this.#runtime.read(session.handle)).trim()) ||
+        `Herdr worker became ${observed}`;
       this.#emit(session, { type: "lifecycle", status: "lost" });
       return {
         success: false,
@@ -355,12 +361,19 @@ function redact(value: string): string {
 }
 
 function lastAgentContentLine(transcript: string): string {
-  return transcript.split(/\r?\n/).map(line => line.trim()).reverse().find(line =>
-    line.length > 0
-    && !/^[─━-]{4,}/.test(line)
-    && !/^\//.test(line)
-    && !/^🎭/.test(line)
-    && !/^[↑↓]/.test(line)
-    && !/^\d+(?:\.\d+)?%\//.test(line)
-  ) ?? "";
+  return (
+    transcript
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .reverse()
+      .find(
+        (line) =>
+          line.length > 0 &&
+          !/^[─━-]{4,}/.test(line) &&
+          !line.startsWith("/") &&
+          !line.startsWith("🎭") &&
+          !/^[↑↓]/.test(line) &&
+          !/^\d+(?:\.\d+)?%\//.test(line),
+      ) ?? ""
+  );
 }

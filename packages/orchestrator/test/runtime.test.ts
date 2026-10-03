@@ -72,9 +72,7 @@ test("restart recovery leaves an observed running worker active", async () => {
   });
 
   expect(recovered.state).toBe("active");
-  expect(recovered.activeWorkers).toEqual([
-    { id: "live-worker", taskId: "implementation" },
-  ]);
+  expect(recovered.activeWorkers).toEqual([{ id: "live-worker", taskId: "implementation" }]);
 });
 
 function task(id: string) {

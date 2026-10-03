@@ -36,7 +36,10 @@ export function sandboxDeclaration(input: SandboxDeclarationInput): SandboxCapab
 }
 
 /** The honest no-isolation declaration; adapters without sandbox support report this rather than omitting themselves. */
-export function noSandboxDeclaration(adapterId: string, detail?: string): SandboxCapabilityDeclaration {
+export function noSandboxDeclaration(
+  adapterId: string,
+  detail?: string,
+): SandboxCapabilityDeclaration {
   return sandboxDeclaration({
     adapterId,
     isolation: "none",
@@ -51,6 +54,10 @@ export function noSandboxDeclaration(adapterId: string, detail?: string): Sandbo
  * payload shape). A provider that does not implement `sandboxDeclaration`
  * is reported with `isolation: none` — absence is declared, never guessed.
  */
-export function collectSandboxCapabilities(providers: readonly AgentProvider[]): SandboxCapabilityDeclaration[] {
-  return providers.map((provider) => provider.sandboxDeclaration?.() ?? noSandboxDeclaration(provider.id));
+export function collectSandboxCapabilities(
+  providers: readonly AgentProvider[],
+): SandboxCapabilityDeclaration[] {
+  return providers.map(
+    (provider) => provider.sandboxDeclaration?.() ?? noSandboxDeclaration(provider.id),
+  );
 }

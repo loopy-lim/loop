@@ -64,7 +64,12 @@ export const GUIDANCE_MAILBOX_DEFAULTS = {
 interface GuidanceEventPayload {
   kind?: {
     type?: unknown;
-    data?: { task_id?: unknown; message?: unknown; worker_id?: unknown; through_sequence?: unknown };
+    data?: {
+      task_id?: unknown;
+      message?: unknown;
+      worker_id?: unknown;
+      through_sequence?: unknown;
+    };
   };
 }
 
@@ -147,10 +152,15 @@ export function steerCoalescingOf(provider: unknown): SteerCoalescing {
   return declared === "turn_boundary" ? "inbox" : "window";
 }
 
-export function resolveMailboxOptions(options: GuidanceMailboxOptions = {}): Required<GuidanceMailboxOptions> {
+export function resolveMailboxOptions(
+  options: GuidanceMailboxOptions = {},
+): Required<GuidanceMailboxOptions> {
   return {
     enabled: options.enabled ?? true,
-    coalescingWindowMs: positive(options.coalescingWindowMs, GUIDANCE_MAILBOX_DEFAULTS.coalescingWindowMs),
+    coalescingWindowMs: positive(
+      options.coalescingWindowMs,
+      GUIDANCE_MAILBOX_DEFAULTS.coalescingWindowMs,
+    ),
     pollIntervalMs: positive(options.pollIntervalMs, GUIDANCE_MAILBOX_DEFAULTS.pollIntervalMs),
     maxMessageBytes: positive(options.maxMessageBytes, GUIDANCE_MAILBOX_DEFAULTS.maxMessageBytes),
   };
@@ -178,7 +188,9 @@ export function guidanceBatchSize(messages: readonly string[], maxMessageBytes: 
   return count;
 }
 
-function parseGuidanceAdded(payloadJson: string): { taskId: string | null; message: string } | undefined {
+function parseGuidanceAdded(
+  payloadJson: string,
+): { taskId: string | null; message: string } | undefined {
   const payload = parsePayload(payloadJson);
   if (payload?.type !== "guidance_added") return undefined;
   const data = payload.data;
@@ -187,12 +199,15 @@ function parseGuidanceAdded(payloadJson: string): { taskId: string | null; messa
   return { taskId, message: data.message };
 }
 
-function parseGuidanceDelivered(payloadJson: string): { taskId: string; throughSequence: number } | undefined {
+function parseGuidanceDelivered(
+  payloadJson: string,
+): { taskId: string; throughSequence: number } | undefined {
   const payload = parsePayload(payloadJson);
   if (payload?.type !== "guidance_delivered") return undefined;
   const through = Number(payload.data?.through_sequence);
   const taskId = payload.data?.task_id;
-  if (!Number.isFinite(through) || typeof taskId !== "string" || taskId.length === 0) return undefined;
+  if (!Number.isFinite(through) || typeof taskId !== "string" || taskId.length === 0)
+    return undefined;
   return { taskId, throughSequence: through };
 }
 
@@ -200,7 +215,9 @@ function isTaskCreated(payloadJson: string): boolean {
   return parsePayload(payloadJson)?.type === "task_created";
 }
 
-function parsePayload(payloadJson: string): { type: string; data?: Record<string, unknown> } | undefined {
+function parsePayload(
+  payloadJson: string,
+): { type: string; data?: Record<string, unknown> } | undefined {
   let payload: GuidanceEventPayload;
   try {
     payload = JSON.parse(payloadJson) as GuidanceEventPayload;
@@ -208,7 +225,10 @@ function parsePayload(payloadJson: string): { type: string; data?: Record<string
     return undefined;
   }
   if (typeof payload.kind?.type !== "string") return undefined;
-  return { type: payload.kind.type, data: payload.kind.data as Record<string, unknown> | undefined };
+  return {
+    type: payload.kind.type,
+    data: payload.kind.data as Record<string, unknown> | undefined,
+  };
 }
 
 /**
@@ -329,7 +349,10 @@ export class GuidanceMailbox {
     const ancestors = this.#ancestorsOf(taskId);
     const extras = this.#guidance.filter(
       (item) =>
-        item.sequence > watermark && item.taskId !== null && item.taskId !== taskId && ancestors.has(item.taskId),
+        item.sequence > watermark &&
+        item.taskId !== null &&
+        item.taskId !== taskId &&
+        ancestors.has(item.taskId),
     );
     let throughSequence = watermark;
     for (const message of resolved) {
@@ -351,7 +374,11 @@ export class GuidanceMailbox {
         .recordGuidanceDelivered({
           databasePath: this.#databasePath,
           runId: this.#runId,
-          guidance: { taskId, workerId: this.#targets.get(taskId)?.workerId ?? "claim-context", throughSequence },
+          guidance: {
+            taskId,
+            workerId: this.#targets.get(taskId)?.workerId ?? "claim-context",
+            throughSequence,
+          },
           executionOwner: this.#executionOwner,
         })
         .catch(() => {
@@ -403,13 +430,19 @@ export class GuidanceMailbox {
       const delivered = parseGuidanceDelivered(event.payloadJson);
       if (delivered) {
         // Log replay: the watermark survives restarts (crash recovery).
-        this.#watermarks.set(delivered.taskId, Math.max(this.#watermarkOf(delivered.taskId), delivered.throughSequence));
+        this.#watermarks.set(
+          delivered.taskId,
+          Math.max(this.#watermarkOf(delivered.taskId), delivered.throughSequence),
+        );
         continue;
       }
       const guidance = parseGuidanceAdded(event.payloadJson);
       if (guidance) {
         added.push({ sequence, taskId: guidance.taskId, message: guidance.message });
-        this.#sequenceByMessage.set(guidance.message, Math.max(this.#sequenceByMessage.get(guidance.message) ?? 0, sequence));
+        this.#sequenceByMessage.set(
+          guidance.message,
+          Math.max(this.#sequenceByMessage.get(guidance.message) ?? 0, sequence),
+        );
       }
     }
     if (sawTaskCreated || this.#graphStale) await this.#refreshGraph();
@@ -428,8 +461,13 @@ export class GuidanceMailbox {
 
   async #refreshGraph(): Promise<void> {
     try {
-      const plan = await this.#control.getRunPlan({ databasePath: this.#databasePath, runId: this.#runId });
-      this.#directDependencies = new Map(plan.tasks.map((task) => [task.id, [...task.dependencies]]));
+      const plan = await this.#control.getRunPlan({
+        databasePath: this.#databasePath,
+        runId: this.#runId,
+      });
+      this.#directDependencies = new Map(
+        plan.tasks.map((task) => [task.id, [...task.dependencies]]),
+      );
       this.#graphStale = false;
     } catch {
       // Routing keeps the previous graph; the next poll retries.
@@ -462,7 +500,8 @@ export class GuidanceMailbox {
     }
     const queue = [taskId];
     while (queue.length > 0) {
-      const current = queue.pop()!;
+      const current = queue.pop();
+      if (current === undefined) break; // length > 0 이 pop 을 보장한다
       for (const next of dependents.get(current) ?? []) {
         if (audience.has(next)) continue;
         audience.add(next);
@@ -478,7 +517,8 @@ export class GuidanceMailbox {
     if (this.#directDependencies.size === 0) return ancestors;
     const queue = [...(this.#directDependencies.get(taskId) ?? [])];
     while (queue.length > 0) {
-      const current = queue.pop()!;
+      const current = queue.pop();
+      if (current === undefined) break; // length > 0 이 pop 을 보장한다
       if (ancestors.has(current)) continue;
       ancestors.add(current);
       queue.push(...(this.#directDependencies.get(current) ?? []));
@@ -500,10 +540,18 @@ export class GuidanceMailbox {
       const watermark = this.#watermarkOf(target.taskId);
       target.pending = target.pending.filter((item) => item.sequence > watermark);
       if (target.pending.length === 0) continue;
-      const batch = guidanceBatchSize(target.pending.map(item => item.message), this.#maxMessageBytes);
+      const batch = guidanceBatchSize(
+        target.pending.map((item) => item.message),
+        this.#maxMessageBytes,
+      );
       if (batch === 0) continue;
-      const message = target.pending.slice(0, batch).map(item => item.message).join("\n");
-      const throughSequence = target.pending[batch - 1].sequence;
+      const message = target.pending
+        .slice(0, batch)
+        .map((item) => item.message)
+        .join("\n");
+      const lastPending = target.pending[batch - 1];
+      if (lastPending === undefined) continue; // batch <= pending.length 불변식
+      const throughSequence = lastPending.sequence;
       try {
         await target.steer(message);
       } catch {
@@ -528,7 +576,7 @@ export class GuidanceMailbox {
   }
 
   #sleep(milliseconds: number): Promise<void> {
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
       const timer = setTimeout(resolve, milliseconds);
       // Never keep a process alive for the mailbox alone.
       timer.unref?.();

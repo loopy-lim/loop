@@ -3,13 +3,23 @@ import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { HerdrWorkerRuntime } from "@loop/herdr";
 import type { GoalCriterionInput, TaskSpecInput } from "@loop/protocol";
-import type { AgentProvider, ProviderRegistry } from "@loop/providers";
+import type { AgentProvider, ProviderRegistry, RouteSelection } from "@loop/providers";
 import { CompletionVerifier, NodeCompletionRunner } from "./completion";
 import { cleanupRun, type CleanupRunReport, type CleanupRunRequest } from "./cleanup";
 import type { WorkerVisibility } from "./config";
 import type { OrchestrationControl } from "./control";
 import type { PersonaKindDefaults, PersonaRegistry } from "./persona";
-import { GuidanceMailbox, resolveMailboxOptions, steerCoalescingOf, type GuidanceMailboxOptions } from "./mailbox";
+import {
+  GuidanceMailbox,
+  resolveMailboxOptions,
+  steerCoalescingOf,
+  type GuidanceMailboxOptions,
+} from "./mailbox";
+import {
+  DEFAULT_COMPUTE_SELECTION,
+  selectionTaskFor,
+  type ComputeSelection,
+} from "./compute-selection";
 import { executeTask, type TaskExecution } from "./task-execution";
 import { redact } from "./redact";
 import { buildScopeCodeMap, type CodeMapProvider } from "./code-map";
@@ -43,6 +53,13 @@ interface OrchestratorOptions {
   /** Enables the built-in scope-derived code map when no explicit provider is supplied. */
   codeMapInjection?: "off" | "scopes";
   /**
+   * Dispatch-scaling provider-selection bias; "cheapest" (default) keeps the
+   * router's least-costly-sufficient choice, "strongest" routes each task at
+   * the ceiling of its own declared compute range and degrades to the
+   * declared floor when no available candidate satisfies it.
+   */
+  computeSelection?: ComputeSelection;
+  /**
    * G17 usage recorder; the collecting surface (adapter) pushes reported
    * usage, the ledger aggregates basis-separated totals for the run summary.
    */
@@ -57,7 +74,11 @@ export interface RunRequest {
   workingDirectory?: string;
   signal?: AbortSignal;
 }
-export interface ExistingRunRequest { databasePath: string; runId: string; signal?: AbortSignal }
+export interface ExistingRunRequest {
+  databasePath: string;
+  runId: string;
+  signal?: AbortSignal;
+}
 export interface RunSummary {
   status: "completed" | "failed" | "cancelled" | "attention" | "paused" | "running";
   tasks: number;
@@ -86,20 +107,24 @@ export class Orchestrator {
   readonly #contextPolicy?: ContextLifecyclePolicy;
   readonly #codeMap?: CodeMapProvider;
   readonly #usageLedger?: UsageLedger;
+  readonly #computeSelection: ComputeSelection;
   constructor(options: OrchestratorOptions) {
     this.#control = options.control;
     this.#providers = options.providers;
     this.#maxWorkers = Math.max(1, options.maxWorkers);
     this.#maxFrontierWorkers = Math.max(1, options.maxFrontierWorkers ?? 1);
-    this.#completionVerifier = options.completionVerifier ?? new CompletionVerifier(new NodeCompletionRunner());
+    this.#completionVerifier =
+      options.completionVerifier ?? new CompletionVerifier(new NodeCompletionRunner());
     this.#herdr = options.herdr;
     this.#personas = options.personas ?? {};
     this.#personaKindDefaults = options.personaKindDefaults;
     this.#workerVisibility = options.workerVisibility ?? "off";
     this.#guidanceMailbox = resolveMailboxOptions(options.guidanceMailbox);
     this.#contextPolicy = options.contextPolicy;
-    this.#codeMap = options.codeMap ?? (options.codeMapInjection === "scopes" ? buildScopeCodeMap : undefined);
+    this.#codeMap =
+      options.codeMap ?? (options.codeMapInjection === "scopes" ? buildScopeCodeMap : undefined);
     this.#usageLedger = options.usageLedger;
+    this.#computeSelection = options.computeSelection ?? DEFAULT_COMPUTE_SELECTION;
   }
   cleanupRun(request: CleanupRunRequest): Promise<CleanupRunReport> {
     return cleanupRun(this.#control, { ...request, herdr: request.herdr ?? this.#herdr });
@@ -111,10 +136,39 @@ export class Orchestrator {
     const summary = ledger.summary(runId);
     return summary.recordCount === 0 ? undefined : summary;
   }
+  /**
+   * Provider route for one task attempt (dispatch-scaling): with the
+   * "strongest" bias the first attempt targets the CEILING of the task's
+   * declared compute range; if no available candidate satisfies it, the
+   * declared floor is tried once and `onCeilingMiss` records the degrade as
+   * run activity. "cheapest" routes exactly as before.
+   */
+  async #routeFor(
+    task: TaskSpecInput,
+    excluded: ReadonlySet<string>,
+    stillActive: () => Promise<boolean>,
+    onCeilingMiss: (error: unknown) => Promise<void>,
+  ): Promise<RouteSelection | undefined> {
+    const biased = selectionTaskFor(task, this.#computeSelection);
+    if (biased === task)
+      return selectWhileActive(this.#providers.selectForTask(task, excluded), stillActive);
+    try {
+      return await selectWhileActive(this.#providers.selectForTask(biased, excluded), stillActive);
+    } catch (error) {
+      await onCeilingMiss(error).catch(() => {});
+      return selectWhileActive(this.#providers.selectForTask(task, excluded), stillActive);
+    }
+  }
   async prepare(request: RunRequest): Promise<void> {
     const input = runInput(request);
-    const prepared = { ...input, intent: redact(request.intent ?? ""), workingDirectory: realpathSync(resolve(request.workingDirectory ?? process.cwd())), tasks: request.tasks };
-    if (request.criteria) await this.#control.prepareGoalRun({ ...prepared, criteria: request.criteria });
+    const prepared = {
+      ...input,
+      intent: redact(request.intent ?? ""),
+      workingDirectory: realpathSync(resolve(request.workingDirectory ?? process.cwd())),
+      tasks: request.tasks,
+    };
+    if (request.criteria)
+      await this.#control.prepareGoalRun({ ...prepared, criteria: request.criteria });
     else await this.#control.prepareRun(prepared);
   }
   async run(request: RunRequest): Promise<RunSummary> {
@@ -134,9 +188,17 @@ export class Orchestrator {
   async #execute(request: ExistingRunRequest): Promise<RunSummary> {
     const input = runInput(request);
     const plan = await this.#control.getRunPlan(input);
-    const summary: RunSummary = { status: "running", tasks: plan.tasks.length, escalations: [], providersByTask: {}, startedAt: {}, finishedAt: {} };
+    const summary: RunSummary = {
+      status: "running",
+      tasks: plan.tasks.length,
+      escalations: [],
+      providersByTask: {},
+      startedAt: {},
+      finishedAt: {},
+    };
     const owner = `${process.pid}:${randomUUID()}`;
-    const lease = () => this.#control.claimExecution({ ...input, owner, nowMs: Date.now(), ttlMs: 5000 });
+    const lease = () =>
+      this.#control.claimExecution({ ...input, owner, nowMs: Date.now(), ttlMs: 5000 });
     if (!(await lease()).accepted) {
       const initial = await this.#control.getSnapshot(input);
       const expires = Number(initial.executionExpiresAt ?? Date.now());
@@ -155,11 +217,19 @@ export class Orchestrator {
       if (!(await lease()).accepted) return summary;
     }
     const executionInput = { ...input, executionOwner: owner };
+    // §D run resilience: declared goal criteria ride into every task
+    // execution so its verification flow can give pending criteria one
+    // stable-source re-run before any blocked-goal attention becomes
+    // inevitable.
+    const goalCriteria = (await this.#control.getSnapshot(input)).goalCriteria.map(
+      ({ id, description, taskId, checkIds }) => ({ id, description, taskId, checkIds }),
+    );
     // Options that never vary across scheduled tasks, assembled once.
     const taskExecutionOptions = {
       input: executionInput,
       control: this.#control,
       verifier: this.#completionVerifier,
+      goalCriteria,
       personas: this.#personas,
       personaKindDefaults: this.#personaKindDefaults,
       recordRawActivity: this.#workerVisibility === "off",
@@ -177,21 +247,45 @@ export class Orchestrator {
     const renew = async () => {
       if (heartbeatRunning) return;
       heartbeatRunning = true;
-      try { if (!(await this.#control.renewExecution({ ...input, owner, nowMs: Date.now(), ttlMs: 5000 })).accepted) leaseLost = true; }
-      catch { leaseLost = true; }
-      finally { heartbeatRunning = false; }
+      try {
+        if (
+          !(await this.#control.renewExecution({ ...input, owner, nowMs: Date.now(), ttlMs: 5000 }))
+            .accepted
+        )
+          leaseLost = true;
+      } catch {
+        leaseLost = true;
+      } finally {
+        heartbeatRunning = false;
+      }
     };
     heartbeat.unref();
     try {
       // A fresh process never guesses that old OS work has disappeared.
       const previous = await this.#control.getSnapshot(input);
-      if (previous.activeWorkers.length > 0 || previous.tasks.some(task => task.state === "verifying")) {
-        for (const task of previous.tasks.filter(task => task.state === "verifying")) {
-          await this.#control.requestAttention({ ...executionInput, attentionId: `recovery-${request.runId}-${task.id}-verification`, kind: "failure", taskId: task.id, summary: `Verification was interrupted. Confirm its process stopped, then run: loop reconcile ${request.runId} ${task.id} stopped; loop resume ${request.runId}.` });
+      if (
+        previous.activeWorkers.length > 0 ||
+        previous.tasks.some((task) => task.state === "verifying")
+      ) {
+        for (const task of previous.tasks.filter((task) => task.state === "verifying")) {
+          await this.#control.requestAttention({
+            ...executionInput,
+            attentionId: `recovery-${request.runId}-${task.id}-verification`,
+            kind: "failure",
+            taskId: task.id,
+            summary: `Verification was interrupted. Confirm its process stopped, then run: loop reconcile ${request.runId} ${task.id} stopped; loop resume ${request.runId}.`,
+          });
         }
         for (const worker of previous.activeWorkers) {
           const id = `recovery-${request.runId}-${worker.id}`;
-          if (!previous.openAttentionIds.includes(id)) await this.#control.requestAttention({ ...executionInput, attentionId: id, kind: "failure", taskId: worker.taskId, summary: `Execution owner restarted. Confirm worker ${worker.id} has stopped, then run: loop reconcile ${request.runId} ${worker.taskId} stopped; loop resume ${request.runId}.` });
+          if (!previous.openAttentionIds.includes(id))
+            await this.#control.requestAttention({
+              ...executionInput,
+              attentionId: id,
+              kind: "failure",
+              taskId: worker.taskId,
+              summary: `Execution owner restarted. Confirm worker ${worker.id} has stopped, then run: loop reconcile ${request.runId} ${worker.taskId} stopped; loop resume ${request.runId}.`,
+            });
         }
         summary.status = "attention";
         return summary;
@@ -200,7 +294,13 @@ export class Orchestrator {
       // happen at safe boundaries (mailbox.ts) and never touch run state.
       // The lease owner authorizes the mailbox's GuidanceDelivered appends.
       mailbox = this.#guidanceMailbox.enabled
-        ? new GuidanceMailbox(this.#control, input.databasePath, input.runId, this.#guidanceMailbox, owner)
+        ? new GuidanceMailbox(
+            this.#control,
+            input.databasePath,
+            input.runId,
+            this.#guidanceMailbox,
+            owner,
+          )
         : undefined;
       mailbox?.start();
       while (true) {
@@ -209,12 +309,15 @@ export class Orchestrator {
         let snapshot = await this.#control.getSnapshot(input);
         if (snapshot.state === "cancelling" || snapshot.state === "cancelled") {
           for (const task of active.values()) task.abort();
-          await Promise.all([...active.values()].map(task => task.done));
+          await Promise.all([...active.values()].map((task) => task.done));
           for (const task of active.values()) if (task.error) throw task.error;
           for (const id of active.keys()) mailbox?.release(id);
           active.clear();
           await this.#control.cancelRun(input);
-          summary.status = (await this.#control.getSnapshot(input)).state === "cancelled" ? "cancelled" : "attention";
+          summary.status =
+            (await this.#control.getSnapshot(input)).state === "cancelled"
+              ? "cancelled"
+              : "attention";
           return summary;
         }
         for (const [id, task] of active) {
@@ -233,7 +336,12 @@ export class Orchestrator {
           summary.status = snapshot.state === "attention" ? "attention" : "paused";
           return summary;
         }
-        const claims = await this.#control.claimRunnableTasks({ ...executionInput, runningTaskIds: [...active.keys()], maxWorkers: this.#maxWorkers, maxFrontierWorkers: this.#maxFrontierWorkers });
+        const claims = await this.#control.claimRunnableTasks({
+          ...executionInput,
+          runningTaskIds: [...active.keys()],
+          maxWorkers: this.#maxWorkers,
+          maxFrontierWorkers: this.#maxFrontierWorkers,
+        });
         for (const taskId of claims.taskIds) {
           // Controls can arrive while earlier workers are being prepared.
           snapshot = await this.#control.getSnapshot(input);
@@ -244,52 +352,105 @@ export class Orchestrator {
           // guidance for descendant sub-tasks. Without a mailbox the context
           // stays exactly as the bridge produced it.
           const claimGuidance = await mailbox?.claimContext(taskId, context.guidance);
-          const startContext = claimGuidance ? { ...context, guidance: claimGuidance.guidance } : context;
+          const startContext = claimGuidance
+            ? { ...context, guidance: claimGuidance.guidance }
+            : context;
           let provider: AgentProvider | undefined;
-          let selectedComputeClass: TaskSpecInput["preferredCompute"] | undefined;
+          let route: RouteSelection | undefined;
           let routeReason = "";
           try {
-            const selection = this.#providers.selectForTask(context.task);
-            const selected = await selectWhileActive(selection, async () => {
-              if (request.signal?.aborted) await this.#control.cancelRun(input);
-              return !leaseLost && (await this.#control.getSnapshot(input)).state === "active";
-            });
+            const selected = await this.#routeFor(
+              context.task,
+              new Set(),
+              async () => {
+                if (request.signal?.aborted) await this.#control.cancelRun(input);
+                return !leaseLost && (await this.#control.getSnapshot(input)).state === "active";
+              },
+              async (error) => {
+                await this.#control.recordActivity({
+                  ...executionInput,
+                  taskId,
+                  activity: redact(
+                    `Strongest compute (${context.task.maximumCompute}) unavailable; routed at the declared floor (${context.task.preferredCompute}). ${error}`,
+                    400,
+                  ),
+                });
+              },
+            );
             if (!selected) break;
             provider = selected.provider;
-            selectedComputeClass = selected.computeClass;
+            route = selected;
             routeReason = selected.reason;
-          }
-          catch (error) {
-            await this.#control.requestAttention({ ...executionInput, attentionId: `provider-${request.runId}-${taskId}-${context.attempt}`, kind: "failure", taskId, summary: redact(error) });
+          } catch (error) {
+            await this.#control.requestAttention({
+              ...executionInput,
+              attentionId: `provider-${request.runId}-${taskId}-${context.attempt}`,
+              kind: "failure",
+              taskId,
+              summary: redact(error),
+            });
             break;
           }
-          if (!provider) break;
-          const history = summary.providersByTask[taskId] ??= [];
+          if (!provider || route === undefined) break;
+          const history = (summary.providersByTask[taskId] ??= []);
           const previousProvider = history.at(-1);
-          if (previousProvider && previousProvider !== provider.id) summary.escalations.push({ taskId, from: previousProvider, to: provider.id });
+          if (previousProvider && previousProvider !== provider.id)
+            summary.escalations.push({ taskId, from: previousProvider, to: provider.id });
           history.push(provider.id);
           const workerId = `${request.runId}:${taskId}:${context.attempt}:${randomUUID()}`;
           // Reserve durable ownership BEFORE the OS side effect.
-          try { await this.#control.recordWorkerStarted({ ...executionInput, taskId, workerId }); }
-          catch (error) {
+          try {
+            await this.#control.recordWorkerStarted({ ...executionInput, taskId, workerId });
+          } catch (error) {
             if ((await this.#control.getSnapshot(input)).state !== "active") break;
             throw error;
           }
-          await this.#control.recordActivity({ ...executionInput, taskId, activity: `Route: ${routeReason}` });
+          await this.#control.recordActivity({
+            ...executionInput,
+            taskId,
+            activity: `Route: ${routeReason}`,
+          });
           summary.startedAt[taskId] = Date.now();
           const execution = executeTask({
-            ...taskExecutionOptions, context: startContext, workerId, provider, computeClass: selectedComputeClass!,
-            selectFallback: async excluded => {
-              const next = await selectWhileActive(this.#providers.selectForTask(context.task, excluded), async () => {
-                if (request.signal?.aborted) await this.#control.cancelRun(input);
-                // Pause drains this already-reserved task; cancellation does not.
-                return !leaseLost && ["active", "pausing"].includes((await this.#control.getSnapshot(input)).state);
-              });
+            ...taskExecutionOptions,
+            context: startContext,
+            workerId,
+            provider,
+            computeClass: route.computeClass,
+            selectFallback: async (excluded) => {
+              const next = await this.#routeFor(
+                context.task,
+                excluded,
+                async () => {
+                  if (request.signal?.aborted) await this.#control.cancelRun(input);
+                  // Pause drains this already-reserved task; cancellation does not.
+                  return (
+                    !leaseLost &&
+                    ["active", "pausing"].includes((await this.#control.getSnapshot(input)).state)
+                  );
+                },
+                async (error) => {
+                  await this.#control.recordActivity({
+                    ...executionInput,
+                    taskId,
+                    activity: redact(
+                      `Strongest compute (${context.task.maximumCompute}) unavailable on fallback; routed at the declared floor (${context.task.preferredCompute}). ${error}`,
+                      400,
+                    ),
+                  });
+                },
+              );
               if (next) {
-                const previous = history.at(-1)!;
+                const previous = history.at(-1);
+                if (previous === undefined)
+                  throw new Error("fallback routing lost the previous provider record");
                 summary.escalations.push({ taskId, from: previous, to: next.provider.id });
                 history.push(next.provider.id);
-                await this.#control.recordActivity({ ...executionInput, taskId, activity: `Fallback route: ${next.reason}` });
+                await this.#control.recordActivity({
+                  ...executionInput,
+                  taskId,
+                  activity: `Fallback route: ${next.reason}`,
+                });
               }
               return next;
             },
@@ -300,17 +461,24 @@ export class Orchestrator {
             // Watermark: everything the assembled start context covered.
             // Guidance at/below it is already with this worker; later
             // guidance arrives through the tap instead.
-            deliveredThroughSequence: claimGuidance ? claimGuidance.throughSequence : Number(snapshot.lastSequence ?? 0),
+            deliveredThroughSequence: claimGuidance
+              ? claimGuidance.throughSequence
+              : Number(snapshot.lastSequence ?? 0),
             // Live delivery follows the provider's current handle (the
             // execution binds it), not the durable worker id. The drain
             // policy reads the provider's steer-delivery capability: a
             // turn-boundary inbox self-coalesces and is handed off on every
             // tap tick, a conversation channel keeps the spam window.
-            ...(provider.steer ? { steer: async message => {
-              const live = execution.steer;
-              if (!live) throw new Error("worker has no live steer channel yet");
-              await live(message);
-            }, steerCoalescing: steerCoalescingOf(provider) } : {}),
+            ...(provider.steer
+              ? {
+                  steer: async (message) => {
+                    const live = execution.steer;
+                    if (!live) throw new Error("worker has no live steer channel yet");
+                    await live(message);
+                  },
+                  steerCoalescing: steerCoalescingOf(provider),
+                }
+              : {}),
           });
           active.set(taskId, execution);
         }
@@ -318,22 +486,40 @@ export class Orchestrator {
         if (active.size === 0) {
           snapshot = await this.#control.getSnapshot(input);
           if (snapshot.state !== "active") continue;
-          const pendingCriteria = snapshot.goalCriteria.filter(item => item.state !== "verified");
-          const blockedSummary = pendingCriteria.length > 0 && snapshot.tasks.every(task => task.state === "done")
-            ? `Tasks passed, but goal criteria remain unverified: ${pendingCriteria.map(item => item.id).join(", ")}. Inspect check receipts and source-state evidence before closing the goal.`
-            : "No runnable task remains. Inspect dependencies and reconcile interrupted verification before retrying.";
-          await this.#control.requestAttention({ ...executionInput, attentionId: `blocked-${request.runId}-${snapshot.lastSequence}`, kind: "failure", taskId: null, summary: blockedSummary });
+          const pendingCriteria = snapshot.goalCriteria.filter((item) => item.state !== "verified");
+          const blockedSummary =
+            pendingCriteria.length > 0 && snapshot.tasks.every((task) => task.state === "done")
+              ? `Tasks passed, but goal criteria remain unverified: ${pendingCriteria.map((item) => item.id).join(", ")}. Inspect check receipts and source-state evidence before closing the goal.`
+              : "No runnable task remains. Inspect dependencies and reconcile interrupted verification before retrying.";
+          await this.#control.requestAttention({
+            ...executionInput,
+            attentionId: `blocked-${request.runId}-${snapshot.lastSequence}`,
+            kind: "failure",
+            taskId: null,
+            summary: blockedSummary,
+          });
           continue;
         }
         // Poll the durable control channel even when no worker has finished.
-        await Promise.race([delay(50), ...[...active.values()].map(task => task.done)]);
+        await Promise.race([delay(50), ...[...active.values()].map((task) => task.done)]);
       }
     } catch (error) {
       for (const task of active.values()) task.abort();
-      await Promise.allSettled([...active.values()].map(task => task.done));
+      await Promise.allSettled([...active.values()].map((task) => task.done));
       const snapshot = await this.#control.getSnapshot(input);
-      if (!leaseLost && snapshot.executionOwner === owner && Number(snapshot.executionExpiresAt ?? 0) > Date.now() && !["completed", "failed", "cancelled"].includes(snapshot.state)) {
-        await this.#control.requestAttention({ ...executionInput, attentionId: `dispatcher-${owner}`, kind: "failure", taskId: null, summary: redact(error) });
+      if (
+        !leaseLost &&
+        snapshot.executionOwner === owner &&
+        Number(snapshot.executionExpiresAt ?? 0) > Date.now() &&
+        !["completed", "failed", "cancelled"].includes(snapshot.state)
+      ) {
+        await this.#control.requestAttention({
+          ...executionInput,
+          attentionId: `dispatcher-${owner}`,
+          kind: "failure",
+          taskId: null,
+          summary: redact(error),
+        });
       }
       summary.status = snapshot.state === "failed" ? "failed" : "attention";
       return summary;
@@ -345,16 +531,30 @@ export class Orchestrator {
     }
   }
 }
-function runInput(request: ExistingRunRequest) { return { databasePath: request.databasePath, runId: request.runId }; }
-function delay(milliseconds: number) { return new Promise<void>(resolve => setTimeout(resolve, milliseconds)); }
+function runInput(request: ExistingRunRequest) {
+  return { databasePath: request.databasePath, runId: request.runId };
+}
+function delay(milliseconds: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
 
-async function selectWhileActive<T>(selection: Promise<T>, stillActive: () => Promise<boolean>): Promise<T | undefined> {
-  const pending = selection.then(provider => ({ provider }), error => ({ error }));
+async function selectWhileActive<T>(
+  selection: Promise<T>,
+  stillActive: () => Promise<boolean>,
+): Promise<T | undefined> {
+  const pending = selection.then(
+    (provider) => ({ provider }),
+    (error) => ({ error }),
+  );
   const deadline = Date.now() + 30000;
   while (await stillActive()) {
     const result = await Promise.race([pending, delay(50).then(() => undefined)]);
-    if (result) { if ("error" in result) throw result.error; return result.provider; }
-    if (Date.now() > deadline) throw new Error("Provider capability lookup timed out; retry after checking the provider.");
+    if (result) {
+      if ("error" in result) throw result.error;
+      return result.provider;
+    }
+    if (Date.now() > deadline)
+      throw new Error("Provider capability lookup timed out; retry after checking the provider.");
   }
   return undefined;
 }
