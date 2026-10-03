@@ -109,3 +109,57 @@ Loop는 멀티 태스크 DAG와 결정 노드 직렬화를 이미 코어에서 �
 - **필수 섹션 목록:** 위 §결정-2의 표가 기계적 규격이다 — 1 메타·상태, 2 배경과 범위, 3 목표와 비목표, 4 요구사항(EARS+`R<n>`+검증 방식), 5 설계(경계 영향 포함), 6 검토된 대안, 7 요구사항–태스크 역추적 표, 8 미해결 질문·위험, 9 검증 계획.
 - **후속 통합 태스크의 첫 적용 방법:** `docs/design/design.md`를 위 9절 형식으로 작성한다. 요구사항은 D1–D3를 EARS로 세분화한 `R<n>` 집합(조사 문서 §7.2의 예시 문장 출발), §7 역추적 표의 태스크 열은 S1–S8에 kind·read/write 범위를 붙인 것, §8은 design-foundations §6의 D-1–D-6을 흡수한다. 작성 후 리뷰·검증까지 수행하고 코드 구현은 별도 승인 단계로 남긴다.
 - **부담·위험:** (i) 문서 골격이 형식주의로 굳을 위험 — 적용 기준(§결정-6)의 면제 규칙으로 완화하며, 몇 회 적용 후 골격의 과잉/부족을 재검토한다; (ii) design.md와 ADR의 역할 혼동 — "계획+근거는 design.md, 영속 결정은 ADR" 원칙과 승격 규칙(§결정-5)으로 구분한다; (iii) `docs/design/design.md`라는 비-slug 파일명이 첫 사례로 남는 것 — 이후 에픽부터 slug 명명을 적용한다.
+
+## 후속 결정 — 디자인 논의 진입점과 read model 편집 프로토콜
+
+### 배경
+
+Stitch는 `DESIGN.md`를 인간과 에이전트가 함께 읽고 편집하며 디자인과 같이 진화시키는 **living artifact**로 정의한다(`docs/design/research/2026-09-24-stitch-design-md-study.md` §2). 반면 Loop의 `docs/design/design-language.md`는 승인된 시각 언어를 정본에서 투영하는 **파생 read model**이고, 변경 요구사항·승인은 `docs/design/design.md`, 영속 결정은 ADR, 실행 값은 코드·테스트·설정이 각각 소유한다. Stitch식 자유 편집을 canonical 본문에 그대로 허용하면 미승인 제안이 현재 규칙처럼 소비되고 단일 원천과 승인 게이트를 우회한다. 반대로 파일 전체를 읽기 전용으로 만들면 living artifact의 사람·에이전트 공동 편집성과 시각 언어에 대해 말할 가까운 진입점을 잃는다.
+
+### 결정
+
+**채택: `design-language.md` 안에 격리된 제안 lane을 허용하되, canonical read model의 직접 수정은 금지한다.** 제3자(사람 또는 다른 에이전트 세션)는 시각 언어 제안을 이 파일에 직접 남길 수 있지만, `## Proposals / 제안` 절의 명시적 마커 안에서만 가능하다. 이 편집은 제안 접수이지 승인이나 현재 규칙 변경이 아니다.
+
+문서별 진입점은 제안의 수명주기로 구분한다.
+
+| 말하려는 내용 | 최초 진입점 | 소유하는 결과 |
+| --- | --- | --- |
+| 색·글리프·밀도·컴포넌트·tone 등 **시각 언어 값의 추가·수정·삭제 제안** | `docs/design/design-language.md`의 `## Proposals / 제안` | 검토 전 후보. canonical 값이 아님 |
+| 변경의 문제·목표·EARS 요구사항·대안·설계·태스크·검증 | 적용 기준을 충족하는 `docs/design/<에픽-slug>.md`(현재 에픽은 `docs/design/design.md`) | 승인 게이트를 거치는 변경 설계 |
+| 여러 에픽에 남을 소유권·경계·승인 정책 또는 채택 이유 | `docs/decisions/` ADR | 영속 규칙과 기각 대안 |
+| 구현과 정합한 현재 시각 언어를 빠르게 조회 | `docs/design/design-language.md`의 canonical 본문 | 파생 read model. 독립 정본이 아님 |
+
+제안 표기 형식은 다음으로 고정한다. ID는 파일 안에서 유일한 `DP-YYYYMMDD-N`을 사용한다.
+
+```md
+<!-- design-proposal:start DP-YYYYMMDD-N -->
+### DP-YYYYMMDD-N — <짧은 제목>
+- **상태:** proposed
+- **제안자:** <사람 또는 에이전트/세션 식별자>
+- **대상:** <canonical 절 또는 시각 언어 항목>
+- **현재 근거:** <코드·테스트·설정·ADR·관찰 링크>
+- **제안:** <추가·수정·삭제할 내용>
+- **이유와 영향:** <사용자 효과, 경계, 호환성>
+- **후속:** untriaged
+<!-- design-proposal:end DP-YYYYMMDD-N -->
+```
+
+- 제안자는 canonical 절, YAML/frontmatter, 기존 관찰값을 함께 고치지 않는다. 제안 마커 밖의 직접 편집은 승인 우회로 간주해 되돌린다.
+- 리뷰어는 근거와 영향을 확인하고 `후속`을 다음 하나로 분류한다: `sync:<정본 링크>`(이미 승인·구현된 값과 read model의 불일치), `design:<design.md 경로>#R<n>`(새 요구사항 또는 동작 변경), `decision:<태스크 id 또는 ADR 경로>`(영속 규칙), `rejected:<이유>`.
+- `sync`는 새 디자인 결정이 아니므로 리뷰어가 정본과 구현 검증을 확인한 뒤 integration 변경으로 canonical 본문에 반영할 수 있다. `design`과 `decision`은 연결된 변경 설계의 decision 태스크가 accepted 되고 구현 completion check가 통과하기 전에는 canonical 본문으로 승격할 수 없다.
+- 승격은 제안자가 아닌 승인 이후의 integration 태스크가 수행한다. 이 태스크는 정본을 확인해 canonical 본문을 갱신하고 제안 블록을 제거한다. 기각 제안도 블록을 제거하되, 재제안 방지가 필요한 물질적 대안과 이유는 연결된 design.md 또는 ADR에 남긴다. Git 이력이 접수·검토 흔적을 보존한다.
+- 제안만 추가된 상태에서는 `design-language.md`의 `status`와 승인 상태를 바꾸지 않는다. 제안 텍스트는 에이전트가 새 UI를 생성할 때 적용할 규칙으로 소비하지 않는다.
+
+따라서 흐름은 **제안(`design-language.md` 제안 lane) → 분류·근거 검토 → 필요 시 `design.md` 개정과 decision 태스크 → 승인 및 구현 검증 → integration이 read model 갱신**이다. 영속 규칙이 생기면 같은 흐름에서 ADR을 먼저 기록한다. 이 구조는 Stitch의 living artifact를 “누구나 제안을 가까이에서 편집할 수 있음”으로 보존하면서도, Loop의 승인 게이트를 “누구나 canonical 값을 즉시 바꿀 수 있음”으로 오해하지 않게 한다.
+
+### 검토한 대안
+
+1. **기각 — `design-language.md` 전체를 자유 편집하는 순수 living-artifact 방식.** 대화 비용은 가장 낮지만 YAML/canonical 본문에서 제안과 승인값을 구분할 수 없다. 에이전트가 미승인 값을 현재 truth로 재소비하고, `design.md` decision 게이트와 코드·테스트·설정의 단일 원천을 우회한다.
+2. **기각 — `design-language.md`를 완전 읽기 전용으로 두고 모든 제안을 `design.md`/decision 태스크에서만 접수.** 승인 경계는 가장 단순하지만 사소한 시각 언어 관찰도 무거운 변경 설계에서 시작해야 하며, Stitch가 강조하는 공동 편집 가능한 living artifact의 이점을 버린다. 특히 제안자가 어느 EARS 요구사항으로 승격할지 알기 전의 관찰을 받을 장소가 없다.
+3. **채택 — 동일 문서의 격리된 제안 lane + 승인 후 단방향 투영.** 제안 접근성은 유지하고 canonical 소비 경계는 명시적으로 닫는다. 별도 inbox 파일이나 새 상태 저장소를 만들지 않아 현재 규모에서 가장 단순하며, 제안이 물질적 변경으로 판정된 시점에만 기존 `design.md`/ADR 절차 비용을 지불한다.
+
+### 결과와 영향
+
+- 디자인 논의의 단일 파일을 새로 만들지 않는다. 질문의 종류에 따라 시각 값은 `design-language.md`, 변경 설계는 `design.md`, 영속 규칙은 ADR로 라우팅한다.
+- `design-language.md`는 **편집 가능한 read model**이지만 편집 가능 범위는 제안 lane뿐이다. canonical 본문은 승인·검증된 정본에서 integration 태스크가 투영한다.
+- 후속 구현 태스크는 `design-language.md`에 위 제안 절과 “제안은 canonical 규칙이 아님”이라는 소비 경고를 추가해야 한다. 본 결정은 문서 프로토콜만 정하며 코드 변경은 없다.

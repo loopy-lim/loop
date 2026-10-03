@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Loop 앱 UI 갤러리 — 전체</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background: #111; color: #eee; margin: 2rem; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin-top: 2.5rem; border-bottom: 1px solid #444; padding-bottom: .4rem;}
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
+  figure { margin: 0; background: #1b1b1b; border-radius: 10px; overflow: hidden; }
+  img { width: 100%; display: block; }
+  figcaption { font-size: .8rem; padding: .5rem .7rem; color: #bbb; }
+  code { color: #8ec; font-size: .72rem; word-break: break-all; }
+</style>
+</head>
+<body>
+<h1>Loop 앱 UI 갤러리 — 현재 상태 전체</h1>
+<p>같은 디렉터리에서 <code>open GALLERY.html</code>로 열면 됩니다. 이미지는 상대 경로라 그대로 렌더됩니다.</p>
+
+<h2>1. 현재 대화 GUI (Codex 앱 스타일, v8 디테일 반영)</h2>
+<div class="grid">
+  <figure><img src="v7/01-tokenless-first-launch-chats.png"><figcaption>첫 실행 — 토큰 입력 없이 바로 채팅 목록 <code>v7/01</code></figcaption></figure>
+  <figure><img src="v5/02-chats-list.png"><figcaption>채팅 목록 (SafeArea, 중앙 정렬) <code>v5/02</code></figcaption></figure>
+  <figure><img src="v5/03-conversation-running.png"><figcaption>대화 뷰 — 실행 중 <code>v5/03</code></figcaption></figure>
+  <figure><img src="v8/01-markdown-code-block-copy.png"><figcaption>마크다운 렌더 + 코드블록 카드 + 복사 <code>v8/01</code></figcaption></figure>
+  <figure><img src="v8/02-tool-card-expanded-running-chip.png"><figcaption>툴 호출 카드 (확장, 상태 칩, 인자 요약) <code>v8/02</code></figcaption></figure>
+  <figure><img src="v8/03-typing-indicator-streaming.png"><figcaption>스트리밍 타이핑 인디케이터 <code>v8/03</code></figcaption></figure>
+  <figure><img src="v8/04-jump-pill-date-header-timestamps.png"><figcaption>타임스탬프 + 날짜 헤더 + "맨 아래로" 필 <code>v8/04</code></figcaption></figure>
+  <figure><img src="v7/02-attachment-conversation.png"><figcaption>이미지 인라인 + 파일 카드 (M2) <code>v7/02</code></figcaption></figure>
+  <figure><img src="v5/04-conversation-steered.png"><figcaption>실행 중 steer 반영 마커 <code>v5/04</code></figcaption></figure>
+  <figure><img src="v5/08-composer-keyboard.png"><figcaption>컴포저 + 키보드 (안전영역) <code>v5/08</code></figcaption></figure>
+  <figure><img src="v8/05-empty-state.png"><figcaption>빈 상태 <code>v8/05</code></figcaption></figure>
+  <figure><img src="v5/05-conversation-raw.png"><figcaption>raw 터미널 토글 (pane 미러) <code>v5/05</code></figcaption></figure>
+  <figure><img src="v5/07-landscape-chats.png"><figcaption>가로 모드 <code>v5/07</code></figcaption></figure>
+</div>
+
+<h2>2. 데스크톱 (Tauri)</h2>
+<div class="grid">
+  <figure><img src="v7/03-desktop-app.png"><figcaption>데스크톱 앱 — 모바일과 동일 GUI <code>v7/03</code></figcaption></figure>
+</div>
+
+<h2>3. 로그인 흐름 (Keychain, 1회 로그인)</h2>
+<div class="grid">
+  <figure><img src="v6/01-first-login-chats.png"><figcaption>첫 로그인 후 <code>v6/01</code></figcaption></figure>
+  <figure><img src="v6/02-relaunch-autoconnect-chats.png"><figcaption>재실행 → 자동 연결 <code>v6/02</code></figcaption></figure>
+  <figure><img src="v6/04-relaunch-after-logout-manual.png"><figcaption>로그아웃 후 수동 Connect 화면 <code>v6/04</code></figcaption></figure>
+  <figure><img src="v5/01-connect-screen.png"><figcaption>수동 Connect (bearer 폴백) <code>v5/01</code></figcaption></figure>
+</div>
+
+<h2>4. v9 — 이미지 첨부 + 구문 강조 + 디자인 승격</h2>
+<div class="grid">
+  <figure><img src="v9/01-composer-attach-thumbnails.png"><figcaption>컴포저에서 이미지 첨부 (썸네일) <code>v9/01</code></figcaption></figure>
+  <figure><img src="v9/02-user-image-inline.png"><figcaption>보낸 이미지가 대화에 인라인 <code>v9/02</code></figcaption></figure>
+  <figure><img src="v9/03-syntax-highlighted-code.png"><figcaption>코드블록 구문 강조 <code>v9/03</code></figcaption></figure>
+  <figure><img src="v9/04-refreshed-chats.png"><figcaption>새 룩 — 채팅 목록 <code>v9/04</code></figcaption></figure>
+  <figure><img src="v9/05-refreshed-conversation.png"><figcaption>새 룩 — 대화 <code>v9/05</code></figcaption></figure>
+</div>
+
+<h2>5. v10 — QR 원 페어링 (스캔 한 번, 계속 연결)</h2>
+<div class="grid">
+  <figure><img src="v10/01-cli-pair-qr.png"><figcaption>CLI/desktop QR <code>v10/01</code></figcaption></figure>
+  <figure><img src="v10/02-deeplink-connect-chats.png"><figcaption>loop:// 딥링크 → 채팅 연결 <code>v10/02</code></figcaption></figure>
+  <figure><img src="v10/03-relaunch-stays-connected.png"><figcaption>재실행 후에도 연결 유지 <code>v10/03</code></figcaption></figure>
+</div>
+
+<h2>6. 진화 히스토리 (참고용)</h2>
+<div class="grid">
+  <figure><img src="01-connect-screen.png"><figcaption>v1 스텁 시대 connect</figcaption></figure>
+  <figure><img src="v2/04-run-live.png"><figcaption>v2 실제 run 파이프라인</figcaption></figure>
+  <figure><img src="v3/04-pane-live.png"><figcaption>v3 pane 터미널 미러</figcaption></figure>
+  <figure><img src="v4/04-conversation-live.png"><figcaption>v4 GUI 대화 전환</figcaption></figure>
+  <figure><img src="v6/03-after-logout-connect-screen.png"><figcaption>v6 로그아웃 직후</figcaption></figure>
+  <figure><img src="v2/06-runs-list-after.png"><figcaption>v2 목록 = loop runs</figcaption></figure>
+</div>
+</body>
+</html>

@@ -36,6 +36,8 @@
 
 ### 실행 1 [risk] WorkerState 표류 수렴: 주석 정정 + store 저장 어휘 상수화
 
+**후속 결정 (2026-09-30, 코드젠 편입):** 아래 안 A의 동결 계약 예외는 더 이상 목표 상태가 아니다. 안 B를 수정 채택하여 `loop-core::run::WorkerState`를 bridge의 `WorkerInput.state`와 `WorkerResultInput.state`(각각 optional)에 연결하고 생성 protocol의 `WorkerState`를 단일 TS 타입 원천으로 삼는다. 기존 호출자의 상태 관측이 없는 경우를 보존하기 위해 optional로 두며, 상태 값은 성공/실패 정책을 대체하지 않는다. `ActiveWorkerOutput`에 상태를 합성하지 않는다. 대안 A(복사 유지)는 AGENTS.md의 TS 사본 금지와 충돌하고, 대안 C(core 타입 제거)는 도메인 소유권을 잃는다. providers의 사본 제거는 별도 순차 작업에서 수행한다. 이 결정의 영향 범위는 loop-core 문서, loop-bridge 계약, 생성 protocol 및 후속 providers 타입 import이며, 이 문서 아래의 당시 선택·코드젠 무접점 주장은 역사적 기록이다.
+
 **문제.** 두 갈래 risk가 한 항목에 묶인다. (a) `worker.rs:8-11` 주석이 존재하지 않는 교량 편입을 주장 — a701a58가 의도한 "생성 protocol 편입"은 실현되지 않았고, 이 거짓 주석 자체가 신규 drift다. (b) `sqlite.rs:452`(preferred_compute), `:486`/`:580`(attention.kind), `:603`(task.state)이 `format!("{:?}")` 디버그 포맷을 저장 — Rust 식별자 이름이 영속 포맷의 사실상 계약이 되어, 변(variant) 개명이 **조용히 저장 문자열을 바꾸고** 기존 행과 어긋나게 한다.
 
 **대안.**

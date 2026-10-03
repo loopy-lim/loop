@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>디자인 리뷰 — 현재 빌드 (2026-09-27)</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background: #0d1117; color: #e6edf3; margin: 2rem; }
+  h1 { font-size: 1.4rem; } h2 { font-size: 1.1rem; margin-top: 2.2rem; border-bottom: 1px solid #30363d; padding-bottom: .4rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1rem; }
+  figure { margin: 0; background: #161b22; border: 1px solid #30363d; border-radius: 10px; overflow: hidden; }
+  img { width: 100%; display: block; }
+  figcaption { font-size: .78rem; padding: .5rem .7rem; color: #9aa4ad; }
+  .now { color: #7ee787; font-weight: 600; }
+  .old { color: #d29922; }
+  code { color: #79c0ff; font-size: .7rem; word-break: break-all; }
+</style>
+</head>
+<body>
+<h1>디자인 리뷰 갤러리 — 현재 빌드 기준</h1>
+<p><span class="now">● 현재 디자인</span> = 2026-09-27 00시 이후 빌드(미니멀 스펙 + 인체공학 + simplify 반영)에서 캡처. <span class="old">● 구버전</span> = 참고용(해당 화면은 이후 토큰 변화 가능).</p>
+
+<h2>1. 핵심 화면 — 현재 디자인 ●</h2>
+<div class="grid">
+  <figure><img src="review-2700/01-chats.png"><figcaption><span class="now">채팅 목록</span> — 방금 캡처 <code>review-2700/01</code></figcaption></figure>
+  <figure><img src="review-2700/02-conversation.png"><figcaption><span class="now">대화 뷰 (실행 중)</span> — 방금 캡처 <code>review-2700/02</code></figcaption></figure>
+  <figure><img src="review-2700/03-conversation-later.png"><figcaption><span class="now">대화 뷰 (진행 후)</span> — 방금 캡처 <code>review-2700/03</code></figcaption></figure>
+  <figure><img src="v8/01-markdown-code-block-copy.png"><figcaption><span class="now">마크다운 + 코드블록 카드 + 복사</span> <code>v8/01</code></figcaption></figure>
+  <figure><img src="v8/02-tool-card-expanded-running-chip.png"><figcaption><span class="now">툴 카드 확장 + 상태 칩</span> <code>v8/02</code></figcaption></figure>
+  <figure><img src="v8/03-typing-indicator-streaming.png"><figcaption><span class="now">타이핑 인디케이터</span> <code>v8/03</code></figcaption></figure>
+  <figure><img src="v8/04-jump-pill-date-header-timestamps.png"><figcaption><span class="now">날짜 헤더 + 타임스탬프 + 점프 필</span> <code>v8/04</code></figcaption></figure>
+  <figure><img src="v8/05-empty-state.png"><figcaption><span class="now">빈 상태</span> <code>v8/05</code></figcaption></figure>
+</div>
+
+<h2>2. 첨부·페어링 — 최신 캡처 (빌드 시점 참고)</h2>
+<div class="grid">
+  <figure><img src="v9/01-composer-attach-thumbnails.png"><figcaption><span class="old">컴포저 이미지 첨부</span> (이전 빌드) <code>v9/01</code></figcaption></figure>
+  <figure><img src="v9/02-user-image-inline.png"><figcaption><span class="old">보낸 이미지 인라인</span> (이전 빌드) <code>v9/02</code></figcaption></figure>
+  <figure><img src="v10/01-cli-pair-qr.png"><figcaption><span class="old">QR 페어링 (CLI)</span> <code>v10/01</code></figcaption></figure>
+  <figure><img src="v10/02-deeplink-connect-chats.png"><figcaption><span class="old">딥링크 연결</span> <code>v10/02</code></figcaption></figure>
+</div>
+
+<h2>3. 실사용 pi 세션 라이브 (v12, 이전 빌드 — 레이아웃 참고)</h2>
+<div class="grid">
+  <figure><img src="v12/01-chats-live-sessions.png"><figcaption>SESSIONS + RUNS 공존 목록 <code>v12/01</code></figcaption></figure>
+  <figure><img src="v12/03-live-completed-turn1.png"><figcaption>라이브 스트리밍 완료 시점 <code>v12/03</code></figcaption></figure>
+</div>
+
+<h2>4. 데스크톱 (보류 상태)</h2>
+<div class="grid">
+  <figure><img src="v7/03-desktop-app.png"><figcaption>Tauri 데스크톱 (구버전) <code>v7/03</code></figcaption></figure>
+</div>
+</body>
+</html>

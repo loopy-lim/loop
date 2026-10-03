@@ -7,6 +7,7 @@
 - **에픽:** design-foundations (디자인 파운데이션 — 표현 어휘·시맨틱 토큰·일관성 강제)
 - **승인 태스크 id:** 미배정 — 본 문서의 승인은 별도 리드 리뷰 게이트에서 수행된다. accepted 전환 시 이 필드에 승인 태스크 id를 기재한다.
 - **작성 태스크:** `write-loop-design-md` (kind=integration, attempt 0) — 이번 실행에서는 본 문서만 작성하며 **코드 변경은 없다.** §7의 실행 태스크는 전부 승인 대기 상태다.
+- **디자인 논의·수정 제안:** [`design-language.md`의 진입 경로](design-language.md#디자인-논의수정-제안-방법)에서 시작한다([근거 ADR](../decisions/design-md-workflow.md#후속-결정--디자인-논의-진입점과-read-model-편집-프로토콜)).
 - **선행 근거 문서:**
   - `docs/design/design-foundations.md` — 권고 D1–D3, 2주 계획 S1–S8, 후속 결정 D-1–D-6
   - `docs/design/research/loop-ui-audit.md` — 현재 UI 감사, 문제 P1–P4 (worktree `86413fa` 기준)

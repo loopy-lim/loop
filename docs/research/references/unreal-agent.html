@@ -1,0 +1,294 @@
+<!DOCTYPE html><html lang="en" class="min-h-full bg-surface scheme-light dark:scheme-dark  reading-article" style="--page-background-image: url(&quot;/assets/img/summer-wall-front.webp&quot;)"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="color-scheme" content="light"><meta name="description" content="We’re sharing Unreal Agent — an agent harness that delivers up to 40% cost savings compared to Codex on production workloads and coding/science benchmarks, without any negative performance impact."><title>Unreal Agent — Unreal Labs</title><link rel="canonical" href="https://unreallabs.ai/blog/unreal-agent/"><meta property="og:title" content="Unreal Agent — Unreal Labs"><meta property="og:description" content="We’re sharing Unreal Agent — an agent harness that delivers up to 40% cost savings compared to Codex on production workloads and coding/science benchmarks, without any negative performance impact."><meta property="og:type" content="article"><meta property="og:url" content="https://unreallabs.ai/blog/unreal-agent/"><meta property="og:site_name" content="Unreal Labs"><meta property="og:image" content="https://unreallabs.ai/assets/blog/unreal-agent/ogimage-v2.png"><meta property="og:image:alt" content="Quality versus cost frontier for coding agents, highlighting Unreal Agent with GPT-6 Astra at xhigh reasoning effort."><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:site" content="@UnrealLabsAI"><meta name="twitter:title" content="Unreal Agent — Unreal Labs"><meta name="twitter:description" content="We’re sharing Unreal Agent — an agent harness that delivers up to 40% cost savings compared to Codex on production workloads and coding/science benchmarks, without any negative performance impact."><meta name="twitter:image" content="https://unreallabs.ai/assets/blog/unreal-agent/ogimage-v2.png"><meta name="twitter:image:alt" content="Quality versus cost frontier for coding agents, highlighting Unreal Agent with GPT-6 Astra at xhigh reasoning effort."><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&amp;family=Libre+Baskerville:wght@400;600;700&amp;display=swap" rel="stylesheet"><meta name="theme-color" content="#E9E8E0" data-reading-theme-color><script>(function(){const readingSafeAreaColors = {"day":"#E9E8E0","night":"#2D3435"};
+const lightingHours = {"dawn":5,"day":8,"golden":17,"night":20};
+
+    (() => {
+      const hour = new Date().getHours();
+      const deviceMode = window.matchMedia?.("(prefers-color-scheme: dark)").matches
+        ? "night"
+        : window.matchMedia?.("(prefers-color-scheme: light)").matches
+          ? "day"
+          : null;
+      const override = new URLSearchParams(location.search).get("light");
+      let saved;
+      try {
+        saved = localStorage.getItem("unreallabs:reading-light");
+      } catch {}
+      const mode = ["day", "night"].includes(override)
+        ? override
+        : ["day", "night"].includes(saved)
+          ? saved
+          : deviceMode ?? (hour < lightingHours.dawn || hour >= lightingHours.night
+              ? "night"
+              : "day");
+      document.documentElement.dataset.readingLight = mode;
+      document.querySelector('meta[name="color-scheme"]').content =
+        mode === "night" ? "dark" : "light";
+      const themeColor = document.querySelector("[data-reading-theme-color]");
+      if (themeColor) {
+        themeColor.content = readingSafeAreaColors[mode];
+        document.documentElement.style.setProperty("--reading-safe-area", readingSafeAreaColors[mode]);
+      }
+    })();
+  })();</script><script type="module" src="/_astro/PostHog.astro_astro_type_script_index_0_lang.Br5tZ5nl.js"></script><link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48"><link rel="icon" type="image/png" href="/favicon.png" sizes="48x48"><link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180"><script async src="https://www.googletagmanager.com/gtag/js?id=G-4ZKTY2S4T3"></script><script>
+          window.dataLayer = window.dataLayer || [];
+          function gtag() {
+            dataLayer.push(arguments);
+          }
+          gtag("js", new Date());
+          gtag("config", "G-4ZKTY2S4T3");
+        </script><style>.section-link-icon[data-astro-cid-ypavld2q]{opacity:0}@media (width>=640px) and (hover:hover) and (pointer:fine){.section-link[data-astro-cid-ypavld2q]:hover .section-link-icon[data-astro-cid-ypavld2q],.section-link[data-astro-cid-ypavld2q]:focus-visible .section-link-icon[data-astro-cid-ypavld2q]{opacity:1}}
+</style><link rel="stylesheet" href="/_astro/wall-background-settings.D8waUhGY.css"></head><body class="bg-surface font-sans text-ink"><script type="module">globalThis.process??={},globalThis.process.env??={},console.log(`%c        ⢀⣤⣶⡿⠂
+    ⢀⣀⣠⣾⣿⣿⣷⣶⣶⣶⣦⣤⣤⣀
+ ⣴⣶⡿⣿⣿⠟⠉⠉⠁    ⠈⠉⠙⠛⢿⣶⣄
+ ⠉⢀⣾⡟⠁             ⠈⢻⣷⡀
+ ⢠⣿⠏        ⣀⣄       ⠹⣿⡄
+⢀⣿⡏    ⢠⣿⣷⡀ ⣿⣿⠆       ⢻⣷
+⣸⣿      ⠛⠛  ⠉⠉        ⢸⣿
+⣿⡏               ⣤⡄   ⣼⡿
+⣿⡇   ⢀⣤⡀       ⢀⣼⡿⠁  ⣰⣿⠃
+⢻⣷   ⠈⠻⣿⣦⣤⣀⣀⣠⣤⣶⡿⠋   ⣰⣿⠃
+⠈⢿⣷⡀    ⠉⠉⠛⠛⠋⠉⠁   ⣠⣾⠟⠁
+  ⠙⢿⣦⣄         ⢀⣤⣾⠟⠋
+    ⠉⠻⠿⣷⣶⣤⣤⣤⣴⣶⡿⠿⠋⠁
+        ⠈⠉⠉⠉⠉%c
+
+UNREAL LABS // hidden channel
+
+> You inspect. We respect.
+
+Curious about agents, harnesses, and runtimes?
+Come build with us.
+
+> Send your CV to contact@unreallabs.ai
+> Bonus points: show us something you built.
+`,`color: #b8862b; font-family: monospace; font-size: 14px; line-height: 1;`,`font-family: monospace; font-size: 12px;`);</script><div data-reading data-light="day" class="relative isolate flex min-h-dvh flex-col text-ink"><div aria-hidden="true" class="pointer-events-none fixed inset-0 -z-10 bg-surface bg-(image:--page-background-image) bg-cover bg-center bg-blend-multiply opacity-(--reading-texture-opacity)"></div><div class="mx-auto flex w-full max-w-[808px] flex-1 flex-col pt-[max(48px,env(safe-area-inset-top))] pr-[max(26px,env(safe-area-inset-right))] pb-[max(30px,env(safe-area-inset-bottom))] pl-[max(26px,env(safe-area-inset-left))] max-[700px]:pb-[max(20px,env(safe-area-inset-bottom))] max-[600px]:pt-[max(32px,env(safe-area-inset-top))]"><nav class="mb-12 grid grid-cols-[1fr_auto] items-center gap-x-6" aria-label="Page navigation"><a href="/" class="inline-flex min-h-11 shrink-0 touch-manipulation items-center font-sans text-xl leading-[1.2] font-semibold tracking-tight [-webkit-tap-highlight-color:transparent] hover:text-muted focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink" aria-label="Unreal Labs — Home">Unreal Labs</a></nav><div class="flex-1 pb-24 max-[600px]:pb-18"><main><article><header><h1 class="font-heading text-4xl leading-tight font-semibold tracking-tight text-balance md:text-5xl">Unreal Agent</h1><div class="flex flex-wrap mt-4 items-center gap-x-3 gap-y-2 text-sm text-fine"><time class="font-sans" datetime="2026-09-22T00:00:00.000Z">22 September 2026</time></div><p class="mt-10 leading-relaxed tracking-tight text-pretty text-ink font-sans text-lg">We’re sharing <a class="text-link underline decoration-rule underline-offset-4 hover:decoration-current focus-visible:outline-2 focus-visible:outline-offset-4" href="https://github.com/unreallabsai/unreal-agent" target="_blank" rel="noopener noreferrer">Unreal Agent</a> — an agent harness that delivers up to 40% cost savings compared to Codex on production workloads and coding/science benchmarks, without any negative performance impact.</p></header><div data-prose class="prose max-w-none prose-headings:font-heading prose-headings:font-semibold prose-a:underline-offset-4 prose-a:hover:decoration-current prose-a:focus-visible:outline-2 prose-a:focus-visible:outline-offset-4 prose-blockquote:font-normal prose-pre:rounded-sm prose-table:block prose-table:w-full prose-table:overflow-x-auto md:prose-table:table prose-th:whitespace-nowrap prose-th:px-3 prose-td:whitespace-nowrap prose-td:px-3 prose-img:rounded-sm mt-11 tracking-tight wrap-break-word text-ink font-sans text-[17px] leading-[1.75] sm:text-base prose-headings:scroll-mt-8 prose-headings:leading-snug prose-headings:tracking-tight prose-headings:text-balance prose-h2:text-2xl sm:prose-h2:text-3xl prose-h3:text-xl sm:prose-h3:text-2xl prose-p:text-pretty prose-li:text-pretty prose-h2:mt-12 prose-h2:mb-3 prose-h3:mt-10 prose-h3:mb-2 [&amp;_:is(h2,h3)+*]:mt-0 prose-a:decoration-rule prose-blockquote:not-italic [&amp;_blockquote_p:first-of-type]:before:content-none [&amp;_blockquote_p:last-of-type]:after:content-none prose-code:font-mono prose-code:tracking-normal prose-pre:border prose-pre:border-rule prose-pre:font-mono prose-pre:tracking-normal prose-table:font-sans prose-table:text-sm prose-table:leading-relaxed prose-table:tracking-normal prose-table:tabular-nums prose-thead:text-fine prose-th:py-3.5 prose-th:font-sans prose-th:leading-relaxed prose-th:font-semibold prose-th:tracking-normal prose-td:py-3.5 [&amp;_tbody_tr:first-child]:bg-soft lg:[&amp;_:is(figure:not([data-prose-inline]),video:not([data-prose-inline]))]:relative lg:[&amp;_:is(figure:not([data-prose-inline]),video:not([data-prose-inline]))]:left-1/2 lg:[&amp;_:is(figure:not([data-prose-inline]),video:not([data-prose-inline]))]:w-[min(72rem,calc(100vw-5rem))] lg:[&amp;_:is(figure:not([data-prose-inline]),video:not([data-prose-inline]))]:max-w-none lg:[&amp;_:is(figure:not([data-prose-inline]),video:not([data-prose-inline]))]:-translate-x-1/2"><figure data-prose-inline="true" class="not-prose my-8"><img src="/assets/blog/unreal-agent/pareto.png" width="2560" height="1576" alt="Quality versus cost frontier for coding agents, highlighting Unreal Agent with GPT-6 Astra at xhigh reasoning effort." loading="eager" decoding="async" class="m-0 h-auto w-full rounded-sm"/></figure>
+<p>If you’re interested in frontier cost-efficiency for your AI agents, we’d love to work together! Get in touch: <a href="mailto:contact@unreallabs.ai">contact@unreallabs.ai</a>.</p>
+<hr/>
+<p>While deploying agents in the wild, we wanted them to respond to users quickly and be cost-effective to run. We’ve noticed that agents spend a lot of time and tokens managing tool calls, which motivated us to build Unreal Agent with a harness that would reduce the model’s tool-management overhead.</p>
+<p>The Unreal Agent harness manages tool calls in a completely asynchronous way, relieving the underlying model of the need to manage waits, polls, and heartbeats for tools.</p>
+<p>This approach drives two major benefits. First, it always allows users to steer the agent without the need to wait for tool calls to finish. Second, it allows the agent to schedule more useful tool call work between model calls, driving frontier cost efficiency. The current version achieves up to 40% cost savings compared to Codex and up to 20% compared to Pi in real workloads and on agentic benchmarks, which we share here.</p>
+<p>We believe harness design is a research area in its own right, with many promising ideas still to be researched and implemented.<sup><a id="cite-1" href="#ref-1" aria-label="Reference 1: HarnessTax" class="scroll-mt-8" role="doc-noteref">1</a></sup></p>
+<h2 id="motivation-and-architecture" data-astro-cid-ypavld2q="true"><a href="#motivation-and-architecture" class="section-link not-prose relative block min-h-11 text-inherit no-underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink" data-astro-cid-ypavld2q><span class="section-link-icon pointer-events-none absolute top-[0.5lh] -left-5 -translate-y-1/2 text-fine transition-opacity duration-300 ease-out motion-reduce:transition-none" aria-hidden="true" data-astro-cid-ypavld2q><span class="block font-sans text-sm leading-none font-normal" data-astro-cid-ypavld2q>#</span></span>Motivation and Architecture</a></h2>
+<p>If you try to build an agent-first product, you’ll quickly realize that there’s no golden path for implementing one. Big-brand vendors offer different SDKs to build agents, each with a different set of trade-offs that might not be immediately apparent.</p>
+<p>At Unreal Labs, we have built a number of agentic products and learned a few things about popular SDKs along the way.</p>
+<p>For example, CLI-oriented SDKs such as Claude’s Agent SDK carry assumptions about local sessions, subprocesses, and resource limits that don’t translate neatly into production use. Handling completion, cancellation, and background tasks reliably often means building your own lifecycle management around them.</p>
+<p>Supporting other providers adds compatibility work: switching API modes can break tools or compaction, while SDK upgrades can change message formats and force integration rewrites. Heavy dependency trees add maintenance and supply-chain risk to a runtime we already need to understand and patch ourselves.</p>
+<p>Security and approvals that rely on harness hooks and specialized tools, in our experience, tend to require more maintenance and be less robust than deterministic environment or sandbox constraints, outside the harness: allowed/disallowed hosts, granular access tokens, proxies with approval gates.</p>
+<p>Along with these technical motivations, we also wanted to build a harness that could always accept user steering messages without delay and juggle heterogeneous tool calls without extra cognitive load for the model. For example, we wanted the agent to be able to kick off a dev environment setup that might take minutes, while exploring the codebase and searching the web in parallel, all without extra token tax.</p>
+<p>Every time Unreal Agent issues a tool call, we immediately append an event-log record that the tool has returned in the “in-progress” state, while continuing its execution in the background. Once a tool actually finishes, we append the result into the session log and call an LLM. Making this work without breaking cache was an interesting engineering challenge in itself.<sup><a id="cite-2" href="#ref-2" aria-label="Reference 2: asynchronous tool results" class="scroll-mt-8" role="doc-noteref">2</a></sup></p>
+<video data-article-video data-prose-inline="true" data-src="/assets/blog/unreal-agent/asynchronous-runtime.mp4" class="my-8 h-auto w-full rounded-sm" poster="/assets/blog/unreal-agent/asynchronous-runtime.png" width="1440" height="822" autoplay loop muted playsinline preload="none" aria-label="Animated comparison of asynchronous tool execution in Unreal Agent and another harness"><a href="/assets/blog/unreal-agent/asynchronous-runtime.mp4">Watch the animation.</a></video><script type="module">globalThis.process??={},globalThis.process.env??={};function e(e){let t=e.querySelectorAll(`[data-article-video]`),n=new Set,r=t=>{let r=n.has(t)&&!e.hidden;if(t.autoplay=r,!r){t.pause();return}t.muted=!0,t.hasAttribute(`src`)||(t.src=t.dataset.src),t.play().catch(()=>{n.has(t)&&!e.hidden&&(t.controls=!0)})},i=()=>t.forEach(r),a=new IntersectionObserver(e=>{for(let t of e){let e=t.target;t.isIntersecting&&t.intersectionRatio>=.2?n.add(e):n.delete(e),r(e)}},{threshold:[0,.2]});return t.forEach(e=>a.observe(e)),e.addEventListener(`visibilitychange`,i),()=>{a.disconnect(),e.removeEventListener(`visibilitychange`,i),n.clear(),t.forEach(e=>{e.autoplay=!1,e.pause()})}}var t=e(document);document.addEventListener(`astro:before-swap`,t,{once:!0});</script>
+<h2 id="cost-efficiency" data-astro-cid-ypavld2q="true"><a href="#cost-efficiency" class="section-link not-prose relative block min-h-11 text-inherit no-underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink" data-astro-cid-ypavld2q><span class="section-link-icon pointer-events-none absolute top-[0.5lh] -left-5 -translate-y-1/2 text-fine transition-opacity duration-300 ease-out motion-reduce:transition-none" aria-hidden="true" data-astro-cid-ypavld2q><span class="block font-sans text-sm leading-none font-normal" data-astro-cid-ypavld2q>#</span></span>Cost Efficiency</a></h2>
+<p>On the surface, Unreal Agent achieves the same outcomes with fewer model turns and fewer input tokens.</p>
+<p>We attribute cost savings to two factors:</p>
+<ol>
+<li>
+<p>Minimal harness footprint and careful engineering of tool output usage. Unreal Agent has simple prompts, token-optimized tool results, and no sub-agents or workflows.<sup><a id="cite-3" href="#ref-3" aria-label="Reference 3: KV cache" class="scroll-mt-8" role="doc-noteref">3</a></sup></p>
+</li>
+<li>
+<p>More tool work per model turn. Unreal Agent has a straightforward asynchronous tool-calling model that is clearly explained to an LLM. This allows it to issue more heavy tool calls per model turn without wasting tokens on polling or waiting for them.</p>
+</li>
+</ol>
+<h2 id="benchmarks" data-astro-cid-ypavld2q="true"><a href="#benchmarks" class="section-link not-prose relative block min-h-11 text-inherit no-underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink" data-astro-cid-ypavld2q><span class="section-link-icon pointer-events-none absolute top-[0.5lh] -left-5 -translate-y-1/2 text-fine transition-opacity duration-300 ease-out motion-reduce:transition-none" aria-hidden="true" data-astro-cid-ypavld2q><span class="block font-sans text-sm leading-none font-normal" data-astro-cid-ypavld2q>#</span></span>Benchmarks</a></h2>
+<p>We’ve built Unreal Agent to deliver real production workflows for us, but it looks good in the benchmarks too. We tested it with GPT-6 Astra xhigh and compared it with Codex and Pi. Here are some of the results.</p>
+<p>There are marginal differences in pass rate, which we attribute to benchmark variance.</p>
+<h3 id="terminal-bench-40" data-astro-cid-ypavld2q="true"><a href="#terminal-bench-40" class="section-link not-prose relative block min-h-11 text-inherit no-underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink" data-astro-cid-ypavld2q><span class="section-link-icon pointer-events-none absolute top-[0.5lh] -left-5 -translate-y-1/2 text-fine transition-opacity duration-300 ease-out motion-reduce:transition-none" aria-hidden="true" data-astro-cid-ypavld2q><span class="block font-sans text-sm leading-none font-normal" data-astro-cid-ypavld2q>#</span></span>Terminal-Bench 4.0</a></h3>
+<p>GPT-6 Astra · xhigh. Codex (lb) is the leaderboard baseline; Unreal Agent and Pi runs are linked below.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:left">Agent</th>
+<th style="text-align:right">Rate</th>
+<th style="text-align:right">Total $</th>
+<th style="text-align:right">In/trial</th>
+<th style="text-align:right">Out/trial</th>
+<th style="text-align:right">Turns</th>
+<th style="text-align:right">Tools</th>
+<th style="text-align:left">Harbor</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left"><strong>unreal-agent</strong></td>
+<td style="text-align:right"><strong>57.9%</strong></td>
+<td style="text-align:right"><strong>1428</strong></td>
+<td style="text-align:right">1.73M</td>
+<td style="text-align:right">32k</td>
+<td style="text-align:right">28</td>
+<td style="text-align:right">37</td>
+<td style="text-align:left"><a href="https://hub.harborframework.com/jobs/27133053-2015-46f3-8c72-6b6910859da6" target="_blank" rel="noopener noreferrer">27133053</a></td>
+</tr>
+<tr>
+<td style="text-align:left">Codex (leaderboard)</td>
+<td style="text-align:right">57.9%</td>
+<td style="text-align:right">2350</td>
+<td style="text-align:right">—</td>
+<td style="text-align:right">—</td>
+<td style="text-align:right">—</td>
+<td style="text-align:right">—</td>
+<td style="text-align:left">—</td>
+</tr>
+<tr>
+<td style="text-align:left">Pi</td>
+<td style="text-align:right">55.0%</td>
+<td style="text-align:right">1827</td>
+<td style="text-align:right">2.83M</td>
+<td style="text-align:right">35k</td>
+<td style="text-align:right">44</td>
+<td style="text-align:right">57</td>
+<td style="text-align:left"><a href="https://hub.harborframework.com/jobs/6ccd097a-747b-4867-be57-a56969df988f" target="_blank" rel="noopener noreferrer">6ccd097a</a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="swe-atlas-codebase-qna" data-astro-cid-ypavld2q="true"><a href="#swe-atlas-codebase-qna" class="section-link not-prose relative block min-h-11 text-inherit no-underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink" data-astro-cid-ypavld2q><span class="section-link-icon pointer-events-none absolute top-[0.5lh] -left-5 -translate-y-1/2 text-fine transition-opacity duration-300 ease-out motion-reduce:transition-none" aria-hidden="true" data-astro-cid-ypavld2q><span class="block font-sans text-sm leading-none font-normal" data-astro-cid-ypavld2q>#</span></span>SWE-Atlas Codebase QnA</a></h3>
+<table>
+<thead>
+<tr>
+<th style="text-align:left">Agent</th>
+<th style="text-align:right">Rate</th>
+<th style="text-align:right">Total $</th>
+<th style="text-align:right">In/trial</th>
+<th style="text-align:right">Out/trial</th>
+<th style="text-align:right">Turns</th>
+<th style="text-align:right">Tools</th>
+<th style="text-align:left">Harbor</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left"><strong>unreal-agent</strong></td>
+<td style="text-align:right"><strong>65.8%</strong></td>
+<td style="text-align:right"><strong>936</strong></td>
+<td style="text-align:right">898k</td>
+<td style="text-align:right">15k</td>
+<td style="text-align:right">16</td>
+<td style="text-align:right">27</td>
+<td style="text-align:left"><a href="https://hub.harborframework.com/jobs/3d2fa057-e11c-4be0-a962-e8be81b87709" target="_blank" rel="noopener noreferrer">3d2fa057</a></td>
+</tr>
+<tr>
+<td style="text-align:left">Codex</td>
+<td style="text-align:right">63.3%</td>
+<td style="text-align:right">1303</td>
+<td style="text-align:right">1.69M</td>
+<td style="text-align:right">17k</td>
+<td style="text-align:right">22</td>
+<td style="text-align:right">21</td>
+<td style="text-align:left"><a href="https://hub.harborframework.com/jobs/11a440fb-b1c4-473b-98a6-907500b3fdaf" target="_blank" rel="noopener noreferrer">11a440fb</a></td>
+</tr>
+<tr>
+<td style="text-align:left">Pi</td>
+<td style="text-align:right">64.0%</td>
+<td style="text-align:right">1033</td>
+<td style="text-align:right">1.29M</td>
+<td style="text-align:right">16k</td>
+<td style="text-align:right">24</td>
+<td style="text-align:right">60</td>
+<td style="text-align:left"><a href="https://hub.harborframework.com/jobs/da4ac972-9d5a-4142-b057-85f07375f14e" target="_blank" rel="noopener noreferrer">da4ac972</a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="deepswe-11" data-astro-cid-ypavld2q="true"><a href="#deepswe-11" class="section-link not-prose relative block min-h-11 text-inherit no-underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink" data-astro-cid-ypavld2q><span class="section-link-icon pointer-events-none absolute top-[0.5lh] -left-5 -translate-y-1/2 text-fine transition-opacity duration-300 ease-out motion-reduce:transition-none" aria-hidden="true" data-astro-cid-ypavld2q><span class="block font-sans text-sm leading-none font-normal" data-astro-cid-ypavld2q>#</span></span>DeepSWE 1.1</a></h3>
+<table>
+<thead>
+<tr>
+<th style="text-align:left">Agent</th>
+<th style="text-align:right">Rate</th>
+<th style="text-align:right">Total $</th>
+<th style="text-align:right">In/trial</th>
+<th style="text-align:right">Out/trial</th>
+<th style="text-align:right">Turns</th>
+<th style="text-align:right">Tools</th>
+<th style="text-align:left">Harbor</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left"><strong>unreal-agent</strong></td>
+<td style="text-align:right"><strong>72.4%</strong></td>
+<td style="text-align:right"><strong>1367</strong></td>
+<td style="text-align:right">1.60M</td>
+<td style="text-align:right">28k</td>
+<td style="text-align:right">26</td>
+<td style="text-align:right">38</td>
+<td style="text-align:left"><a href="https://hub.harborframework.com/jobs/2311ca63-2929-49eb-ba0c-0084ef31ba8b" target="_blank" rel="noopener noreferrer">2311ca63</a></td>
+</tr>
+<tr>
+<td style="text-align:left">Codex</td>
+<td style="text-align:right">69.0%</td>
+<td style="text-align:right">1633</td>
+<td style="text-align:right">2.19M</td>
+<td style="text-align:right">30k</td>
+<td style="text-align:right">30</td>
+<td style="text-align:right">29</td>
+<td style="text-align:left"><a href="https://hub.harborframework.com/jobs/e20ecafd-695a-417c-90f5-35fd36d2786f" target="_blank" rel="noopener noreferrer">e20ecafd</a></td>
+</tr>
+<tr>
+<td style="text-align:left">Pi</td>
+<td style="text-align:right">69.6%</td>
+<td style="text-align:right">1584</td>
+<td style="text-align:right">2.21M</td>
+<td style="text-align:right">30k</td>
+<td style="text-align:right">40</td>
+<td style="text-align:right">75</td>
+<td style="text-align:left"><a href="https://hub.harborframework.com/jobs/cd7d8de6-c152-48de-9840-b22bbea96d99" target="_blank" rel="noopener noreferrer">cd7d8de6</a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="agents-last-exam--ale-cli" data-astro-cid-ypavld2q="true"><a href="#agents-last-exam--ale-cli" class="section-link not-prose relative block min-h-11 text-inherit no-underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink" data-astro-cid-ypavld2q><span class="section-link-icon pointer-events-none absolute top-[0.5lh] -left-5 -translate-y-1/2 text-fine transition-opacity duration-300 ease-out motion-reduce:transition-none" aria-hidden="true" data-astro-cid-ypavld2q><span class="block font-sans text-sm leading-none font-normal" data-astro-cid-ypavld2q>#</span></span>Agents’ Last Exam · ALE-CLI</a></h3>
+<p>Full pass rates and mean scores are listed below. These runs are not on Harbor.</p>
+<table>
+<thead>
+<tr>
+<th style="text-align:left">Agent</th>
+<th style="text-align:right">Full pass</th>
+<th style="text-align:right">Mean score</th>
+<th style="text-align:right">Total $</th>
+<th style="text-align:right">In/task</th>
+<th style="text-align:right">Out/task</th>
+<th style="text-align:right">Turns</th>
+<th style="text-align:right">Tools</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left"><strong>unreal-agent</strong></td>
+<td style="text-align:right"><strong>30.0%</strong></td>
+<td style="text-align:right"><strong>59.7</strong></td>
+<td style="text-align:right"><strong>217</strong></td>
+<td style="text-align:right">0.76M</td>
+<td style="text-align:right">18k</td>
+<td style="text-align:right">18</td>
+<td style="text-align:right">23</td>
+</tr>
+<tr>
+<td style="text-align:left">Codex</td>
+<td style="text-align:right">29.0%</td>
+<td style="text-align:right">58.1</td>
+<td style="text-align:right">292</td>
+<td style="text-align:right">1.59M</td>
+<td style="text-align:right">15k</td>
+<td style="text-align:right">—</td>
+<td style="text-align:right">21</td>
+</tr>
+<tr>
+<td style="text-align:left">Pi</td>
+<td style="text-align:right">29.0%</td>
+<td style="text-align:right">59.2</td>
+<td style="text-align:right">262</td>
+<td style="text-align:right">1.19M</td>
+<td style="text-align:right">19k</td>
+<td style="text-align:right">27</td>
+<td style="text-align:right">37</td>
+</tr>
+</tbody>
+</table>
+<p>We run mostly coding benchmarks because they are available on Harbor, which makes reproduction and verification easier, but the harness is domain-agnostic.</p>
+<h2 id="getting-started-with-unreal-agent" data-astro-cid-ypavld2q="true"><a href="#getting-started-with-unreal-agent" class="section-link not-prose relative block min-h-11 text-inherit no-underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink" data-astro-cid-ypavld2q><span class="section-link-icon pointer-events-none absolute top-[0.5lh] -left-5 -translate-y-1/2 text-fine transition-opacity duration-300 ease-out motion-reduce:transition-none" aria-hidden="true" data-astro-cid-ypavld2q><span class="block font-sans text-sm leading-none font-normal" data-astro-cid-ypavld2q>#</span></span>Getting started with Unreal Agent</a></h2>
+<p>The Unreal Agent SDK currently offers:</p>
+<ul>
+<li>Go library that you can integrate directly into your codebase</li>
+<li>Runner executable similar to <code>claude -p</code> / <code>codex exec</code></li>
+<li>Benchmark runner compatible with <a href="https://www.harborframework.com/" target="_blank" rel="noopener noreferrer">Harbor</a></li>
+</ul>
+<p>Check out our <a href="https://github.com/unreallabsai/unreal-agent" target="_blank" rel="noopener noreferrer">github repo</a> if you want to try it for yourself</p>
+<h2 id="references" data-astro-cid-ypavld2q="true"><a href="#references" class="section-link not-prose relative block min-h-11 text-inherit no-underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink" data-astro-cid-ypavld2q><span class="section-link-icon pointer-events-none absolute top-[0.5lh] -left-5 -translate-y-1/2 text-fine transition-opacity duration-300 ease-out motion-reduce:transition-none" aria-hidden="true" data-astro-cid-ypavld2q><span class="block font-sans text-sm leading-none font-normal" data-astro-cid-ypavld2q>#</span></span>References</a></h2>
+<div class="space-y-6 font-sans text-base leading-7 tracking-normal"><div id="ref-1" tabIndex="-1" class="scroll-mt-8"><p>[1] Melissa Z. Pan, Shuo Yang, Negar Arabzadeh, Wei-Lin Chiang, Ion Stoica, and Matei Zaharia. “<a href="https://arena.ai/blog/coding-agents-harness-tax" target="_blank" rel="noopener noreferrer">HarnessTax: How Much Does Harness Matter for Coding Agents?</a>” 2026. <a href="#cite-1" aria-label="Back to reference 1 in the text">↩</a></p></div><div id="ref-2" role="note" tabIndex="-1" class="scroll-mt-8"><p>[2] The use of two tool-call result items (one in progress, one final) in a single context is underspecified in the Responses API documentation. During testing, we encountered rejections with some models on some inference providers (not OpenAI), and the <code>function_call_output</code> status field seemed to have no impact in those cases.</p><p>Our tests showed that models can understand the progression from a running update to a final result when the conversation format is accepted. We believe this pattern should be explicitly supported by the Responses API and consistently supported across inference providers. <a href="#cite-2" aria-label="Back to reference 2 in the text">↩</a></p></div><div id="ref-3" tabIndex="-1" class="scroll-mt-8"><p>[3] Diogo. “<a href="https://www.completeskeptic.com/p/kv-cache-rules-everything-around" target="_blank" rel="noopener noreferrer">(KV) Cache Rules Everything Around Me.</a>” Complete Skeptic, September 9, 2026. <a href="#cite-3" aria-label="Back to reference 3 in the text">↩</a></p></div></div></div></article><section class="mt-14 border-t border-rule pt-6 text-base leading-7 tracking-tight text-ink sm:text-lg sm:leading-8 font-sans" aria-label="Get in touch"><span>Write to us at <a href="mailto:contact@unreallabs.ai" class="group/email text-link no-underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-link inline"><span class="box-decoration-clone [--underline-muted:color-mix(in_srgb,currentColor_30%,transparent)] bg-[linear-gradient(currentColor,currentColor),linear-gradient(var(--underline-muted),var(--underline-muted))] bg-[length:0%_1px,100%_1px] bg-right-bottom bg-no-repeat pb-0.5 transition-[background-size] duration-200 group-hover/email:bg-[length:100%_1px,100%_1px] group-hover/email:bg-left-bottom group-focus-visible/email:bg-[length:100%_1px,100%_1px] group-focus-visible/email:bg-left-bottom motion-reduce:transition-none">contact@unreallabs.ai</span></a> or leave your email and we'll get in touch:&nbsp;</span><form id="newsletter-form" class="inline-flex h-7 w-64 max-w-full items-baseline border-b border-rule align-baseline transition-colors focus-within:border-ink/40 motion-reduce:transition-none sm:h-8" aria-label="Leave your email" action="/newsletter" method="post" tabindex="-1"><label class="sr-only" for="newsletter-email">Your email address</label><input id="newsletter-email" class="peer h-full min-w-0 flex-1 bg-transparent text-ink placeholder:text-fine focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink" type="email" name="email" placeholder="you@company.com" autocomplete="email" autocapitalize="none" spellcheck="false" required><button class="group -my-2 -mr-3.5 inline-flex size-11 shrink-0 self-center cursor-pointer items-center justify-center text-fine opacity-0 transition-opacity peer-focus:opacity-100 peer-[:not(:placeholder-shown)]:opacity-100 focus-visible:opacity-100 data-[state=success]:opacity-100 motion-reduce:transition-none enabled:hover:text-ink focus-visible:rounded-xs focus-visible:outline-2 focus-visible:-outline-offset-2 disabled:cursor-default data-[state=loading]:cursor-wait" type="submit" data-state="idle" aria-label="Send your email address"><svg class="hidden size-3.5 group-data-[state=idle]:block" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m6 4 4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><svg class="hidden size-3.5 animate-spin group-data-[state=loading]:block motion-reduce:animate-none" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.5" opacity="0.25"></circle><path d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path></svg><svg class="hidden size-3.5 text-success group-data-[state=success]:block" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3 8 3.25 3.25L13 4.5" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"></path></svg></button></form><p id="newsletter-status" class="sr-only text-sm leading-5 text-error data-[state=error]:not-sr-only" role="status" aria-live="polite"></p><dialog id="newsletter-confirmation" aria-labelledby="newsletter-confirmation-title" aria-describedby="newsletter-confirmation-description" class="m-auto w-[calc(100%-3rem)] max-w-sm scale-95 rounded-2xl border border-rule bg-surface p-8 text-center text-ink opacity-0 shadow-xl transition-[opacity,scale,display,overlay] transition-discrete duration-200 ease-out backdrop:bg-black/20 open:scale-100 open:opacity-100 starting:open:scale-95 starting:open:opacity-0 motion-reduce:scale-none motion-reduce:transition-none"><svg class="mx-auto mb-5 size-8 text-success" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4.5 4.5L19 7" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"></path></svg><h2 id="newsletter-confirmation-title" class="font-heading text-2xl font-normal">Thanks!</h2><p id="newsletter-confirmation-description" class="mt-3 text-base leading-6">We'll get back to you shortly.</p><div class="mt-6"><button id="newsletter-confirmation-close" class="min-h-11 cursor-pointer rounded-lg bg-ink px-6 text-sm text-surface hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-4" type="button">Got it</button></div></dialog><script type="module">globalThis.process??={},globalThis.process.env??={};var e=document.querySelector(`#newsletter-form`),t=document.querySelector(`#newsletter-email`),n=document.querySelector(`#newsletter-status`),r=e.querySelector(`button[type="submit"]`),i=document.querySelector(`#newsletter-confirmation`),a=!1,o=new Set;function s(){return t.value.trim().toLowerCase()}function c(e){if(o.has(e))return!0;try{return localStorage.getItem(`unreallabs:enquiry:${e}`)===`sent`}catch{return!1}}function l(e){o.add(e);try{localStorage.setItem(`unreallabs:enquiry:${e}`,`sent`)}catch{}}function u(){n.textContent=`Thanks! We'll get back to you shortly.`,d(`success`),i.open||i.showModal()}document.querySelector(`#newsletter-confirmation-close`).addEventListener(`click`,()=>{i.close()}),i.addEventListener(`close`,()=>{(window.matchMedia(`(pointer: fine)`).matches?t:e).focus({preventScroll:!0})}),i.addEventListener(`click`,e=>{if(e.target!==i)return;let t=i.getBoundingClientRect();(e.clientX<t.left||e.clientX>t.right||e.clientY<t.top||e.clientY>t.bottom)&&i.close()});function d(e){r.dataset.state=e===`error`?`idle`:e,r.disabled=e===`loading`||e===`success`,r.setAttribute(`aria-label`,e===`loading`?`Saving your email`:e===`success`?`Email saved`:`Send your email address`),n.dataset.state=e}t.addEventListener(`input`,()=>{a||(d(c(s())?`success`:`idle`),n.textContent=``)}),e.addEventListener(`submit`,async r=>{if(r.target!==e||(r.preventDefault(),a||!e.reportValidity()))return;let i=s();if(c(i)){u();return}a=!0,d(`loading`),t.readOnly=!0,e.setAttribute(`aria-busy`,`true`),n.textContent=`Saving…`;try{let e=await fetch(`/newsletter`,{method:`POST`,headers:{"Content-Type":`application/json`},body:JSON.stringify({email:i}),signal:AbortSignal.timeout(25e3)}),t=await e.json();if(!e.ok||t.ok!==!0){d(`error`),n.textContent=t.error||`Couldn't save your email. Please try again.`;return}l(i),u(),document.dispatchEvent(new Event(`newsletter:success`))}catch{d(`error`),n.textContent=`Couldn't save your email. Please try again.`}finally{a=!1,t.readOnly=!1,e.removeAttribute(`aria-busy`)}});</script></section></main></div><footer class="text-xs sm:text-sm text-fine"><p class="max-w-[900px] text-pretty leading-5 sm:leading-6"><span>Backed by Sequoia &amp; First Round</span><span class="mx-2" aria-hidden="true">·</span><span>Founded by engineers from CERN, Meta, Snap, Bloomberg &amp; DeepMind</span></p><div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 leading-5 sm:leading-6"><div class="flex items-center gap-2"><a href="https://x.com/UnrealLabsAI" aria-label="X" title="X" target="_blank" rel="noopener noreferrer" class="inline-flex size-6 items-center justify-center hover:text-link focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link"><svg viewBox="0 0 256 256" fill="currentColor" class="size-[20px]" aria-hidden="true" focusable="false"><path d="M214.75,211.71l-62.6-98.38,61.77-67.95a8,8,0,0,0-11.84-10.76L143.24,99.34,102.75,35.71A8,8,0,0,0,96,32H48a8,8,0,0,0-6.75,12.3l62.6,98.37-61.77,68a8,8,0,1,0,11.84,10.76l58.84-64.72,40.49,63.63A8,8,0,0,0,160,224h48a8,8,0,0,0,6.75-12.29ZM164.39,208,62.57,48h29L193.43,208Z" /></svg></a><a href="https://www.linkedin.com/company/unreallabsai/" aria-label="LinkedIn" title="LinkedIn" target="_blank" rel="noopener noreferrer" class="inline-flex size-6 items-center justify-center hover:text-link focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link"><svg viewBox="0 0 256 256" fill="currentColor" class="size-[20px]" aria-hidden="true" focusable="false"><path d="M216,24H40A16,16,0,0,0,24,40V216a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V40A16,16,0,0,0,216,24Zm0,192H40V40H216V216ZM96,112v64a8,8,0,0,1-16,0V112a8,8,0,0,1,16,0Zm88,28v36a8,8,0,0,1-16,0V140a20,20,0,0,0-40,0v36a8,8,0,0,1-16,0V112a8,8,0,0,1,15.79-1.78A36,36,0,0,1,184,140ZM100,84A12,12,0,1,1,88,72,12,12,0,0,1,100,84Z" /></svg></a><a href="https://discord.gg/DS8X9GtVC" aria-label="Discord" title="Discord" target="_blank" rel="noopener noreferrer" class="inline-flex size-6 items-center justify-center hover:text-link focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link"><svg viewBox="0 0 256 256" fill="currentColor" class="size-[20px]" aria-hidden="true" focusable="false"><path d="M104,140a12,12,0,1,1-12-12A12,12,0,0,1,104,140Zm60-12a12,12,0,1,0,12,12A12,12,0,0,0,164,128Zm74.45,64.9-67,29.71a16.17,16.17,0,0,1-21.71-9.1l-8.11-22q-6.72.45-13.63.46t-13.63-.46l-8.11,22a16.18,16.18,0,0,1-21.71,9.1l-67-29.71a15.93,15.93,0,0,1-9.06-18.51L38,58A16.07,16.07,0,0,1,51,46.14l36.06-5.93a16.22,16.22,0,0,1,18.26,11.88l3.26,12.84Q118.11,64,128,64t19.4.93l3.26-12.84a16.21,16.21,0,0,1,18.26-11.88L205,46.14A16.07,16.07,0,0,1,218,58l29.53,116.38A15.93,15.93,0,0,1,238.45,192.9ZM232,178.28,202.47,62s0,0-.08,0L166.33,56a.17.17,0,0,0-.17,0l-2.83,11.14c5,.94,10,2.06,14.83,3.42A8,8,0,0,1,176,86.31a8.09,8.09,0,0,1-2.16-.3A172.25,172.25,0,0,0,128,80a172.25,172.25,0,0,0-45.84,6,8,8,0,1,1-4.32-15.4c4.82-1.36,9.78-2.48,14.82-3.42L89.83,56s0,0-.12,0h0L53.61,61.93a.17.17,0,0,0-.09,0L24,178.33,91,208a.23.23,0,0,0,.22,0L98,189.72a173.2,173.2,0,0,1-20.14-4.32A8,8,0,0,1,82.16,170,171.85,171.85,0,0,0,128,176a171.85,171.85,0,0,0,45.84-6,8,8,0,0,1,4.32,15.41A173.2,173.2,0,0,1,158,189.72L164.75,208a.22.22,0,0,0,.21,0Z" /></svg></a><a href="https://github.com/unreallabsai/" aria-label="GitHub" title="GitHub" target="_blank" rel="noopener noreferrer" class="inline-flex size-6 items-center justify-center hover:text-link focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link"><svg viewBox="0 0 256 256" fill="currentColor" class="size-[20px]" aria-hidden="true" focusable="false"><path d="M208.31,75.68A59.78,59.78,0,0,0,202.93,28,8,8,0,0,0,196,24a59.75,59.75,0,0,0-48,24H124A59.75,59.75,0,0,0,76,24a8,8,0,0,0-6.93,4,59.78,59.78,0,0,0-5.38,47.68A58.14,58.14,0,0,0,56,104v8a56.06,56.06,0,0,0,48.44,55.47A39.8,39.8,0,0,0,96,192v8H72a24,24,0,0,1-24-24A40,40,0,0,0,8,136a8,8,0,0,0,0,16,24,24,0,0,1,24,24,40,40,0,0,0,40,40H96v16a8,8,0,0,0,16,0V192a24,24,0,0,1,48,0v40a8,8,0,0,0,16,0V192a39.8,39.8,0,0,0-8.44-24.53A56.06,56.06,0,0,0,216,112v-8A58.14,58.14,0,0,0,208.31,75.68ZM200,112a40,40,0,0,1-40,40H112a40,40,0,0,1-40-40v-8a41.74,41.74,0,0,1,6.9-22.48A8,8,0,0,0,80,73.83a43.81,43.81,0,0,1,.79-33.58,43.88,43.88,0,0,1,32.32,20.06A8,8,0,0,0,119.82,64h32.35a8,8,0,0,0,6.74-3.69,43.87,43.87,0,0,1,32.32-20.06A43.81,43.81,0,0,1,192,73.83a8.09,8.09,0,0,0,1,7.65A41.72,41.72,0,0,1,200,104Z" /></svg></a></div><span aria-hidden="true">·</span><a href="/privacy" class="touch-manipulation underline-offset-[3px] [-webkit-tap-highlight-color:transparent] hover:underline focus-visible:rounded-[3px] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-link">Privacy</a><span aria-hidden="true">·</span><a href="/terms" class="touch-manipulation underline-offset-[3px] [-webkit-tap-highlight-color:transparent] hover:underline focus-visible:rounded-[3px] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-link">Terms</a><span aria-hidden="true">·</span><div class="shrink-0"><button type="button" class="inline-flex min-h-11 cursor-pointer touch-manipulation items-center whitespace-nowrap underline-offset-[3px] [-webkit-tap-highlight-color:transparent] hover:underline focus-visible:rounded-[3px] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-link [&amp;[hidden]]:hidden" data-reading-toggle hidden><span class="dark:hidden">Dark theme</span><span class="hidden dark:inline">Light theme</span></button></div></div></footer></div></div></body></html><script type="module" src="/_astro/ReadingLayout.astro_astro_type_script_index_0_lang.DXLKEwjk.js"></script>
