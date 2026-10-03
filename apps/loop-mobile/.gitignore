@@ -1,0 +1,4 @@
+# Native build products (installed alongside the RN 0.81 project)
+ios/Pods/
+ios/build/
+ios/.xcode.env.local

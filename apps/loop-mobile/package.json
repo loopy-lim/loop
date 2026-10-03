@@ -1,0 +1,37 @@
+{
+  "name": "@loop/loop-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Loop React Native mobile app: gateway connect, prompt submit, live run status/output over HTTP/SSE.",
+  "exports": "./src/App.tsx",
+  "scripts": {
+    "test": "bun test test",
+    "typecheck": "tsc -p tsconfig.json",
+    "start": "react-native start",
+    "ios": "react-native run-ios",
+    "ios:release": "bash scripts/build-ios-simulator.sh",
+    "pod": "cd ios && pod install"
+  },
+  "dependencies": {
+    "@loop/protocol": "file:../../packages/protocol",
+    "react": "19.1.0",
+    "react-native": "0.81.4",
+    "react-native-keychain": "^10.0.0",
+    "react-native-safe-area-context": "^5.6.1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@babel/preset-env": "^7.25.3",
+    "@babel/runtime": "^7.25.0",
+    "@react-native-community/cli": "20.0.0",
+    "@react-native-community/cli-platform-ios": "20.0.0",
+    "@react-native/babel-preset": "0.81.4",
+    "@react-native/metro-config": "0.81.4",
+    "@types/react": "19.1.16",
+    "@types/react-test-renderer": "19.1.0",
+    "react-test-renderer": "19.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
