@@ -1,0 +1,15 @@
+{
+  "name": "@loop/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Loop HTTP gateway adapter: /v1 submit + list + get + SSE run stream, Tailscale-only bind (docs/decisions/2026-xx-remote-app-architecture.md).",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@loop/orchestrator": "workspace:*",
+    "@loop/providers": "workspace:*",
+    "@loop/protocol": "workspace:*"
+  }
+}

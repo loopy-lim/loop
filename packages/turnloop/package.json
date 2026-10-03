@@ -1,0 +1,11 @@
+{
+  "name": "@loop/turnloop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@loop/protocol": "workspace:*",
+    "@loop/providers": "workspace:*"
+  }
+}

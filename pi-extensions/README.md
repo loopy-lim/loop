@@ -9,6 +9,7 @@ Generic [pi coding-agent](https://github.com/earendil-works/pi-coding-agent) ext
 | `persona.ts` | Persona management: `/persona` command, built-in personas, user-defined personas, auto mode, system-prompt injection, footer status, Loop run-start status re-assert |
 | `todo-widget.ts` | `todo` tool plus a persistent live widget above the editor (todos + a distinct Tasks section for Loop runs), and a `/todos` overlay |
 | `usage.ts` | `/usage` command aggregating LLM spend (dollars + tokens) across all pi sessions, grouped by day, model, and project |
+| `session-tap.ts` | Fail-open live pi conversation mirror to the gateway session collector (interactive TUI included) |
 
 ## Install locations
 
@@ -18,6 +19,7 @@ Generic [pi coding-agent](https://github.com/earendil-works/pi-coding-agent) ext
   ```bash
   cp pi-extensions/persona.ts pi-extensions/todo-widget.ts pi-extensions/usage.ts ~/.pi/agent/extensions/
   ```
+- **Session tap registration:** add `"/Users/loopy/dev/ll3/loop/pi-extensions/session-tap.ts"` to the `extensions` array in `~/.pi/agent/settings.json` (or copy `session-tap.ts` to `~/.pi/agent/extensions/`). Restart pi or run `/reload`; pi loads extensions in interactive, RPC, JSON and print modes. The gateway must be running; override its collector path via `LOOP_GATEWAY_SESSION_SOCKET` (or set `LOOP_SESSION_TAP_SOCKET` for the tap only). Missing gateway never blocks pi. Do not configure both auto-discovery and the settings entry for the same tap.
 - **User-defined personas:** `~/.pi/agent/personas/*.md` (one Markdown file per persona). Built-in personas live in code; that directory is only for user overrides. These files are **not** installed by this repo — `pi-extensions/personas/*.md` is reference material only.
 
 ---
