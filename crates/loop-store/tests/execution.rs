@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use loop_core::event::{Event, EventKind};
 use loop_store::SqliteStore;
 

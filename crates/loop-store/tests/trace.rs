@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use loop_core::attention::{Attention, AttentionKind, AttentionResolution};
 use loop_core::benchmark::TraceSummary;
 use loop_core::event::{Event, EventKind};

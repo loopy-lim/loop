@@ -3,6 +3,7 @@ mod compute_class;
 mod failure;
 mod routing;
 mod terminalization;
+mod verification;
 
 pub use cleanup::{
     evaluate_external_session_removal, evaluate_run_record_removal, evaluate_surface_removal,
@@ -21,6 +22,7 @@ pub use terminalization::{
     DependencyTerminalization, IndependentBranchAction, RunFailureAction, TerminalizationOutcome,
     TerminalizationPolicy,
 };
+pub use verification::is_check_side_effect_path;
 
 #[cfg(test)]
 mod minimal_intervention_tests {

@@ -43,10 +43,10 @@ impl Scheduler {
                 }
                 continue;
             }
-            if task.preferred_compute == ComputeClass::Frontier {
-                if frontier >= self.capacity.max_frontier_workers {
-                    continue;
-                }
+            if task.preferred_compute == ComputeClass::Frontier
+                && frontier >= self.capacity.max_frontier_workers
+            {
+                continue;
             }
             if running_tasks
                 .iter()

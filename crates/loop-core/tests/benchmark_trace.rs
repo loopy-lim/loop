@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use loop_core::benchmark::{compare_traces, TraceSummary};
 use loop_core::event::{Event, EventKind};
 use loop_core::task::TaskId;

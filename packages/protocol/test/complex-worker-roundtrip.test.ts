@@ -45,7 +45,9 @@ describe("complex worker command round-trips", () => {
           readScope: [],
           writeScope: ["src/**"],
           requirements: [],
-          completionChecks: [{ id: "c1", command: "true", args: [], workingDirectory: null, timeoutMs: 5000 }],
+          completionChecks: [
+            { id: "c1", command: "true", args: [], workingDirectory: null, timeoutMs: 5000 },
+          ],
           preferredCompute: "fast",
           minimumCompute: "tiny",
           maximumCompute: "strong",
@@ -59,7 +61,9 @@ describe("complex worker command round-trips", () => {
           readScope: [],
           writeScope: ["src/**"],
           requirements: [],
-          completionChecks: [{ id: "c2", command: "true", args: [], workingDirectory: null, timeoutMs: 5000 }],
+          completionChecks: [
+            { id: "c2", command: "true", args: [], workingDirectory: null, timeoutMs: 5000 },
+          ],
           preferredCompute: "fast",
           minimumCompute: "tiny",
           maximumCompute: "strong",
@@ -80,7 +84,12 @@ describe("complex worker command round-trips", () => {
 
     // Dispatch-path invocation of the complex-codec commands (through the
     // engine, not the raw frame), including the optional WorkerState field.
-    const started = await recordWorkerStarted({ databasePath, runId, taskId: "t1", workerId: "w1" });
+    const started = await recordWorkerStarted({
+      databasePath,
+      runId,
+      taskId: "t1",
+      workerId: "w1",
+    });
     expect(started.accepted).toBe(true);
 
     const finished = await recordWorkerResult({

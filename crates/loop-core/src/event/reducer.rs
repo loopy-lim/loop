@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::attention::{Attention, AttentionState};
-use crate::policy::{next_compute_class, ArtifactKind, FailureClass};
+use crate::policy::{is_check_side_effect_path, next_compute_class, ArtifactKind, FailureClass};
 use crate::run::RunState;
 use crate::task::{Task, TaskId, TaskState, TaskTransitionError};
 
@@ -105,7 +105,19 @@ impl RunProjection {
                                     && !receipt.timed_out
                                     && receipt.source.as_ref().is_some_and(|source| {
                                         source.is_stable()
-                                            && source.observed_outside_write_scope.is_empty()
+                                            && source.observed_outside_write_scope.iter().all(
+                                                |path| {
+                                                    // These receipts belong to the criterion
+                                                    // task's own declared completion checks.
+                                                    // Writes those checks produce as side
+                                                    // effects (build artifacts, dependency
+                                                    // caches, git-ignored output) cannot be
+                                                    // attributed to the worker and must not
+                                                    // block closure; any other out-of-scope
+                                                    // change still does.
+                                                    is_check_side_effect_path(path)
+                                                },
+                                            )
                                     })
                             })
                         })

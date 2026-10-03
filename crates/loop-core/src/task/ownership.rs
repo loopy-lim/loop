@@ -27,10 +27,16 @@ impl WorkOwnership {
     }
 
     /// These are observations in a shared worktree, never authorship claims.
+    /// Only repository-relative paths can be observations of the audited
+    /// working directory: absolute paths (including Loop's own state, such as
+    /// the run database artifacts under `~/.config/loop`) and `..`-escaping
+    /// relatives name files outside the audited tree and are never recorded
+    /// as worker out-of-scope observations. Repository-relative paths outside
+    /// the write scope are still returned and still block verification.
     pub fn observed_outside_write_scope(&self, paths: &[String]) -> Vec<String> {
         let mut outside: Vec<_> = paths
             .iter()
-            .filter(|path| !self.write_scope_contains(path))
+            .filter(|path| is_repository_relative(path) && !self.write_scope_contains(path))
             .cloned()
             .collect();
         outside.sort();
@@ -43,7 +49,7 @@ fn scope_matches_path(scope: &str, path: &str) -> bool {
     if scope == "." {
         return true;
     }
-    if path.starts_with('/') || path.split('/').any(|part| part == "..") {
+    if !is_repository_relative(path) {
         return false;
     }
     let pattern = scope.strip_prefix("./").unwrap_or(scope).as_bytes();
@@ -82,6 +88,13 @@ fn scope_matches_path(scope: &str, path: &str) -> bool {
         result
     }
     matches(pattern, path, 0, 0, &mut memo)
+}
+
+/// Whether `path` addresses a file inside the audited working directory.
+/// Absolute paths and `..`-escaping relatives point outside the audited tree,
+/// so they cannot be observations of the shared repository tree.
+fn is_repository_relative(path: &str) -> bool {
+    !path.starts_with('/') && !path.split('/').any(|part| part == "..")
 }
 
 fn normalize_all<I, S>(values: I) -> Vec<String>

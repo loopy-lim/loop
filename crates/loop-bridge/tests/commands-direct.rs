@@ -343,6 +343,7 @@ fn pause_run_and_confirm_paused_transition_the_run_state() {
         task_id: "pausable".into(),
         worker_id: "worker-1".into(),
         execution_owner: None,
+        state: None,
     })
     .unwrap();
     pause_run(RunInput {
@@ -363,6 +364,7 @@ fn pause_run_and_confirm_paused_transition_the_run_state() {
         task_id: "pausable".into(),
         worker_id: "worker-1".into(),
         execution_owner: None,
+        state: None,
     })
     .unwrap();
     confirm_paused(RunInput {

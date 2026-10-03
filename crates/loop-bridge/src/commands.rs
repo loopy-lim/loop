@@ -7,7 +7,7 @@ use loop_core::policy::{
     IndependentBranchAction, OnExhaustion, RefusalCode, RetentionPolicy, RetryOutcome, RetryScope,
     RunFailureAction, TerminalizationPolicy,
 };
-use loop_core::run::RunState;
+use loop_core::run::{RunState, WorkerState};
 use loop_core::scheduler::{Capacity, Scheduler};
 use loop_core::task::{
     Assumption, CompletionCheck, CompletionContract, CompletionCoverage, DecompositionContract,
@@ -162,6 +162,7 @@ pub struct WorkerInput {
     pub task_id: String,
     pub worker_id: String,
     pub execution_owner: Option<String>,
+    pub state: Option<WorkerState>,
 }
 
 #[bridge_type]
@@ -181,6 +182,7 @@ pub struct WorkerResultInput {
     pub success: bool,
     pub summary: String,
     pub execution_owner: Option<String>,
+    pub state: Option<WorkerState>,
 }
 
 #[bridge_type]

@@ -109,6 +109,7 @@ fn prepared_run(database_path: &str) {
         task_id: "impl".into(),
         worker_id: "worker-1".into(),
         execution_owner: Some("orchestrator".into()),
+        state: None,
     })
     .unwrap();
 }

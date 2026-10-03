@@ -64,6 +64,7 @@ fn worker_result_and_dependency_context_are_durable_and_relevant() {
         task_id: "a".into(),
         worker_id: "worker-a".into(),
         execution_owner: None,
+        state: None,
     })
     .unwrap();
     record_worker_result(WorkerResultInput {
@@ -74,6 +75,7 @@ fn worker_result_and_dependency_context_are_durable_and_relevant() {
         success: true,
         summary: "The upstream finding".into(),
         execution_owner: None,
+        state: None,
     })
     .unwrap();
     record_verification(VerificationInput {

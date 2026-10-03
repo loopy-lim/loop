@@ -3,6 +3,7 @@
 //! The watermark is deterministic core policy: it advances only in ascending
 //! event-log sequence order per task, rejects out-of-order or duplicate
 //! deliveries, and replays identically from the durable event log.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use loop_core::event::{Event, EventKind, ProjectionError, RunProjection};
 use loop_core::policy::ComputeClass;

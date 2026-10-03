@@ -1,6 +1,11 @@
 [scheduler]
 max_parallel = 6
-max_frontier_workers = 1
+# Dispatch scaling (2026-xx): frontier-class work no longer serializes behind a
+# single worker. The cap stays a configured worker limit (≤ max_parallel);
+# independent frontier tasks now dispatch concurrently up to max_parallel.
+# Only overlapping write scopes and serial decision/integration kinds still
+# serialize tasks (loop-core scheduler conflict rules).
+max_frontier_workers = 6
 decision_parallelism = 1
 integration_parallelism = 1
 unknown_write_scope_is_exclusive = true
@@ -10,6 +15,12 @@ default_compute_class = "balanced"
 high_risk_floor = "strong"
 critical_risk_floor = "frontier"
 escalation = ["deterministic", "typed_decision", "tiny", "fast", "balanced", "strong", "frontier"]
+# Provider-selection bias over each task's declared compute range (dispatch-scaling).
+# "cheapest" (default) keeps the least-costly sufficient class;
+# "strongest" routes every task at the top of its own range (maximumCompute),
+# i.e. the strongest configured compute class — maximum reasoning tokens — and
+# degrades to the declared floor when no available candidate satisfies the ceiling.
+compute_selection = "cheapest"
 
 [recovery]
 missing_worker_state = "lost"

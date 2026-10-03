@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use loop_core::event::{Artifact, Event, EventKind};
 use loop_core::policy::{ArtifactKind, RefusalCode, RetentionPolicy};
 use loop_core::run::RunState;

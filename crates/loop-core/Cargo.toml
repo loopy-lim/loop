@@ -35,3 +35,6 @@ path = "tests/benchmark_profile.rs"
 [[test]]
 name = "benchmark_trace"
 path = "tests/benchmark_trace.rs"
+
+[lints]
+workspace = true

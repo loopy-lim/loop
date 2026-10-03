@@ -12,6 +12,7 @@
 //! de-facto persistence contract. The words below are now pinned explicitly:
 //! any change to a stored string fails here because existing persisted rows
 //! (and the read-back paths that parse them) depend on the exact values.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 // The `#[path]` includes compile the private modules into this binary; the
 // store's full API surface is intentionally unused here, so silence the

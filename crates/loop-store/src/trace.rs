@@ -5,6 +5,7 @@
 //! comparison and self-trace reports read the same numbers without joining
 //! data in the adapter layer.
 
+use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 
 use loop_core::benchmark::TraceSummary;
@@ -70,8 +71,13 @@ pub struct RunTraceReport {
 impl SqliteStore {
     /// Aggregate one run's persisted events into a trace report.
     pub fn trace_report(&self, run_id: &str) -> Result<RunTraceReport, StoreError> {
+        // `trace_reports` yields exactly one report per requested id, so a
+        // single-id request always produces a single report; a missing entry
+        // degrades to the existing not-found error instead of panicking.
         let mut reports = self.trace_reports(std::slice::from_ref(&run_id))?;
-        Ok(reports.pop().expect("one requested run yields one report"))
+        reports
+            .pop()
+            .ok_or_else(|| StoreError::RunNotFound(run_id.to_string()))
     }
 
     /// Aggregate several runs, preserving the given input order.
@@ -171,17 +177,18 @@ fn scan_tasks(connection: &Connection, run_id: &str) -> Result<Vec<TaskTrace>, S
         let Some(key) = task_key(&event) else {
             continue;
         };
-        if !rows.contains_key(&key) {
-            order.push(key.clone());
-            rows.insert(
-                key.clone(),
-                TaskTrace {
+        // The entry API keeps the invariant (every key in `order` exists in
+        // `rows`) true by construction instead of asserting it after lookup.
+        let task = match rows.entry(key.clone()) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                order.push(key.clone());
+                entry.insert(TaskTrace {
                     task_id: key.clone(),
                     ..TaskTrace::default()
-                },
-            );
-        }
-        let task = rows.get_mut(&key).expect("row inserted above");
+                })
+            }
+        };
         match &event.kind {
             EventKind::TaskReady(_) => {
                 if task.first_ready_seq.is_none() {
@@ -210,9 +217,12 @@ fn scan_tasks(connection: &Connection, run_id: &str) -> Result<Vec<TaskTrace>, S
             _ => {}
         }
     }
+    // `order` only records keys inserted into `rows` above, so removal is
+    // total; `filter_map` keeps the collection panic-free while preserving
+    // the input order for identical run data.
     Ok(order
         .into_iter()
-        .map(|id| rows.remove(&id).expect("order matches inserted rows"))
+        .filter_map(|id| rows.remove(&id))
         .collect())
 }
 

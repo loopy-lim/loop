@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::str::FromStr;
 
 use loop_core::benchmark::WorkflowProfile;

@@ -83,6 +83,51 @@ fn successful_check_cannot_complete_after_source_drift_and_scope_observation_is_
 }
 
 #[test]
+fn check_receipts_do_not_attribute_system_state_paths_to_workers() {
+    let dir = tempfile::tempdir().unwrap();
+    let database_path = dir.path().join("loop.db").display().to_string();
+    let run_id = "system-state-attribution";
+    create_run(CreateRunInput { database_path: database_path.clone(), run_id: run_id.into() }).unwrap();
+    let mut task = research("change");
+    task.write_scope = vec!["src/**".into()];
+    submit_plan(SubmitPlanInput { database_path: database_path.clone(), run_id: run_id.into(), tasks: vec![task] }).unwrap();
+    claim_and_work(&database_path, run_id, "change", "worker");
+    finish_worker(&database_path, run_id, "change", "worker", true);
+    record_check_receipts(RecordCheckReceiptsInput {
+        database_path: database_path.clone(),
+        run_id: run_id.into(),
+        task_id: "change".into(),
+        checks: vec![CheckReceipt {
+            id: "tests".into(), command: "true".into(), args: vec![], working_directory: ".".into(),
+            exit_code: 0, stdout: String::new(), stderr: String::new(), timed_out: false, duration_ms: 1,
+            output_artifact: None,
+            source: Some(SourceReceipt {
+                before_fingerprint: "stable".into(), after_fingerprint: "stable".into(),
+                observed_changed_paths: vec![
+                    "/Users/loopy/.config/loop/loop.sqlite.artifacts/run-1/change/check.txt".into(),
+                    "../outside/notes.md".into(),
+                    "docs/user.md".into(),
+                ],
+                observed_outside_write_scope: Vec::new(),
+            }),
+        }],
+        execution_owner: None,
+    }).unwrap();
+    let context = get_task_context(TaskContextInput {
+        database_path: database_path.clone(), run_id: run_id.into(), task_id: "change".into(),
+    }).unwrap();
+    // Absolute paths outside the audited working directory (including Loop's
+    // own state under ~/.config/loop) and `..`-escaping relatives are never
+    // attributed to the worker; a repository-relative out-of-scope edit still
+    // is recorded.
+    assert_eq!(context.previous_checks[0].source.as_ref().unwrap().observed_outside_write_scope, vec!["docs/user.md"]);
+    // With stable source the receipt no longer poisons verification.
+    pass_verification(&database_path, run_id, "change");
+    let snapshot = get_snapshot(RunInput { database_path, run_id: run_id.into() }).unwrap();
+    assert_eq!(snapshot.tasks[0].state, TaskState::Done);
+}
+
+#[test]
 fn high_level_commands_create_plan_and_claim_ready_tasks() {
     let dir = tempfile::tempdir().unwrap();
     let database_path = dir.path().join("loop.db").display().to_string();
@@ -287,6 +332,7 @@ fn exhausted_worker_failure_creates_retryable_human_attention() {
         task_id: "fragile".into(),
         worker_id: "worker-1".into(),
         execution_owner: None,
+        state: None,
     })
     .unwrap();
     record_worker_result(WorkerResultInput {
@@ -297,6 +343,7 @@ fn exhausted_worker_failure_creates_retryable_human_attention() {
         success: false,
         summary: "failed after escalation".into(),
         execution_owner: None,
+        state: None,
     })
     .unwrap();
     let paused = get_snapshot(RunInput {
@@ -366,6 +413,7 @@ fn connection_error_worker_result_takes_the_attention_path_not_terminal_failure(
         task_id: "lonely".into(),
         worker_id: "worker-1".into(),
         execution_owner: Some("owner-1".into()),
+        state: None,
     })
     .unwrap();
     // With the attempt ladder spent (max_attempts = 1), a connection error
@@ -378,6 +426,7 @@ fn connection_error_worker_result_takes_the_attention_path_not_terminal_failure(
         success: false,
         summary: "Error: Connection error.".into(),
         execution_owner: Some("owner-1".into()),
+        state: None,
     })
     .unwrap();
 
@@ -461,6 +510,7 @@ fn connection_error_verification_failure_takes_the_attention_path_not_terminal_f
         task_id: "verify-lonely".into(),
         worker_id: "worker-1".into(),
         execution_owner: Some("owner-1".into()),
+        state: None,
     })
     .unwrap();
     record_worker_result(WorkerResultInput {
@@ -471,6 +521,7 @@ fn connection_error_verification_failure_takes_the_attention_path_not_terminal_f
         success: true,
         summary: "done".into(),
         execution_owner: Some("owner-1".into()),
+        state: None,
     })
     .unwrap();
     // A check-free verification failure carrying a transport fault text must
@@ -593,6 +644,7 @@ fn retry_cannot_bypass_reconciliation_for_verifying_work() {
         task_id: "a".into(),
         worker_id: "worker".into(),
         execution_owner: None,
+        state: None,
     })
     .unwrap();
     record_worker_result(WorkerResultInput {
@@ -603,6 +655,7 @@ fn retry_cannot_bypass_reconciliation_for_verifying_work() {
         success: true,
         summary: "done".into(),
         execution_owner: None,
+        state: None,
     })
     .unwrap();
     request_attention(RequestAttentionInput {
@@ -820,6 +873,7 @@ fn cancellation_requires_worker_acknowledgement_and_terminal_runs_do_not_resume(
         task_id: "a".into(),
         worker_id: "worker".into(),
         execution_owner: None,
+        state: None,
     })
     .unwrap();
     cancel_run(RunInput {
@@ -887,6 +941,7 @@ fn reconciled_orphans_require_stop_confirmation_and_reject_a_live_owner() {
         task_id: "a".into(),
         worker_id: "lost".into(),
         execution_owner: None,
+        state: None,
     })
     .unwrap();
     let reconcile = |confirmed_stopped| ReconcileTaskInput {
@@ -987,6 +1042,7 @@ fn claim_and_work(database_path: &str, run_id: &str, task_id: &str, worker_id: &
         task_id: task_id.into(),
         worker_id: worker_id.into(),
         execution_owner: None,
+        state: None,
     })
     .unwrap();
 }
@@ -1020,6 +1076,7 @@ fn finish_worker(database_path: &str, run_id: &str, task_id: &str, worker_id: &s
             "failed".into()
         },
         execution_owner: None,
+        state: None,
     })
     .unwrap();
 }
@@ -1102,6 +1159,7 @@ fn get_trace_counts_retries_failures_and_attention() {
         task_id: "fragile-task".into(),
         worker_id: "worker-2".into(),
         execution_owner: None,
+        state: None,
     })
     .unwrap();
     finish_worker(&path, "trace-retry", "fragile-task", "worker-2", true);
@@ -1184,6 +1242,7 @@ fn compare_traces_ranks_runs_by_deterministic_score() {
         task_id: "task".into(),
         worker_id: "worker-2".into(),
         execution_owner: None,
+        state: None,
     })
     .unwrap();
     finish_worker(&path, "bench-retried", "task", "worker-2", true);

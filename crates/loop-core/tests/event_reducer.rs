@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use loop_core::event::{Event, EventKind, RunProjection};
 use loop_core::policy::ComputeClass;
 use loop_core::run::RunState;

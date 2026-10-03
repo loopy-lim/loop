@@ -235,26 +235,30 @@ impl FailurePolicy {
     /// misconfiguration is surfaced at contract validation instead of being
     /// silently ignored at evaluation time.
     pub fn validate(&self) -> Result<(), &'static str> {
-        if let Some(budget) = self
-            .retry_budgets
-            .iter()
-            .find(|budget| !budget.failure_class.is_nondeterministic())
-        {
-            return Err(match budget.failure_class {
+        // Exhaustive over `FailureClass`: adding a deterministic variant
+        // breaks compilation here instead of relying on an unreachable
+        // catch-all at runtime.
+        for budget in &self.retry_budgets {
+            let reason = match budget.failure_class {
                 FailureClass::Assertion => {
-                    "retry budgets cannot target assertion failures; the first \
-                     deterministic assertion failure is terminal"
+                    Some("retry budgets cannot target assertion failures; the first \
+                          deterministic assertion failure is terminal")
                 }
                 FailureClass::InvalidContract => {
-                    "retry budgets cannot target invalid-contract failures; they are \
-                     deterministic and terminal on first occurrence"
+                    Some("retry budgets cannot target invalid-contract failures; they are \
+                          deterministic and terminal on first occurrence")
                 }
                 FailureClass::ProcessStart => {
-                    "retry budgets cannot target process-start failures; they are \
-                     deterministic and terminal on first occurrence"
+                    Some("retry budgets cannot target process-start failures; they are \
+                          deterministic and terminal on first occurrence")
                 }
-                _ => unreachable!("only deterministic classes are rejected"),
-            });
+                FailureClass::Timeout | FailureClass::Interrupted | FailureClass::Environment => {
+                    None
+                }
+            };
+            if let Some(reason) = reason {
+                return Err(reason);
+            }
         }
         Ok(())
     }

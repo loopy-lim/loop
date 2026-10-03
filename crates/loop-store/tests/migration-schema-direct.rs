@@ -3,6 +3,7 @@
 //! Both modules are compiled into this test binary via `#[path]` includes so
 //! `migrate` and `SCHEMA` are exercised without going through
 //! `SqliteStore::open` and without widening the crate's public API.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 #[path = "../src/schema.rs"]
 mod schema;

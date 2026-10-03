@@ -346,6 +346,19 @@ export type CheckResultInput = {
   passed: boolean;
 };
 
+/**
+ * Lifecycle vocabulary for a worker as observed at the adapter boundary.
+ *
+ * This enum is the domain source of the worker-status vocabulary. The bridge carries this type through the optional `state` fields on `WorkerInput` and `WorkerResultInput`, generating the protocol `WorkerState`. These observations do not change the existing worker result policy; absent state remains valid for callers that only report success and summary. Adapters should consume the generated type rather than maintain a copy.
+ *
+ * Vocabulary correspondence (decided here, once):
+ *
+ * - `starting` / `running` / `completed` / `cancelled` map one-to-one to the adapter session lifecycle. - `lost` is the only terminal-without-result state. An adapter session that ends without a usable result (process exit, API failure, blocked or unobservable agent) reports `lost`; the failure taxonomy and retryability stay adapter-side in the worker result. Recovery uses the same term for a worker that can no longer be observed after a restart.
+ *
+ * There is deliberately no `failed` variant: the graph does not distinguish "worker failed" from "worker lost" as a state — both reconcile through the recorded worker result, and the run-level failure vocabulary already lives in [`crate::run::RunState`] and task events.
+ */
+export type WorkerState = 'starting' | 'running' | 'completed' | 'lost' | 'cancelled';
+
 export type ComputeCandidateInput = {
   id: string;
   computeClass: ComputeClass;
@@ -675,6 +688,7 @@ export type WorkerResultInput = {
   success: boolean;
   summary: string;
   executionOwner?: string | null;
+  state?: WorkerState | null;
 };
 
 export type WorkerInput = {
@@ -683,6 +697,7 @@ export type WorkerInput = {
   taskId: string;
   workerId: string;
   executionOwner?: string | null;
+  state?: WorkerState | null;
 };
 
 export type ReleaseExecutionInput = {

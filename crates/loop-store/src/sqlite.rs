@@ -13,7 +13,7 @@ use loop_core::task::{TaskBuildError, TaskState};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use thiserror::Error;
 
-use crate::migration::migrate;
+use crate::migration::{migrate, MigrationError};
 
 pub struct SqliteStore {
     pub(crate) connection: Connection,
@@ -795,6 +795,8 @@ pub enum StoreError {
     ExpectedVerification,
     #[error("append_task requires a TaskCreated event")]
     ExpectedTaskCreated,
+    #[error(transparent)]
+    Migration(#[from] MigrationError),
     #[error(transparent)]
     Graph(#[from] GraphError),
     #[error(transparent)]

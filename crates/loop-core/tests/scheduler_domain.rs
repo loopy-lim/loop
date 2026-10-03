@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::collections::BTreeSet;
 
 use loop_core::attention::{Attention, AttentionKind, AttentionResolution, AttentionState};

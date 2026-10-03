@@ -196,16 +196,24 @@ fn validate_semantic_pair(
     right: &Task,
     tasks: &BTreeMap<TaskId, Task>,
 ) -> Result<(), GraphError> {
-    let left_touchpoints = &left
+    // `validate_preflight` runs `validate_task_contract` for every task
+    // before pair checks, so these contracts are already guaranteed to
+    // exist; a miss is reported through the same error instead of an
+    // invariant panic.
+    let left_contract = left
         .decomposition_contract
         .as_ref()
-        .unwrap()
-        .semantic_touchpoints;
-    let right_touchpoints = &right
+        .ok_or_else(|| GraphError::MissingDecompositionContract {
+            task: left.id.clone(),
+        })?;
+    let right_contract = right
         .decomposition_contract
         .as_ref()
-        .unwrap()
-        .semantic_touchpoints;
+        .ok_or_else(|| GraphError::MissingDecompositionContract {
+            task: right.id.clone(),
+        })?;
+    let left_touchpoints = &left_contract.semantic_touchpoints;
+    let right_touchpoints = &right_contract.semantic_touchpoints;
     for left_touchpoint in left_touchpoints {
         for right_touchpoint in right_touchpoints {
             if !semantic_touchpoints_conflict(left_touchpoint, right_touchpoint) {
@@ -264,7 +272,13 @@ fn visit(
     if !visiting.insert(id.clone()) {
         return Err(GraphError::Cycle { task: id.clone() });
     }
-    for dependency in &tasks[id].dependencies {
+    // `validate` confirmed every dependency exists before traversal runs, so
+    // the lookup below cannot miss; a miss is treated defensively as having
+    // no dependencies instead of panicking on the map index.
+    let Some(task) = tasks.get(id) else {
+        return Ok(());
+    };
+    for dependency in &task.dependencies {
         visit(dependency, tasks, visiting, complete)?;
     }
     visiting.remove(id);

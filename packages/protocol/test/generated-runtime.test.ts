@@ -57,12 +57,63 @@ test("generated Bun commands drive a complete persisted plan setup", async () =>
 });
 
 test("generated TypeScript preserves Rust enum domains", () => {
-  const generated = readFileSync(
-    resolve(import.meta.dir, "../src/generated/types.ts"),
-    "utf8",
-  );
+  const generated = readFileSync(resolve(import.meta.dir, "../src/generated/types.ts"), "utf8");
   expect(generated).toContain("export type TaskKind =");
   expect(generated).toContain("export type ComputeClass =");
   expect(generated).not.toContain("kind: string;");
   expect(generated).not.toContain("preferredCompute: string;");
+});
+
+test("generated TypeScript anchors the conversation frame family (decision 2026-xx-gui-conversation D2)", () => {
+  const generated = readFileSync(resolve(import.meta.dir, "../src/generated/events.ts"), "utf8");
+
+  // All nine v1 frame events are schema-anchored under their rustra event
+  // names; SSE frame names are these minus the `loop.` prefix.
+  const eventNames = [
+    "loop.session_list",
+    "loop.user_message",
+    "loop.assistant_delta",
+    "loop.assistant_message",
+    "loop.tool_call_started",
+    "loop.tool_call_ended",
+    "loop.lifecycle",
+    "loop.steer_queued",
+    "loop.conversation_reset",
+  ];
+  for (const name of eventNames) {
+    expect(generated).toContain(`'${name}':`);
+  }
+
+  // Frame vocabulary types are generated (no hand-written TS copies):
+  // shared structs and all enums get named exports; direct event payload
+  // structs are inlined into RustraEventPayloads (pane-family precedent).
+  for (const type of [
+    "RemoteSessionSummary",
+    "RemoteSessionState",
+    "RemoteSessionResetReason",
+    "ConversationUserMessageSource",
+    "ConversationLifecyclePhase",
+  ]) {
+    expect(generated).toContain(`export type ${type}`);
+  }
+
+  // Inventory and frame payload fields ride the generated camelCase contract.
+  expect(generated).toContain("sessionId: string;");
+  expect(generated).toContain("sessions: RemoteSessionSummary[];");
+  expect(generated).toContain("messageId: string;");
+  expect(generated).toContain("imageCount: number;");
+  expect(generated).toContain("toolCallId: string;");
+  expect(generated).toContain("argsTruncated: boolean;");
+  expect(generated).toContain("resultTruncated: boolean;");
+  expect(generated).toContain("isError: boolean;");
+  expect(generated).toContain("steerId: string;");
+
+  // Enum domains are fixed at v1 (decision D2/D3), not widened to string.
+  expect(generated).toContain("'cursorUnavailable' | 'sessionGone' | 'slowConsumer'");
+  expect(generated).toContain("'interactive' | 'steer' | 'api'");
+  expect(generated).toContain("'sessionStarted' | 'turnStarted' | 'turnEnded' | 'sessionEnded'");
+  expect(generated).toContain("'live' | 'ended' | 'unobserved'");
+  expect(generated).not.toContain("source: string;");
+  expect(generated).not.toContain("reason: string;");
+  expect(generated).not.toContain("state: string;");
 });
