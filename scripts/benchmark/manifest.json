@@ -1,0 +1,26 @@
+{
+  "name": "normalize-label-fake-smoke",
+  "intent": "Normalize labels by collapsing whitespace and title-casing words",
+  "sourceDirectory": "/Users/loopy/dev/ll3/loop/scripts/benchmark/fixture",
+  "configDirectory": "../../config/benchmark",
+  "candidateIds": ["fake:baseline", "fake:alternative"],
+  "iterations": 1,
+  "tasks": [{
+    "id": "implement", "title": "Normalize labels", "kind": "implementation",
+    "dependencies": [], "readScope": ["src/normalize.ts", "tests/normalize.test.ts"],
+    "writeScope": ["src/normalize.ts"],
+    "requirements": ["normalizeLabel collapses whitespace and title-cases words"],
+    "completionChecks": [{
+      "id": "normalize-test", "command": "bun", "args": ["test", "tests/normalize.test.ts"],
+      "workingDirectory": null, "timeoutMs": 120000
+    }],
+    "preferredCompute": "fast", "minimumCompute": "fast", "maximumCompute": "fast",
+    "routing": {"risk": "low", "required": {"coding": 0, "reasoning": 0, "tools": 0, "vision": 0, "long_context": 0}},
+    "maxAttempts": 1
+  }],
+  "criteria": [{
+    "id": "normalization", "taskId": "implement",
+    "description": "normalizeLabel collapses whitespace and title-cases words",
+    "checkIds": ["normalize-test"]
+  }]
+}
