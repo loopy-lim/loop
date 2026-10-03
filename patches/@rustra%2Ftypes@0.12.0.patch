@@ -1,0 +1,50 @@
+diff --git a/dist/complex-codec-compiled.js b/dist/complex-codec-compiled.js
+index 18987d65225489489232e6c69bfc4f1e5fd8969f..ecfba7c8bf97a8703d8f76779983ea1df92b5d3a 100644
+--- a/dist/complex-codec-compiled.js
++++ b/dist/complex-codec-compiled.js
+@@ -89,7 +89,20 @@ function compileNode(schema, definitions, refs, depth) {
+                 kind: 'struct',
+                 fields: Object.entries(schema.properties ?? {}).map(([key, fieldSchema]) => ({
+                     key,
+-                    node: compileNode(fieldSchema, definitions, refs, depth + 1),
++                    // Loop local patch: for a non-required field the struct codec
++                    // already writes/reads a presence byte (encodeStruct /
++                    // decodeNode 'struct'). When the field schema is itself a
++                    // nullable ("type":[T,"null"] / anyOf[T,null]), compileNode
++                    // wraps it in an 'option' node, producing a SECOND 0/1 tag —
++                    // but the native fast-path handler decodes the input with
++                    // plain serde/postcard where the field is just
++                    // Option<T> (ONE tag). The extra byte desynchronised every
++                    // optional field and killed dispatch with "postcard decode:
++                    // Found an Option discriminant". Unwrap the nullable so the
++                    // presence byte is the only tag, mirroring serde.
++                    node: compileNode(!required.has(key) && optionInner(fieldSchema)
++                        ? optionInner(fieldSchema)
++                        : fieldSchema, definitions, refs, depth + 1),
+                     required: required.has(key),
+                 })),
+             };
+diff --git a/dist/complex-codec.js b/dist/complex-codec.js
+index 0e5739492056703307f7531656fdad924394b2c6..348ccee98018a4d570f1023bec6342476f7ff789 100644
+--- a/dist/complex-codec.js
++++ b/dist/complex-codec.js
+@@ -54,8 +54,17 @@ export function createComplexCodec(options) {
+                 const reader = new Reader(bytes, maxCollectionLength);
+                 reader.raw(8);
+                 const result = decodeNode(reader, outputIr, maxDepth, 0, maxCollectionLength);
+-                if (reader.remaining !== 0)
+-                    throw new ComplexCodecError('trailing bytes in complex response');
++                // Loop local patch: the Bun FFI transport reuses a caller buffer whose
++                // byteLength is the capacity, not the frame length (see @rustra/bun
++                // bun-ffi.js: "byteLength 는 capacity(512)이고 프레임 길이는 프레임 내부
++                // 구조(postcard varint/tier3 len 접두어)가 전달한다 — 완결 프레임에서
++                // 디코드는 프레임 내부에서 종료된다"). Every hand-written generated codec
++                // honours that contract by self-terminating; this strict `remaining`
++                // check is the only violator, so complex-codec commands
++                // (recordWorkerStarted/recordWorkerResult/…) always failed with
++                // "trailing bytes in complex response" and killed the dispatcher
++                // before any herdr agent spawned. IR-complete decode is authoritative.
++                void reader.remaining;
+                 return { ok: true, result: options.outputSchema.type === 'null' ? undefined : result };
+             }
+             catch (error) {
