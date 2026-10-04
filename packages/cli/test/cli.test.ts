@@ -687,6 +687,123 @@ test("add-goal-task persists a correction and criterion atomically", async () =>
   ]);
 });
 
+test("promote-steer validates arguments and payload before touching the bridge", async () => {
+  const flags = ["--config", join(root, "config"), "--json"];
+
+  const missingRunId = output();
+  expect(await runCli(["promote-steer", ...flags], { io: missingRunId.io, stdin: "{}" })).toBe(2);
+  expect(missingRunId.stderr()).toContain("promote-steer requires <run-id>");
+
+  const invalidJson = output();
+  expect(
+    await runCli(["promote-steer", "run-1", ...flags], { io: invalidJson.io, stdin: "not-json" }),
+  ).toBe(2);
+  expect(invalidJson.stderr()).toContain("promote-steer requires a JSON payload on stdin");
+
+  const missingMessage = output();
+  expect(
+    await runCli(["promote-steer", "run-1", ...flags], {
+      io: missingMessage.io,
+      stdin: JSON.stringify({ task: { id: "t" }, criteria: [{ id: "c" }] }),
+    }),
+  ).toBe(2);
+  expect(missingMessage.stderr()).toContain("non-empty user message");
+
+  const missingTask = output();
+  expect(
+    await runCli(["promote-steer", "run-1", ...flags], {
+      io: missingTask.io,
+      stdin: JSON.stringify({ message: "fix it" }),
+    }),
+  ).toBe(2);
+  expect(missingTask.stderr()).toContain("dependent task object");
+
+  const emptyCriteria = output();
+  expect(
+    await runCli(["promote-steer", "run-1", ...flags], {
+      io: emptyCriteria.io,
+      stdin: JSON.stringify({ message: "fix it", task: { id: "t" }, criteria: [] }),
+    }),
+  ).toBe(2);
+  expect(emptyCriteria.stderr()).toContain("non-empty criteria");
+});
+
+test("promote-steer forwards the promotion to the bridge and returns its receipt", async () => {
+  await protocol.rustra.ready();
+  const databasePath = join(mkdtempSync(join(tmpdir(), "loop-cli-promote-")), "loop.sqlite");
+  const runId = "promote-run";
+  await protocol.createRun({ databasePath, runId });
+  const flags = ["--config", join(root, "config"), "--database", databasePath, "--json"];
+  const baseTask: protocol.TaskSpecInput = {
+    id: "impl",
+    title: "Implement",
+    kind: "implementation",
+    dependencies: [],
+    readScope: ["src/**"],
+    writeScope: ["src/impl.ts"],
+    requirements: ["works"],
+    completionChecks: [{ id: "impl-check", command: "true", args: [], timeoutMs: 1_000 }],
+    preferredCompute: "fast",
+    minimumCompute: "tiny",
+    maximumCompute: "strong",
+    maxAttempts: 1,
+  };
+  await protocol.addTask({ databasePath, runId, task: baseTask });
+  const promotedTask: protocol.TaskSpecInput = {
+    ...baseTask,
+    id: "correction",
+    title: "Apply user correction",
+    requirements: ["works", "correction works"],
+    writeScope: ["src/correction.ts"],
+    dependencies: ["impl"],
+    completionChecks: [{ id: "correction-check", command: "true", args: [], timeoutMs: 1_000 }],
+  };
+  const criterion = {
+    id: "correction",
+    description: "correction works",
+    taskId: promotedTask.id,
+    checkIds: ["correction-check"],
+  };
+
+  const rejected = output();
+  expect(
+    await runCli(["promote-steer", runId, ...flags], {
+      io: rejected.io,
+      stdin: JSON.stringify({
+        message: "also cover the correction",
+        task: { ...promotedTask, dependencies: ["unknown"] },
+        criteria: [criterion],
+      }),
+    }),
+  ).toBe(1);
+  expect(rejected.stderr()).toContain("unknown task unknown");
+
+  const accepted = output();
+  expect(
+    await runCli(["promote-steer", runId, ...flags], {
+      io: accepted.io,
+      stdin: JSON.stringify({ message: "also cover the correction", task: promotedTask, criteria: [criterion] }),
+    }),
+  ).toBe(0);
+  const receipt = JSON.parse(accepted.stdout()) as {
+    accepted: boolean;
+    runId: string;
+    taskId: string;
+    criterionIds: string[];
+    evidenceTests: string[];
+  };
+  expect(receipt).toMatchObject({
+    accepted: true,
+    runId,
+    taskId: "correction",
+    criterionIds: ["correction"],
+  });
+  expect(receipt.evidenceTests.length).toBeGreaterThan(0);
+  const snapshot = await protocol.getSnapshot({ databasePath, runId });
+  expect(snapshot.tasks.map((task) => task.id).sort()).toEqual(["correction", "impl"]);
+  expect(snapshot.goalCriteria).toMatchObject([{ id: "correction", state: "pending" }]);
+});
+
 test("steer relay process command mirrors the owner spawn layout", () => {
   expect(
     buildSteerRelayCommand({

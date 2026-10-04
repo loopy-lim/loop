@@ -411,6 +411,21 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
       print(accepted, parsed.json, io);
       return 0;
     }
+    if (parsed.command === "promote-steer") {
+      const runId = parsed.operands[0];
+      if (!runId) throw new UsageError("promote-steer requires <run-id>");
+      const payload = parsePromoteSteerPayload(options.stdin ?? (await Bun.stdin.text()));
+      const config = configuration(parsed);
+      const protocol = await loadProtocol();
+      await protocol.rustra.ready();
+      const receipt = await protocol.promoteSteer({
+        databasePath: config.databasePath,
+        runId,
+        ...payload,
+      });
+      print(receipt, parsed.json, io);
+      return receipt.accepted ? 0 : 1;
+    }
     if (
       [
         "status",
@@ -1325,6 +1340,46 @@ function parseGoalTaskPayload(value: string): {
   throw new UsageError("add-goal-task requires task and non-empty criteria JSON");
 }
 
+function parsePromoteSteerPayload(value: string): {
+  message: string;
+  task: TaskSpecInput;
+  criteria: GoalCriterionInput[];
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new UsageError("promote-steer requires a JSON payload on stdin");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new UsageError("promote-steer payload must be a JSON object");
+  }
+  const payload = parsed as Record<string, unknown>;
+  if (typeof payload.message !== "string" || !payload.message.trim()) {
+    throw new UsageError("promote-steer payload requires a non-empty user message");
+  }
+  if (!payload.task || typeof payload.task !== "object" || Array.isArray(payload.task)) {
+    throw new UsageError("promote-steer payload requires a dependent task object");
+  }
+  const task = payload.task as Record<string, unknown>;
+  if (typeof task.id !== "string" || !task.id.trim()) {
+    throw new UsageError("promote-steer dependent task requires a non-empty id");
+  }
+  if (!Array.isArray(payload.criteria) || payload.criteria.length === 0) {
+    throw new UsageError("promote-steer payload requires non-empty criteria");
+  }
+  for (const criterion of payload.criteria) {
+    if (!criterion || typeof criterion !== "object" || Array.isArray(criterion)) {
+      throw new UsageError("promote-steer criteria must be GoalCriterionInput objects");
+    }
+  }
+  return {
+    message: payload.message,
+    task: payload.task as TaskSpecInput,
+    criteria: payload.criteria as GoalCriterionInput[],
+  };
+}
+
 function print(value: unknown, json: boolean, io: CliIo): void {
   if (json) io.stdout(`${JSON.stringify(value)}\n`);
   else io.stdout(`${JSON.stringify(value, null, 2)}\n`);
@@ -1369,6 +1424,7 @@ Usage:
   loop goal-ledger <run-id>          Show the goal criterion ledger with owning tasks, check evidence, and steer provenance
   loop add-task <run-id> --json      Read TaskSpecInput JSON from stdin and add it atomically
   loop add-goal-task <run-id> --json Read task and criteria JSON from stdin and add them atomically
+  loop promote-steer <run-id> --json  Read message, dependent task, and criteria JSON from stdin and promote them atomically
   loop steer <run-id> <task-id|all> <message>
   loop resolve <run-id> <attention-id> <approved|retry|cancel|answer>
   loop cleanup [run-id] [--execute] [--keep <N>]
