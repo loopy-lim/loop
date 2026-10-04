@@ -32,7 +32,7 @@ Reader: contributors deciding where a change belongs.
 
 | Layer | Owns | Must not own |
 | --- | --- | --- |
-| Core | task/DAG invariants, readiness, conflicts, capacity, compute classes, transitions | providers, commands, UI, SQLite |
+| Core | task/DAG invariants, readiness, conflicts, capacity, compute classes, transitions, benchmark trace scoring ([ADR](adr/benchmark-placement.md)) | providers, commands, UI, SQLite, benchmark execution/prompt fixtures |
 | Store | schema, ordered events, materialized indexes, worker reconciliation | provider calls, scheduling policy |
 | Bridge | high-level Rustra operations and validation at the process boundary | database CRUD API, model-specific behavior |
 | Protocol | generated Rustra types/commands and Bun native host | parallel domain definitions or manual bridge clients |
@@ -58,11 +58,11 @@ Pending → Ready → Running → Verifying → Done
 
 1. Validate all dependencies and reject cycles.
 2. Select pending/ready tasks whose dependencies are done.
-3. Pause when the run has open attention.
+3. Hold dispatch while the run cannot dispatch: a non-dispatchable lifecycle state (pausing, paused, cancelling, terminal) is `Paused`; an attention state or an open attention is `AttentionHeld`.
 4. Enforce total and frontier capacity.
 5. Serialize decision/integration nodes.
 6. Reject concurrent overlapping write scopes.
-7. Return task IDs in deterministic order.
+7. Return one verdict — `Claimed(ids) | Paused | AttentionHeld | Empty` — from loop-core's scheduler. The bridge relays it verbatim (`claimRunnableTasks` → `outcome` + `taskIds`); the orchestrator re-enters its loop on a hold and raises a blocked attention only for a hold-free `Empty`.
 
 ## Durable recovery
 
