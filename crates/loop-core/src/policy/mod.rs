@@ -24,7 +24,7 @@ pub use terminalization::{
     DependencyTerminalization, IndependentBranchAction, RunFailureAction, TerminalizationOutcome,
     TerminalizationPolicy,
 };
-pub use verification::is_check_side_effect_path;
+pub use verification::{focused_rerun_check_ids, is_check_side_effect_path, CheckOutcome, FocusedRerun};
 
 #[cfg(test)]
 mod minimal_intervention_tests {

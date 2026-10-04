@@ -47,6 +47,48 @@ const GENERATED_FILES: &[&str] = &[".DS_Store"];
 /// File suffixes for incremental-build and bytecode caches.
 const GENERATED_SUFFIXES: &[&str] = &[".tsbuildinfo", ".pyc", ".pyo"];
 
+/// Prior outcome used when deciding whether a completion check can be reused.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CheckOutcome {
+    /// A verifier recorded a stable pass.
+    StablePass,
+    /// The check failed or did not produce stable passing evidence.
+    Failed,
+}
+
+/// Deterministic partition of checks for a focused verification run.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FocusedRerun {
+    pub reuse_check_ids: Vec<String>,
+    pub rerun_check_ids: Vec<String>,
+}
+
+/// Reuse checks with stable passing evidence; rerun failures and unknown checks.
+pub fn focused_rerun_check_ids<I, S>(
+    check_ids: I,
+    outcomes: &[(String, CheckOutcome)],
+) -> FocusedRerun
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let mut plan = FocusedRerun {
+        reuse_check_ids: Vec::new(),
+        rerun_check_ids: Vec::new(),
+    };
+    for check_id in check_ids {
+        let check_id = check_id.into();
+        if outcomes.iter().any(|(known_id, outcome)| {
+            known_id == &check_id && *outcome == CheckOutcome::StablePass
+        }) {
+            plan.reuse_check_ids.push(check_id);
+        } else {
+            plan.rerun_check_ids.push(check_id);
+        }
+    }
+    plan
+}
+
 /// Whether `path` is generated tool output that a declared completion check
 /// may write outside the task's write scope. Such paths never block criterion
 /// verification; every other path observed outside the write scope still does.
@@ -74,7 +116,26 @@ pub fn is_check_side_effect_path(path: &str) -> bool {
 
 #[cfg(test)]
 mod attribution_tests {
-    use super::is_check_side_effect_path;
+    use super::{focused_rerun_check_ids, is_check_side_effect_path, CheckOutcome};
+
+    #[test]
+    fn focused_rerun_reuses_stable_passes_and_reruns_failures_and_unknowns() {
+        let outcomes = vec![
+            ("unit".to_owned(), CheckOutcome::StablePass),
+            ("lint".to_owned(), CheckOutcome::Failed),
+            ("obsolete".to_owned(), CheckOutcome::StablePass),
+        ];
+        let plan = focused_rerun_check_ids(["unit", "lint", "integration"], &outcomes);
+        assert_eq!(plan.reuse_check_ids, ["unit"]);
+        assert_eq!(plan.rerun_check_ids, ["lint", "integration"]);
+    }
+
+    #[test]
+    fn focused_rerun_empty_input_produces_empty_plan() {
+        let plan = focused_rerun_check_ids(std::iter::empty::<&str>(), &[]);
+        assert!(plan.reuse_check_ids.is_empty());
+        assert!(plan.rerun_check_ids.is_empty());
+    }
 
     #[test]
     fn build_and_dependency_output_is_exempt() {
