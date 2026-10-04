@@ -10,7 +10,13 @@ import type { RunSummary } from "@loop/orchestrator";
 // Node-targeted pi extension bundle stays free of Bun-only imports (bun:ffi).
 import { derivePersonaVocabulary, type PersonaVocabulary } from "@loop/orchestrator/persona";
 import { loadLoopConfig } from "@loop/orchestrator/config";
-import { compactLines, type OutputLimits, singleLine } from "@loop/presentation";
+import {
+  compactLines,
+  isActiveRunState,
+  type OutputLimits,
+  type SnapshotRenderOptions,
+  singleLine,
+} from "@loop/presentation";
 import type {
   RunListOutput,
   SnapshotOutput,
@@ -18,6 +24,7 @@ import type {
   TaskSpecInput,
   GoalCriterionInput,
   ComputeClass,
+  PromoteSteerOutput,
 } from "@loop/protocol";
 
 import { validateGoalPlan, type GoalPlan } from "./lead/decompose";
@@ -176,12 +183,21 @@ export interface LoopLeadBackend {
   guidance(runId: string, taskId: string, cwd: string): Promise<string>;
   runs(cwd: string): Promise<RunListOutput[]>;
   models(cwd: string): Promise<string[]>;
-  addTask(
+  /**
+   * Promote the user's mid-run condition into the goal contract: one atomic
+   * append binds the user's own words, a new dependent task, and new goal
+   * criteria, so the completion gate holds the run open until the promoted
+   * criteria verify. The receipt carries the focused test names that prove
+   * the promotion contract — surface them as evidence, never as the user's
+   * verification.
+   */
+  promoteSteer(
     runId: string,
+    message: string,
     task: TaskSpecInput,
-    cwd: string,
     criteria: GoalCriterionInput[],
-  ): Promise<SnapshotOutput>;
+    cwd: string,
+  ): Promise<PromoteSteerOutput>;
 }
 
 function renderRunWidget(
@@ -253,6 +269,10 @@ export function registerLoopExtension(
   const automaticFollowUpRuns = new Set<string>();
   let inFinalReviewTurn = false;
   let leadTiming = new LeadTiming();
+  /** Working-line options for Lead-rendered snapshots: elapsed time only when
+   * this session knows the run is in flight. */
+  const leadSnapshotOptions = (snapshot: SnapshotOutput): SnapshotRenderOptions =>
+    isActiveRunState(snapshot.state) ? { elapsedMs: leadTiming.activeMs(snapshot.runId) } : {};
 
   const stopObserver = () => {
     observerVersion++;
@@ -343,7 +363,7 @@ export function registerLoopExtension(
         await pi.sendMessage(
           {
             customType: "loop-final-review",
-            content: `Loop final review for ${snapshot.runId}. Original intent: ${snapshot.intent}. Durable criteria: ${snapshot.goalCriteria.length ? snapshot.goalCriteria.map((item) => `${item.id} ${item.state}: ${item.description}`).join("; ") : "untracked"}. Compare the original goal and later user corrections with these criteria and executable check evidence. If a requirement is absent or unverified, start one focused follow-up run with an explicit completion check. If covered, summarize the verified result in at most 8 lines: result, checks, and any material limit. Show details only when asked. Do not repeat this automatic review for a follow-up run.`,
+            content: `Loop final review for ${snapshot.runId}. Original intent: ${snapshot.intent}. Durable criteria: ${snapshot.goalCriteria.length ? snapshot.goalCriteria.map((item) => `${item.id} ${item.state}: ${item.description}`).join("; ") : "untracked"}. Compare the original goal and later user corrections with these criteria and executable check evidence. If a requirement is absent or unverified, start one focused follow-up run with an explicit completion check. Report the review outcome as a closing report that separates verified criteria, unverified criteria, and the follow-up path. If covered, summarize the verified result in at most 8 lines: result, checks, and any material limit. Show details only when asked. Do not repeat this automatic review for a follow-up run.`,
             display: false,
           },
           { triggerTurn: true, deliverAs: "followUp" },
@@ -559,7 +579,7 @@ export function registerLoopExtension(
             signal,
             onProgress: (snapshot) => {
               onUpdate?.(
-                result(renderSnapshot("status", snapshot, limits), {
+                result(renderSnapshot("status", snapshot, limits, leadSnapshotOptions(snapshot)), {
                   runId,
                   state: snapshot.state,
                 }),
@@ -775,7 +795,7 @@ export function registerLoopExtension(
         );
       }
       const snapshot = await current(context, params.runId);
-      return result(renderLeadSnapshot(params.action ?? "status", snapshot, limits), {
+      return result(renderLeadSnapshot(params.action ?? "status", snapshot, limits, leadSnapshotOptions(snapshot)), {
         runId: snapshot.runId,
         state: snapshot.state,
       });
@@ -791,7 +811,7 @@ export function registerLoopExtension(
       if (!params.runId?.trim()) throw new Error("runId is required");
       const snapshot = await current(context, params.runId);
       bind(snapshot.runId, context);
-      return result(renderLeadSnapshot("status", snapshot, limits), {
+      return result(renderLeadSnapshot("status", snapshot, limits, leadSnapshotOptions(snapshot)), {
         runId: snapshot.runId,
         state: snapshot.state,
       });
@@ -882,30 +902,80 @@ export function registerLoopExtension(
   pi.registerTool({
     name: "loop_add_task",
     label: "Loop Add Task",
-    description: `Add one task to the current active graph. Provide JSON {task, criteria} with explicit requirement-to-check coverage. ${taskSpecInputDescription(vocabulary)}`,
+    description: `Promote the user's mid-run condition into the goal contract: add one dependent task whose criteria carry the changed acceptance, and Loop appends it atomically with the user's own words so the completion gate holds the run open until the new criteria verify. Provide JSON {task, criteria} with explicit requirement-to-check coverage. ${taskSpecInputDescription(vocabulary)}`,
     parameters: Type.Object({ taskJson: Type.String(), runId: Type.Optional(Type.String()) }),
     async execute(_id, params, _signal, _update, context) {
+      if (inFinalReviewTurn)
+        throw new Error(
+          "Promoting a condition needs the latest user message; this turn is an automatic final review",
+        );
       const snapshot = await current(context, params.runId);
       if (!params.taskJson) throw new Error("taskJson is required");
       const payload = parseGoalTask(params.taskJson);
       const [task] = normalizePersonas([payload.task], vocabulary);
       if (task === undefined) throw new Error("task normalization produced no task");
+      if (task.dependencies.length === 0)
+        throw new Error(
+          "A promoted condition needs a dependent task: declare dependencies on the tasks whose verified result it corrects or extends",
+        );
+      if (!lastUserPrompt.trim())
+        throw new Error(
+          "Promotion records the user's own condition text; no latest user message is available",
+        );
+      if (["completed", "failed", "cancelled"].includes(snapshot.state)) {
+        throw new Error(
+          `Run ${snapshot.runId} is ${snapshot.state}; start a follow-up run carrying this condition and its completion checks instead.`,
+        );
+      }
+      let promoted: PromoteSteerOutput;
       try {
-        const next = await backend.addTask(snapshot.runId, task, context.cwd, payload.criteria);
-        acceptSnapshot(next, context);
-        return result(
-          `Task ${task.id} recorded in run ${snapshot.runId}; completion checks remain pending.`,
-          { runId: snapshot.runId, taskId: task.id, state: next.state },
+        promoted = await backend.promoteSteer(
+          snapshot.runId,
+          lastUserPrompt,
+          task,
+          payload.criteria,
+          context.cwd,
         );
       } catch (error) {
         const latest = await backend.snapshot(snapshot.runId, context.cwd);
         if (["completed", "failed", "cancelled"].includes(latest.state)) {
           throw new Error(
             `Run ${snapshot.runId} is ${latest.state}; preserve the requested task for a new run: ${error instanceof Error ? error.message : String(error)}`,
+            { cause: error },
           );
         }
         throw error;
       }
+      const next = await backend.snapshot(snapshot.runId, context.cwd);
+      acceptSnapshot(next, context);
+      return result(
+        compactLines(
+          [
+            `Condition promoted into run ${snapshot.runId}: criteria ${promoted.criterionIds.join(", ")} on dependent task ${promoted.taskId}.`,
+            "The run stays open until the new criteria verify through their declared checks; report them as unverified until then.",
+            ...(promoted.evidenceTests.length
+              ? [
+                  "Promotion contract evidence (focused tests):",
+                  ...promoted.evidenceTests.map((name) => `- ${name}`),
+                ]
+              : [
+                  "No focused promotion evidence tests were reported; treat the criterion as unverified.",
+                ]),
+          ],
+          {
+            lineLimit: limits.statusLineLimit,
+            lineTextLimit: limits.lineTextLimit,
+            overflow: (omitted) => `… ${omitted} more`,
+          },
+        ).join("\n"),
+        {
+          runId: snapshot.runId,
+          taskId: promoted.taskId,
+          criterionIds: promoted.criterionIds,
+          evidenceTests: promoted.evidenceTests,
+          state: next.state,
+        },
+      );
     },
   });
   pi.registerTool({
@@ -929,7 +999,7 @@ export function registerLoopExtension(
         context,
       );
       acceptSnapshot(next, context);
-      return result(withOwnerRestart(renderLeadSnapshot("status", next, limits), restarted), {
+      return result(withOwnerRestart(renderLeadSnapshot("status", next, limits, leadSnapshotOptions(next)), restarted), {
         runId: snapshot.runId,
         state: next.state,
       });
@@ -955,7 +1025,7 @@ export function registerLoopExtension(
               : undefined;
       if (!next) throw new Error("Choose pause, resume, or cancel");
       acceptSnapshot(next, context);
-      return result(renderLeadSnapshot("status", next, limits), {
+      return result(renderLeadSnapshot("status", next, limits, leadSnapshotOptions(next)), {
         runId: snapshot.runId,
         state: next.state,
       });
@@ -1210,18 +1280,18 @@ class DefaultLoopLeadBackend implements LoopLeadBackend {
     return models.map((model) => `${model.computeClass} · ${model.id}`);
   }
 
-  async addTask(
+  async promoteSteer(
     runId: string,
+    message: string,
     task: TaskSpecInput,
-    cwd: string,
     criteria: GoalCriterionInput[],
-  ): Promise<SnapshotOutput> {
-    await this.#json<unknown>(
-      ["add-goal-task", runId, "--json"],
+    cwd: string,
+  ): Promise<PromoteSteerOutput> {
+    return this.#json(
+      ["promote-steer", runId, "--json"],
       cwd,
-      JSON.stringify({ task, criteria }),
+      JSON.stringify({ message, task, criteria }),
     );
-    return this.snapshot(runId, cwd);
   }
 
   async #json<T>(args: string[], cwd: string, stdin?: string, signal?: AbortSignal): Promise<T> {
@@ -1406,7 +1476,7 @@ function leadInstructions(
   return [
     "You are the interactive Lead for Loop.",
     currentRunId
-      ? `Current bound run: ${currentRunId}. For progress questions use loop_status; for a correction to a live task use loop_steer, for an added requirement use loop_add_task, for attention use loop_resolve, and for explicit pause/resume/cancel use loop_control. Read the durable snapshot before acting. Do not submit another run while this goal's run is active. If the bound run is terminal and the user has an unfinished requirement, start a follow-up run carrying that requirement and its completion checks. If the user asks for a separate goal while this run is active, ask whether to include it or queue it after completion.`
+      ? `Current bound run: ${currentRunId}. For progress questions use loop_status; for a correction to a live task use loop_steer, for an added requirement use loop_add_task to promote it into the goal contract, for attention use loop_resolve, and for explicit pause/resume/cancel use loop_control. Read the durable snapshot before acting. Do not submit another run while this goal's run is active. If the bound run is terminal and the user has an unfinished requirement, start a follow-up run carrying that requirement and its completion checks. If the user asks for a separate goal while this run is active, ask whether to include it or queue it after completion.`
       : "No run is bound. Use loop_status without arguments to list active runs and their intents, then loop_select_run after the user identifies the goal. Do not ask the user to supply an internal run ID.",
     "For a new engineering execution request, inspect only the minimum path and contract context needed. If ownership paths are unclear, use loop_code_map for file and symbol names, then open source text only as needed. For one bounded implementation task with exact scope, call loop_quick_run once and map each requirement to the check IDs that prove it in acceptance. For a dependency DAG, call loop_run exactly once with tasks and criteria.",
     "When the user asks about a worker or its evidence, use loop_status to select the task and loop_task to inspect its durable detail in this conversation. Use loop_guidance to distinguish correction recorded, worker delivered, and post-delivery checks; inspect coverage before claiming the changed criterion passed.",
@@ -1415,12 +1485,14 @@ function leadInstructions(
     "Requirements must name the result and evidence the worker returns; downstream tasks receive dependency result summaries rather than implicit context.",
     "Do not claim completion yourself; Loop owns verification through the declared completion checks and worker evidence.",
     "Do not poll or sleep after loop_run returns; the observer updates status and completion asynchronously. End the turn promptly so the user can steer in this Pi conversation. Check status again only when the user asks or an attention needs a decision.",
+    "Do not report a run terminal before the goal review passes: every durable criterion must be verified by its declared check evidence. A verifier FAIL verdict or any pending criterion keeps the goal incomplete even when the run state says completed.",
     "If a verifier reports FAIL or an unmet acceptance criterion, state that the goal is incomplete even when the run state says completed; add a corrective task while active or start a follow-up run after terminal.",
     "If a previous run ended in attention, paused, cancelled, or otherwise incomplete, explicitly carry the original goal's unresolved acceptance criteria into the next delegated DAG and state the available resume or follow-up path.",
     "Use only prior conversation and visible Loop output to identify unfinished work. Do not invent unavailable run or task details.",
     "Keep the user's mid-run correction text unchanged when calling loop_steer. Report recorded guidance, worker delivery, and verified completion as separate facts. A successful worker response alone is not verification.",
-    "For changed acceptance criteria, add a dependent task with write ownership and an executable check covering the new criterion. You may also steer the active worker, but queued guidance can arrive after its current turn and does not replace the dependent task. If the run is terminal, start a follow-up run.",
+    "Promotion rule for mid-run adjustments: a user condition that changes acceptance must be promoted into the goal contract with loop_add_task — one dependent task whose criteria carry the condition, appended atomically with the user's own words, and the completion gate then holds the run open until the new criteria verify. loop_steer guidance is delivery-only and never satisfies the completion gate. If the run is terminal, start a follow-up run carrying the condition and its checks.",
     "Never claim that guidance was implemented from delivery alone. Inspect the final source and focused test evidence for the changed criterion before reporting it as done.",
+    "End every goal with a closing report that separates verified criteria, unverified criteria, and the follow-up path (corrective task while active, focused follow-up run after terminal); never report an unverified criterion as done.",
     ...(currentRunId ? [] : [decompositionPrompt(intent, vocabulary)]),
   ].join("\n");
 }
@@ -1478,9 +1550,10 @@ function renderLeadSnapshot(
   action: string,
   snapshot: SnapshotOutput,
   limits: OutputLimits,
+  options: SnapshotRenderOptions = {},
 ): string {
   if (action !== "attention") {
-    const rendered = renderSnapshot(action, snapshot, limits);
+    const rendered = renderSnapshot(action, snapshot, limits, options);
     if (action !== "status" || !verifierReportedFailure(snapshot)) return rendered;
     return compactLines(
       [

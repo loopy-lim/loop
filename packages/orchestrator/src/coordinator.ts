@@ -217,19 +217,11 @@ export class Orchestrator {
       if (!(await lease()).accepted) return summary;
     }
     const executionInput = { ...input, executionOwner: owner };
-    // §D run resilience: declared goal criteria ride into every task
-    // execution so its verification flow can give pending criteria one
-    // stable-source re-run before any blocked-goal attention becomes
-    // inevitable.
-    const goalCriteria = (await this.#control.getSnapshot(input)).goalCriteria.map(
-      ({ id, description, taskId, checkIds }) => ({ id, description, taskId, checkIds }),
-    );
     // Options that never vary across scheduled tasks, assembled once.
     const taskExecutionOptions = {
       input: executionInput,
       control: this.#control,
       verifier: this.#completionVerifier,
-      goalCriteria,
       personas: this.#personas,
       personaKindDefaults: this.#personaKindDefaults,
       recordRawActivity: this.#workerVisibility === "off",
@@ -347,6 +339,21 @@ export class Orchestrator {
           snapshot = await this.#control.getSnapshot(input);
           if (snapshot.state !== "active") break;
           const context = await this.#control.getTaskContext({ ...input, taskId });
+          // §D run resilience: goal criteria are captured per claim, not once
+          // per execution. A steer promotion can land mid-run (new criterion
+          // bound to a new dependent task); the per-claim snapshot carries it
+          // into this task's verification flow, whose self-heal re-runs the
+          // promoted criterion's checks on stable source — so the store's
+          // completion gate sees verified evidence instead of a dead-end
+          // blocked-goal attention.
+          const goalCriteria = snapshot.goalCriteria.map(
+            ({ id, description, taskId, checkIds }) => ({
+              id,
+              description,
+              taskId,
+              checkIds,
+            }),
+          );
           // Claim-context steering (M-TL2): the mailbox filters guidance the
           // delivery watermark already covered and appends ancestor-targeted
           // guidance for descendant sub-tasks. Without a mailbox the context
@@ -413,6 +420,7 @@ export class Orchestrator {
           summary.startedAt[taskId] = Date.now();
           const execution = executeTask({
             ...taskExecutionOptions,
+            goalCriteria,
             context: startContext,
             workerId,
             provider,

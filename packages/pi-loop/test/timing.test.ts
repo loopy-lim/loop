@@ -75,3 +75,14 @@ test("clock regression never produces a negative duration", () => {
   expect(final?.requestToResultMs).toBeUndefined();
   expect(formatFinalTiming(final)).toBeUndefined();
 });
+
+test("activeMs measures in-flight runs and forgets submitted ones", () => {
+  let now = 1_000;
+  const timing = new LeadTiming(() => now);
+  expect(timing.activeMs("run-a")).toBeUndefined();
+  timing.beginSubmission("run-a");
+  now = 43_500;
+  expect(timing.activeMs("run-a")).toBe(42_500);
+  timing.forget("run-a");
+  expect(timing.activeMs("run-a")).toBeUndefined();
+});

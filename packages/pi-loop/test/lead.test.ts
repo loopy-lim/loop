@@ -60,7 +60,22 @@ test("natural-language Pi turns receive the Loop Lead contract", async () => {
   );
   expect(result.systemPrompt).toContain("If a verifier reports FAIL");
   expect(result.systemPrompt).toContain("Do not poll or sleep after loop_run returns");
-  expect(result.systemPrompt).toContain("For changed acceptance criteria, add a dependent task");
+  expect(result.systemPrompt).toContain(
+    "Do not report a run terminal before the goal review passes",
+  );
+  expect(result.systemPrompt).toContain(
+    "A verifier FAIL verdict or any pending criterion keeps the goal incomplete",
+  );
+  expect(result.systemPrompt).toContain(
+    "Promotion rule for mid-run adjustments: a user condition that changes acceptance must be promoted into the goal contract with loop_add_task",
+  );
+  expect(result.systemPrompt).toContain(
+    "loop_steer guidance is delivery-only and never satisfies the completion gate",
+  );
+  expect(result.systemPrompt).toContain(
+    "closing report that separates verified criteria, unverified criteria, and the follow-up path",
+  );
+  expect(result.systemPrompt).toContain("never report an unverified criterion as done");
   expect(result.systemPrompt).toContain(
     "Never claim that guidance was implemented from delivery alone",
   );
@@ -357,6 +372,33 @@ test("loop_run forwards explicit requirement-to-check mapping to the durable bac
   expect(submitted[0]?.map((item) => item.checkIds)).toEqual([["render"], ["persist"]]);
 });
 
+test("Lead status line marks an in-flight run as working instead of stalled", async () => {
+  const host = fakePi();
+  registerLoopExtension(host.api, fakeBackend(), undefined, settings);
+  const piContext = context();
+  await host.tools.get("loop_run")!.execute(
+    "run",
+    {
+      intent: "Render",
+      tasksJson: JSON.stringify({
+        tasks: [task("impl", "implementation", [], ["src/impl.ts"])],
+        criteria: [{ id: "impl", taskId: "impl", description: "impl", checkIds: ["tests"] }],
+      }),
+    },
+    new AbortController().signal,
+    undefined,
+    piContext,
+  );
+  const status = await host.tools
+    .get("loop_status")!
+    .execute("status", {}, new AbortController().signal, undefined, piContext);
+  const text = status.content[0]?.text ?? "";
+  expect(text).toContain("State: active");
+  // Working marker: running task title, session-measured elapsed when known,
+  // and the latest activity line (run progress visibility).
+  expect(text).toMatch(/Working: Implement · (0s · )?Editing renderer/);
+});
+
 test("Pi conversation can inspect bounded durable detail for a selected task", async () => {
   const host = fakePi();
   registerLoopExtension(host.api, fakeBackend(), undefined, settings);
@@ -640,9 +682,18 @@ test("natural-language tools use the bound run and preserve the user's steering 
       calls.push(`steer:${runId}:${taskId}:${message}`);
       return snapshot(runId);
     },
-    async addTask(runId, task) {
-      calls.push(`add:${runId}:${task.id}`);
-      return { ...snapshot(runId), lastSequence: 2 };
+    async promoteSteer(runId, message, task, criteria) {
+      calls.push(`promote:${runId}:${task.id}:${message}`);
+      return {
+        accepted: true,
+        runId,
+        taskId: task.id,
+        criterionIds: criteria.map((criterion) => criterion.id),
+        summary: `steer promoted on dependent task ${task.id}`,
+        evidenceTests: [
+          "loop_core::event::steer::tests::steer_promotion_binds_message_task_and_criterion",
+        ],
+      };
     },
     async pause(runId) {
       calls.push(`pause:${runId}`);
@@ -683,9 +734,165 @@ test("natural-language tools use the bound run and preserve the user's steering 
     .execute("pause", { action: "pause" }, new AbortController().signal, undefined, piContext);
   expect(calls).toEqual([
     "steer:run-x:impl:지금 작업에서 X는 빼줘",
-    "add:run-x:verify",
+    "promote:run-x:verify:지금 작업에서 X는 빼줘",
     "pause:run-x",
   ]);
+});
+
+test("a mid-run condition is promoted into a dependent task with the user's words and focused evidence, not guidance-only", async () => {
+  const host = fakePi();
+  const promotions: Array<{
+    runId: string;
+    message: string;
+    taskId: string;
+    dependencies: string[];
+    criteria: import("@loop/protocol").GoalCriterionInput[];
+  }> = [];
+  const evidenceTests = [
+    "loop_core::event::steer::tests::steer_promotion_binds_message_task_and_criterion",
+    "loop_bridge::execution::steer_promotion_bridge_tests::steer_promotion_binds_criterion_to_new_dependent_task",
+  ];
+  const backend = fakeBackend({
+    async promoteSteer(runId, message, task, criteria) {
+      promotions.push({
+        runId,
+        message,
+        taskId: task.id,
+        dependencies: task.dependencies,
+        criteria,
+      });
+      return {
+        accepted: true,
+        runId,
+        taskId: task.id,
+        criterionIds: criteria.map((criterion) => criterion.id),
+        summary: "steer promoted",
+        evidenceTests,
+      };
+    },
+  });
+  registerLoopExtension(host.api, backend, undefined, settings);
+  const piContext = context();
+  await host.tools
+    .get("loop_select_run")!
+    .execute("bind", { runId: "run-x" }, new AbortController().signal, undefined, piContext);
+  await host.hooks.get("before_agent_start")!(
+    { prompt: "다른 출력 형식도 markdown 표로 추가해줘", systemPrompt: "base" },
+    piContext,
+  );
+  const response = await host.tools.get("loop_add_task")!.execute(
+    "promote",
+    {
+      taskJson: goalTaskJson(task("correction", "implementation", ["impl"], ["src/correction.ts"])),
+    },
+    new AbortController().signal,
+    undefined,
+    piContext,
+  );
+
+  // The user's condition text rides the promotion verbatim; the dependent
+  // task and criteria reach the goal contract untouched.
+  expect(promotions).toHaveLength(1);
+  expect(promotions[0]).toMatchObject({
+    runId: "run-x",
+    message: "다른 출력 형식도 markdown 표로 추가해줘",
+    taskId: "correction",
+    dependencies: ["impl"],
+  });
+  expect(promotions[0]?.criteria.length).toBeGreaterThan(0);
+  // The receipt reports the promotion and returns the focused test names as
+  // evidence, with the run explicitly still open until verification.
+  const text = response.content[0]?.text ?? "";
+  expect(text).toContain("criteria");
+  expect(text).toContain("dependent task correction");
+  expect(text).toContain("run stays open until the new criteria verify");
+  for (const name of evidenceTests) expect(text).toContain(name);
+  expect(response.details).toMatchObject({
+    runId: "run-x",
+    taskId: "correction",
+    evidenceTests,
+  });
+});
+
+test("promotion refuses guidance-only shapes: detached tasks, missing user words, terminal runs", async () => {
+  const host = fakePi();
+  const promoted: string[] = [];
+  const backend = fakeBackend({
+    async promoteSteer(runId) {
+      promoted.push(runId);
+      return {
+        accepted: true,
+        runId,
+        taskId: "correction",
+        criterionIds: ["correction:1"],
+        summary: "steer promoted",
+        evidenceTests: [],
+      };
+    },
+    async snapshot(runId) {
+      return { ...snapshot(runId), state: "completed" as const };
+    },
+  });
+  registerLoopExtension(host.api, backend, undefined, settings);
+  const piContext = context();
+  await host.tools
+    .get("loop_select_run")!
+    .execute("bind", { runId: "run-x" }, new AbortController().signal, undefined, piContext);
+  const promoteCondition = (taskJson: string) =>
+    host.tools
+      .get("loop_add_task")!
+      .execute("promote", { taskJson }, new AbortController().signal, undefined, piContext);
+
+  // A promoted condition must land on a dependent task; a detached one would
+  // not extend the verified graph.
+  await expect(
+    promoteCondition(goalTaskJson(task("correction", "implementation", [], ["src/correction.ts"]))),
+  ).rejects.toThrow("dependent task");
+
+  // Without the user's own condition text there is nothing to promote.
+  const freshHost = fakePi();
+  registerLoopExtension(freshHost.api, fakeBackend(), undefined, settings);
+  await freshHost.tools
+    .get("loop_select_run")!
+    .execute("bind", { runId: "run-x" }, new AbortController().signal, undefined, context());
+  await expect(
+    freshHost.tools.get("loop_add_task")!.execute(
+      "promote",
+      {
+        taskJson: goalTaskJson(
+          task("correction", "implementation", ["impl"], ["src/correction.ts"]),
+        ),
+      },
+      new AbortController().signal,
+      undefined,
+      context(),
+    ),
+  ).rejects.toThrow("no latest user message");
+  expect(promoted).toEqual([]);
+
+  // The automatic final review turn cannot promote: it has no user message.
+  await host.hooks.get("message_start")!(
+    { message: { role: "custom", customType: "loop-final-review" } },
+    piContext,
+  );
+  await expect(
+    promoteCondition(
+      goalTaskJson(task("correction", "implementation", ["impl"], ["src/correction.ts"])),
+    ),
+  ).rejects.toThrow("automatic final review");
+  expect(promoted).toEqual([]);
+
+  // A terminal run takes a follow-up run, never a mid-run promotion.
+  await host.hooks.get("before_agent_start")!(
+    { prompt: "추가 조건이 있어", systemPrompt: "base" },
+    piContext,
+  );
+  await expect(
+    promoteCondition(
+      goalTaskJson(task("correction", "implementation", ["impl"], ["src/correction.ts"])),
+    ),
+  ).rejects.toThrow("follow-up run");
+  expect(promoted).toEqual([]);
 });
 
 test("resolving exhausted failure attention restarts the detached owner for ready tasks", async () => {
@@ -1267,6 +1474,9 @@ test("Pi Lead reviews a completed goal once and does not recursively review its 
   expect(review?.content).toContain("original goal");
   expect(review?.content).toContain("at most 8 lines");
   expect(review?.content).toContain("details only when asked");
+  expect(review?.content).toContain(
+    "closing report that separates verified criteria, unverified criteria, and the follow-up path",
+  );
 
   await host.events.get("message_start")?.at(-1)?.(
     { message: { role: "custom", customType: "loop-final-review" } },
@@ -2125,8 +2335,17 @@ function fakeBackend(overrides: Partial<LoopLeadBackend> = {}): LoopLeadBackend 
     async models() {
       return ["fast · configured-model"];
     },
-    async addTask() {
-      return current;
+    async promoteSteer(_runId, _message, task, criteria) {
+      return {
+        accepted: true,
+        runId: "run-x",
+        taskId: task.id,
+        criterionIds: criteria.map((criterion) => criterion.id),
+        summary: `steer promoted to criteria [${criteria.map((c) => c.id).join(", ")}] on dependent task ${task.id}`,
+        evidenceTests: [
+          "loop_bridge::execution::steer_promotion_bridge_tests::steer_promotion_binds_criterion_to_new_dependent_task",
+        ],
+      };
     },
     ...overrides,
   };

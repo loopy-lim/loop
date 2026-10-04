@@ -87,4 +87,13 @@ export class LeadTiming {
   forget(runId: string): void {
     this.#runs.delete(runId);
   }
+
+  /** Elapsed milliseconds since this session submitted the run — undefined
+   * when the run predates the session or the clock is unusable. Feeds the
+   * working line so an in-flight run shows visible progress. */
+  activeMs(runId: string): number | undefined {
+    const times = this.#runs.get(runId);
+    if (!times) return undefined;
+    return elapsed(times.submissionAt, this.clock());
+  }
 }

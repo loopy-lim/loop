@@ -2,11 +2,16 @@ import type { RunListOutput, SnapshotOutput, TaskContextOutput } from "@loop/pro
 
 import { compactLines, compactItems, singleLine, type OutputLimits } from "./compact";
 import { emptyState, moreItems, separator } from "./tokens";
+import { workingLine } from "./working";
 
 /** Options for the live worker-activity feed (docs/decisions/2026-09-23-worker-visibility.md D3/D5). */
 export interface SnapshotRenderOptions {
   /** Per-worker history lines shown in the watch feed; 0/undefined hides the feed section. */
   workerActivityLines?: number;
+  /** Elapsed milliseconds in the active run, measured by long-lived callers
+   * (Lead session, watch); SnapshotOutput carries no run-start timestamp, so
+   * undefined simply hides the elapsed segment of the working line. */
+  elapsedMs?: number;
 }
 
 export function renderSnapshot(
@@ -168,10 +173,12 @@ function renderStatus(
           lineTextLimit: limits.lineTextLimit,
           overflow: (omitted) => moreItems(omitted, "task findings"),
         });
+  const working = workingLine(snapshot, options.elapsedMs);
   const status = compactLines(
     [
       `Run ${snapshot.runId}`,
       `State: ${snapshot.state}`,
+      ...(working ? [working] : []),
       `Tasks: ${done}/${snapshot.tasks.length} ${separator.list} Workers: ${snapshot.activeWorkers.length} ${separator.list} Attention: ${snapshot.openAttentionIds.length}`,
       ...visibleTasks,
     ],

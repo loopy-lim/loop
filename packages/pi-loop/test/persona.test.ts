@@ -368,7 +368,7 @@ function fakeBackend(overrides: Partial<LoopLeadBackend> = {}): LoopLeadBackend 
     async models() {
       return [];
     },
-    async addTask() {
+    async promoteSteer() {
       throw new Error("not used in persona tests");
     },
     ...overrides,
