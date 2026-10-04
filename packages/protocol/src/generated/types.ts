@@ -131,6 +131,7 @@ export type TaskSnapshotOutput = {
   blockedBy: string[];
   lastFailure?: string | null;
   activities: string[];
+  lastProgressMs?: number | bigint | null;
   resultSummary?: string | null;
 };
 
@@ -142,6 +143,7 @@ export type ActiveWorkerOutput = {
 };
 
 export type AttentionSnapshotOutput = {
+  openedAtMs?: number | bigint | null;
   id: string;
   kind: AttentionKind;
   summary: string;

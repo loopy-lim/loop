@@ -2,7 +2,18 @@ import type { RunListOutput, SnapshotOutput, TaskContextOutput } from "@loop/pro
 
 import { compactLines, compactItems, singleLine, type OutputLimits } from "./compact";
 import { emptyState, moreItems, separator } from "./tokens";
-import { workingLine } from "./working";
+import { workingLine, formatElapsed } from "./working";
+
+/** Age in milliseconds of a persisted instant (task lastProgressMs, attention
+ * openedAtMs); undefined when the snapshot predates the field. Future
+ * instants clamp to 0 — clock corrections are not staleness. */
+function ageMs(
+  instantMs: number | bigint | null | undefined,
+  nowMs: number,
+): number | undefined {
+  if (instantMs === undefined || instantMs === null) return undefined;
+  return Math.max(0, nowMs - Number(instantMs));
+}
 
 /** Options for the live worker-activity feed (docs/decisions/2026-09-23-worker-visibility.md D3/D5). */
 export interface SnapshotRenderOptions {
@@ -12,6 +23,10 @@ export interface SnapshotRenderOptions {
    * (Lead session, watch); SnapshotOutput carries no run-start timestamp, so
    * undefined simply hides the elapsed segment of the working line. */
   elapsedMs?: number;
+  /** Clock used to age persisted progress (task lastProgressMs) and open
+   * attention (openedAtMs); defaults to the render time. Tests pass a fixed
+   * clock for deterministic output. */
+  nowMs?: number;
 }
 
 export function renderSnapshot(
@@ -22,7 +37,7 @@ export function renderSnapshot(
 ): string {
   if (command === "graph") return renderGraph(snapshot, limits);
   if (command === "workers") return renderWorkers(snapshot, limits);
-  if (command === "attention") return renderAttention(snapshot, limits);
+  if (command === "attention") return renderAttention(snapshot, limits, options);
   return renderStatus(snapshot, limits, options);
 }
 
@@ -118,14 +133,20 @@ function renderWorkers(snapshot: SnapshotOutput, limits: OutputLimits): string {
   ).join("\n");
 }
 
-function renderAttention(snapshot: SnapshotOutput, limits: OutputLimits): string {
+function renderAttention(
+  snapshot: SnapshotOutput,
+  limits: OutputLimits,
+  options: SnapshotRenderOptions = {},
+): string {
   const openIds = snapshot.openAttentionIds;
   if (openIds.length === 0) return emptyState.attentionOk;
   const attentionById = new Map(snapshot.attention.map((item) => [item.id, item]));
+  const nowMs = options.nowMs ?? Date.now();
   const items = openIds.map((id) => {
     const item = attentionById.get(id);
     if (!item) return id;
-    return [`${item.kind} ${item.id}`, item.taskId, item.summary]
+    const waitedAge = ageMs(item.openedAtMs, nowMs);
+    return [`${item.kind} ${item.id}`, waitedAge === undefined ? null : `waited ${formatElapsed(waitedAge)}`, item.taskId, item.summary]
       .filter(Boolean)
       .join(` ${separator.list} `);
   });
@@ -156,12 +177,16 @@ function renderStatus(
   options: SnapshotRenderOptions = {},
 ): string {
   const done = snapshot.tasks.filter((task) => task.state === "done").length;
+  const statusNowMs = options.nowMs ?? Date.now();
   const taskLines = [...snapshot.tasks]
     .sort((left, right) => {
       return taskPriority(left.state) - taskPriority(right.state);
     })
     .map((task) => {
-      const details = [...(task.title !== task.id ? [task.title] : []), ...taskDetails(task)];
+      const details = [
+        ...(task.title !== task.id ? [task.title] : []),
+        ...taskDetails(task, statusNowMs),
+      ];
       return `${task.id} ${separator.list} ${task.state}${details.length > 0 ? ` ${separator.list} ${details.join(` ${separator.list} `)}` : ""}`;
     });
   const taskLineLimit = Math.min(limits.findingsLineLimit, Math.max(0, limits.statusLineLimit - 3));
@@ -173,7 +198,7 @@ function renderStatus(
           lineTextLimit: limits.lineTextLimit,
           overflow: (omitted) => moreItems(omitted, "task findings"),
         });
-  const working = workingLine(snapshot, options.elapsedMs);
+  const working = workingLine(snapshot, options.elapsedMs, options.nowMs);
   const status = compactLines(
     [
       `Run ${snapshot.runId}`,
@@ -224,11 +249,18 @@ function renderActivityFeed(
   return lines.join("\n");
 }
 
-function taskDetails(task: SnapshotOutput["tasks"][number]): string[] {
+function taskDetails(task: SnapshotOutput["tasks"][number], nowMs: number = Date.now()): string[] {
   const latestActivity = task.activities.at(-1);
+  // Trust signal: a running/verifying task is only as healthy as its persisted
+  // last progress; a dead worker's age grows here instead of faking activity.
+  const progressAge =
+    task.state === "running" || task.state === "verifying"
+      ? ageMs(task.lastProgressMs, nowMs)
+      : undefined;
   return [
     ...(task.blockedBy.length > 0 ? [`blocked: ${task.blockedBy.join(", ")}`] : []),
     ...(task.state !== "done" && task.lastFailure ? [`failure: ${task.lastFailure}`] : []),
+    ...(progressAge !== undefined ? [`progress: ${formatElapsed(progressAge)} ago`] : []),
     ...(latestActivity ? [`activity: ${latestActivity}`] : []),
     ...(task.resultSummary ? [`result: ${task.resultSummary}`] : []),
   ];

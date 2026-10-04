@@ -71,6 +71,36 @@ fn trace_report_derives_durations_from_recorded_timestamps() {
 }
 
 #[test]
+fn progress_and_attention_timestamps_survive_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("progress.sqlite");
+    {
+        let mut store = SqliteStore::open(&path).unwrap();
+        append_plan_run(&mut store);
+    }
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute("UPDATE events SET created_at = 1000 + seq", [])
+        .unwrap();
+    drop(connection);
+    let store = SqliteStore::open(&path).unwrap();
+    assert_eq!(
+        store.last_progress_ms("bench-plan-1", "impl").unwrap(),
+        Some(1014_000)
+    );
+    assert_eq!(
+        store.last_progress_ms("bench-plan-1", "missing").unwrap(),
+        None
+    );
+    assert_eq!(
+        store
+            .attention_opened_ms("bench-plan-1", "att-impl")
+            .unwrap(),
+        Some(1018_000)
+    );
+}
+
+#[test]
 fn trace_queries_follow_input_order_and_missing_runs_error() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = SqliteStore::open(dir.path().join("multi.sqlite")).unwrap();

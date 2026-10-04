@@ -64,6 +64,14 @@ interface OrchestratorOptions {
    * usage, the ledger aggregates basis-separated totals for the run summary.
    */
   usageLedger?: UsageLedger;
+  /**
+   * Stall watchdog budget handed to every task execution: an attempt with no
+   * progress signal (stream event, lifecycle transition, check milestone)
+   * for this long fails with a stalled-timeout worker result, so retry and
+   * attention policy apply instead of the run hanging. Omitted = the
+   * task-execution compile-time default.
+   */
+  stallTimeoutMs?: number;
 }
 export interface RunRequest {
   databasePath: string;
@@ -107,6 +115,7 @@ export class Orchestrator {
   readonly #contextPolicy?: ContextLifecyclePolicy;
   readonly #codeMap?: CodeMapProvider;
   readonly #usageLedger?: UsageLedger;
+  readonly #stallTimeoutMs?: number;
   readonly #computeSelection: ComputeSelection;
   constructor(options: OrchestratorOptions) {
     this.#control = options.control;
@@ -124,6 +133,7 @@ export class Orchestrator {
     this.#codeMap =
       options.codeMap ?? (options.codeMapInjection === "scopes" ? buildScopeCodeMap : undefined);
     this.#usageLedger = options.usageLedger;
+    this.#stallTimeoutMs = options.stallTimeoutMs;
     this.#computeSelection = options.computeSelection ?? DEFAULT_COMPUTE_SELECTION;
   }
   cleanupRun(request: CleanupRunRequest): Promise<CleanupRunReport> {
@@ -227,6 +237,7 @@ export class Orchestrator {
       recordRawActivity: this.#workerVisibility === "off",
       ...(this.#contextPolicy ? { contextPolicy: this.#contextPolicy } : {}),
       ...(this.#codeMap ? { codeMap: this.#codeMap } : {}),
+      ...(this.#stallTimeoutMs === undefined ? {} : { stallTimeoutMs: this.#stallTimeoutMs }),
     };
     const active = new Map<string, TaskExecution>();
     let leaseLost = false;

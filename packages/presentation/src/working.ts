@@ -29,12 +29,18 @@ export function formatElapsed(ms: number): string {
 
 /**
  * Working line for a run in flight: the running task's title (or the running
- * task count), the caller-supplied elapsed time when known, and the most
- * recent activity across running tasks — one compact line so an active run
- * never looks stalled behind a bare `0/1 verified` counter. Undefined for
+ * task count), the caller-supplied elapsed time when known, the persisted
+ * last-progress age when the snapshot carries one, and the most recent
+ * activity across running tasks — one compact line so an active run never
+ * looks stalled behind a bare `0/1 verified` counter, and a dead worker's
+ * growing progress age is visible instead of fake health. Undefined for
  * runs that are not actively working.
  */
-export function workingLine(snapshot: SnapshotOutput, elapsedMs?: number): string | undefined {
+export function workingLine(
+  snapshot: SnapshotOutput,
+  elapsedMs?: number,
+  nowMs?: number,
+): string | undefined {
   if (!isActiveRunState(snapshot.state)) return undefined;
   const running = snapshot.tasks.filter((task) => task.state === "running");
   const label =
@@ -42,9 +48,38 @@ export function workingLine(snapshot: SnapshotOutput, elapsedMs?: number): strin
       ? running[0]!.title || running[0]!.id
       : `${running.length} running task${running.length === 1 ? "" : "s"}`;
   const latestActivity = running.flatMap((task) => task.activities).at(-1);
+  const progressAge = stalestProgressAgeMs(running, nowMs);
   return [
     `Working: ${label}`,
     ...(elapsedMs === undefined ? [] : [formatElapsed(elapsedMs)]),
+    ...(progressAge === undefined ? [] : [`progress ${formatElapsed(progressAge)}`]),
     ...(latestActivity ? [latestActivity] : []),
   ].join(` ${separator.list} `);
+}
+
+/** Age in milliseconds of a task's persisted last-progress timestamp;
+ * undefined when the snapshot predates progress tracking. Future timestamps
+ * clamp to `0s` (clock corrections are not staleness). */
+function progressAgeMs(
+  lastProgressMs: number | bigint | null | undefined,
+  nowMs: number,
+): number | undefined {
+  if (lastProgressMs === undefined || lastProgressMs === null) return undefined;
+  return Math.max(0, nowMs - Number(lastProgressMs));
+}
+
+/**
+ * Worst-case (oldest) last-progress age across the given tasks, in
+ * milliseconds — the run-health reading: one silent worker makes the whole
+ * run suspect. Snapshots without progress timestamps yield undefined so old
+ * callers render exactly as before.
+ */
+function stalestProgressAgeMs(
+  tasks: ReadonlyArray<{ lastProgressMs?: number | bigint | null }>,
+  nowMs: number = Date.now(),
+): number | undefined {
+  const ages = tasks
+    .map((task) => progressAgeMs(task.lastProgressMs, nowMs))
+    .filter((age): age is number => age !== undefined);
+  return ages.length === 0 ? undefined : Math.max(...ages);
 }

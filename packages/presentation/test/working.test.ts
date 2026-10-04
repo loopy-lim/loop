@@ -81,6 +81,31 @@ test("workingLine is undefined unless the run is actively working", () => {
   }
 });
 
+test("workingLine ages the persisted last-progress timestamp", () => {
+  const now = 1_000_000;
+  const fresh = snapshot({ tasks: [task({ lastProgressMs: now - 42_000 })] });
+  expect(workingLine(fresh, 42_000, now)).toBe(
+    "Working: Fix pair check · 42s · progress 42s · wrote src/a.ts",
+  );
+  // Worst-case reading: one silent worker makes the whole run suspect.
+  const mixed = snapshot({
+    tasks: [
+      task({ id: "a", title: "A", activities: [], lastProgressMs: now - 1_000 }),
+      task({ id: "b", title: "B", activities: [], lastProgressMs: now - 125_000 }),
+    ],
+  });
+  expect(workingLine(mixed, undefined, now)).toBe("Working: 2 running tasks · progress 2m05s");
+  // Snapshots without progress timestamps render exactly as before.
+  expect(workingLine(snapshot(), 42_000, now)).toBe(
+    "Working: Fix pair check · 42s · wrote src/a.ts",
+  );
+  // Future timestamps are clock corrections, not staleness.
+  const future = snapshot({ tasks: [task({ lastProgressMs: now + 5_000 })] });
+  expect(workingLine(future, undefined, now)).toBe(
+    "Working: Fix pair check · progress 0s · wrote src/a.ts",
+  );
+});
+
 test("status renders the working line for active runs and stays within the budget", () => {
   const output = renderSnapshot("status", snapshot(), limits, { elapsedMs: 42_000 });
   const lines = output.split("\n");
@@ -94,4 +119,56 @@ test("status omits the working line for non-active runs even with elapsed time",
     elapsedMs: 42_000,
   });
   expect(output).not.toContain("Working:");
+});
+
+test("status marks stale running tasks with their last-progress age", () => {
+  const now = 1_000_000;
+  const output = renderSnapshot(
+    "status",
+    snapshot({ tasks: [task({ lastProgressMs: now - 125_000 })] }),
+    limits,
+    { nowMs: now },
+  );
+  expect(output).toContain("progress: 2m05s ago");
+  // Terminal tasks carry no progress-age detail.
+  const done = renderSnapshot(
+    "status",
+    snapshot({ tasks: [task({ state: "done", lastProgressMs: now - 125_000 })] }),
+    limits,
+    { nowMs: now },
+  );
+  expect(done).not.toContain("progress:");
+});
+
+test("attention rendering ages each open item", () => {
+  const now = 1_000_000;
+  const output = renderSnapshot(
+    "attention",
+    snapshot({
+      openAttentionIds: ["atn-1"],
+      attention: [
+        {
+          openedAtMs: now - 250_000,
+          id: "atn-1",
+          kind: "failure",
+          summary: "boom",
+          taskId: "impl",
+        },
+      ],
+    }),
+    limits,
+    { nowMs: now },
+  );
+  expect(output).toContain("waited 4m10s");
+  // Items without an opening timestamp render exactly as before.
+  const timeless = renderSnapshot(
+    "attention",
+    snapshot({
+      openAttentionIds: ["atn-2"],
+      attention: [{ id: "atn-2", kind: "failure", summary: "boom", taskId: "impl" }],
+    }),
+    limits,
+    { nowMs: now },
+  );
+  expect(timeless).not.toContain("waited");
 });

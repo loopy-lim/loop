@@ -18,14 +18,14 @@ use loop_store::{SqliteStore, StoreError};
 use rustra::prelude::*;
 use std::sync::OnceLock;
 
+use crate::context_summary::ContextSummaryEvent;
 use crate::conversation::{
     ConversationAssistantDelta, ConversationAssistantMessage, ConversationLifecycle,
     ConversationSteerQueued, ConversationToolCallEnded, ConversationToolCallStarted,
     ConversationUserMessage, RemoteSessionListOutput, RemoteSessionResetEvent,
 };
-use crate::pane::{RemotePaneListOutput, RemotePaneResetEvent, RemotePaneTextEvent};
-use crate::context_summary::ContextSummaryEvent;
 use crate::hooks::LifecycleHookEvent;
+use crate::pane::{RemotePaneListOutput, RemotePaneResetEvent, RemotePaneTextEvent};
 use crate::sandbox::SandboxCapabilityReport;
 use crate::usage::UsageRecordEvent;
 use crate::{EventOutput, GuidanceDeliveredEvent, RunChangedEvent};
@@ -267,6 +267,7 @@ pub struct TaskSnapshotOutput {
     pub blocked_by: Vec<String>,
     pub last_failure: Option<String>,
     pub activities: Vec<String>,
+    pub last_progress_ms: Option<i64>,
     pub result_summary: Option<String>,
 }
 
@@ -345,6 +346,7 @@ pub struct GoalCriterionStatusOutput {
 
 #[bridge_type]
 pub struct AttentionSnapshotOutput {
+    pub opened_at_ms: Option<i64>,
     pub id: String,
     pub kind: AttentionKind,
     pub summary: String,
@@ -511,13 +513,11 @@ pub fn add_task(input: AddTaskInput) -> Result<OperationOutput> {
     let task = task_from_input(input.task)?;
     let mut store = store(&input.database_path)?;
     let event = Event::new(&input.run_id, EventKind::TaskCreated(task));
-    let sequence = store
-        .append_task(&event)
-        .map_err(|error| match error {
-            StoreError::RunNotFound(_) => bridge_error("run_not_found", error),
-            StoreError::Graph(_) | StoreError::Task(_) => bridge_error("invalid_graph", error),
-            _ => bridge_error("add_task_failed", error),
-        })?;
+    let sequence = store.append_task(&event).map_err(|error| match error {
+        StoreError::RunNotFound(_) => bridge_error("run_not_found", error),
+        StoreError::Graph(_) | StoreError::Task(_) => bridge_error("invalid_graph", error),
+        _ => bridge_error("add_task_failed", error),
+    })?;
     notify_run_changed(&input.run_id, sequence);
     Ok(OperationOutput { accepted: true })
 }
@@ -736,10 +736,15 @@ pub fn record_verification(input: VerificationInput) -> Result<OperationOutput> 
     let projection = store
         .projection(&input.run_id)
         .map_err(|error| bridge_error("snapshot_failed", error))?;
-    let source_drift = !input.checks.is_empty() && projection.checks.get(&task_id)
-        .is_some_and(|receipts| receipts.iter().any(|receipt| {
-            receipt.source.as_ref().is_some_and(|source| !source.is_stable())
-        }));
+    let source_drift = !input.checks.is_empty()
+        && projection.checks.get(&task_id).is_some_and(|receipts| {
+            receipts.iter().any(|receipt| {
+                receipt
+                    .source
+                    .as_ref()
+                    .is_some_and(|source| !source.is_stable())
+            })
+        });
     let passed = input.passed && !source_drift;
     let failure_reason = if source_drift {
         "Source changed during completion checks; rerun checks on stable source".to_string()
@@ -757,8 +762,9 @@ pub fn record_verification(input: VerificationInput) -> Result<OperationOutput> 
             // Check-free reasons are owner errors, not check evidence, so a
             // transport fault text classifies as Interrupted rather than
             // Environment (which would consume the attempt ladder).
-            _ => FailureClass::classify_transport(&input.reason)
-                .unwrap_or(FailureClass::Environment),
+            _ => {
+                FailureClass::classify_transport(&input.reason).unwrap_or(FailureClass::Environment)
+            }
         }
     };
     let kind = if passed {
@@ -997,20 +1003,29 @@ pub fn get_run_graph(input: RunGraphInput) -> Result<RunGraphOutput> {
             None => GraphOwnerHealth::Missing,
         }
     };
-    let nodes = snapshot.tasks.into_iter().map(|task| GraphNodeOutput {
-        workers: snapshot.active_workers.iter().filter(|worker| worker.task_id == task.id).map(|worker| worker.id.clone()).collect(),
-        id: task.id,
-        title: task.title,
-        kind: task.kind,
-        state: task.state,
-        dependencies: task.dependencies,
-        blocked_by: task.blocked_by,
-        read_scope: task.read_scope,
-        write_scope: task.write_scope,
-        attempt: task.attempt,
-        result_summary: task.result_summary,
-        last_failure: task.last_failure,
-    }).collect();
+    let nodes = snapshot
+        .tasks
+        .into_iter()
+        .map(|task| GraphNodeOutput {
+            workers: snapshot
+                .active_workers
+                .iter()
+                .filter(|worker| worker.task_id == task.id)
+                .map(|worker| worker.id.clone())
+                .collect(),
+            id: task.id,
+            title: task.title,
+            kind: task.kind,
+            state: task.state,
+            dependencies: task.dependencies,
+            blocked_by: task.blocked_by,
+            read_scope: task.read_scope,
+            write_scope: task.write_scope,
+            attempt: task.attempt,
+            result_summary: task.result_summary,
+            last_failure: task.last_failure,
+        })
+        .collect();
     Ok(RunGraphOutput {
         run_id: snapshot.run_id,
         state: snapshot.state,
@@ -1539,56 +1554,70 @@ fn snapshot(store: &SqliteStore, run_id: &str) -> Result<SnapshotOutput> {
         .attention
         .values()
         .filter(|item| item.state == loop_core::attention::AttentionState::Open)
-        .map(|item| AttentionSnapshotOutput {
-            id: item.id.clone(),
-            kind: item.kind,
-            summary: item.summary.clone(),
-            task_id: item.task_id.as_ref().map(ToString::to_string),
+        .map(|item| {
+            Ok(AttentionSnapshotOutput {
+                opened_at_ms: store
+                    .attention_opened_ms(run_id, &item.id)
+                    .map_err(|error| bridge_error("snapshot_failed", error))?,
+                id: item.id.clone(),
+                kind: item.kind,
+                summary: item.summary.clone(),
+                task_id: item.task_id.as_ref().map(ToString::to_string),
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
     let tasks = projection
         .tasks
         .values()
-        .map(|task| TaskSnapshotOutput {
-            id: task.id.to_string(),
-            title: task.title.clone(),
-            kind: task.kind,
-            state: task.state,
-            attempt: task.attempt,
-            preferred_compute: task.preferred_compute,
-            dependencies: task.dependencies.iter().map(ToString::to_string).collect(),
-            read_scope: task.ownership.read_scope.clone(),
-            write_scope: task.ownership.write_scope.clone(),
-            blocked_by: task
-                .dependencies
-                .iter()
-                .filter(|id| {
-                    projection
-                        .tasks
-                        .get(*id)
-                        .is_none_or(|dependency| dependency.state != TaskState::Done)
-                })
-                .map(ToString::to_string)
-                .collect(),
-            last_failure: projection.failures.get(&task.id).cloned(),
-            activities: projection
-                .activities
-                .get(&task.id)
-                .map(|history| history.iter().cloned().collect())
-                .unwrap_or_default(),
-            result_summary: projection.outputs.get(&task.id).cloned(),
+        .map(|task| {
+            Ok(TaskSnapshotOutput {
+                last_progress_ms: store
+                    .last_progress_ms(run_id, task.id.as_str())
+                    .map_err(|error| bridge_error("snapshot_failed", error))?,
+                id: task.id.to_string(),
+                title: task.title.clone(),
+                kind: task.kind,
+                state: task.state,
+                attempt: task.attempt,
+                preferred_compute: task.preferred_compute,
+                dependencies: task.dependencies.iter().map(ToString::to_string).collect(),
+                read_scope: task.ownership.read_scope.clone(),
+                write_scope: task.ownership.write_scope.clone(),
+                blocked_by: task
+                    .dependencies
+                    .iter()
+                    .filter(|id| {
+                        projection
+                            .tasks
+                            .get(*id)
+                            .is_none_or(|dependency| dependency.state != TaskState::Done)
+                    })
+                    .map(ToString::to_string)
+                    .collect(),
+                last_failure: projection.failures.get(&task.id).cloned(),
+                activities: projection
+                    .activities
+                    .get(&task.id)
+                    .map(|history| history.iter().cloned().collect())
+                    .unwrap_or_default(),
+                result_summary: projection.outputs.get(&task.id).cloned(),
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
     let lease = store
         .execution_lease(run_id)
         .map_err(|error| bridge_error("lease_failed", error))?;
-    let goal_criteria = projection.goal_criteria_status().into_iter().map(|item| GoalCriterionStatusOutput {
-        id: item.criterion.id,
-        description: item.criterion.description,
-        task_id: item.criterion.task_id.to_string(),
-        check_ids: item.criterion.check_ids,
-        state: item.state,
-    }).collect();
+    let goal_criteria = projection
+        .goal_criteria_status()
+        .into_iter()
+        .map(|item| GoalCriterionStatusOutput {
+            id: item.criterion.id,
+            description: item.criterion.description,
+            task_id: item.criterion.task_id.to_string(),
+            check_ids: item.criterion.check_ids,
+            state: item.state,
+        })
+        .collect();
     Ok(SnapshotOutput {
         execution_owner: lease.as_ref().map(|(owner, _)| owner.clone()),
         execution_expires_at: lease.map(|(_, expires)| expires),

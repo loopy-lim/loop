@@ -191,6 +191,26 @@ impl SqliteStore {
         .collect()
     }
 
+    /// Timestamp of the latest durable worker start or task activity, in milliseconds.
+    pub fn last_progress_ms(&self, run_id: &str, task_id: &str) -> Result<Option<i64>, StoreError> {
+        Ok(self.connection.query_row(
+            "SELECT max(created_at) * 1000 FROM events WHERE run_id = ?1 AND ((json_extract(payload_json, '$.kind.type') = 'worker_started' OR json_extract(payload_json, '$.kind.type') = 'task_activity_recorded') AND json_extract(payload_json, '$.kind.data.task_id') = ?2)",
+            params![run_id, task_id], |row| row.get(0),
+        )?)
+    }
+
+    /// Opening time of an attention request, in milliseconds.
+    pub fn attention_opened_ms(
+        &self,
+        run_id: &str,
+        attention_id: &str,
+    ) -> Result<Option<i64>, StoreError> {
+        Ok(self.connection.query_row(
+            "SELECT min(created_at) * 1000 FROM events WHERE run_id = ?1 AND json_extract(payload_json, '$.kind.type') = 'attention_created' AND json_extract(payload_json, '$.kind.data.id') = ?2",
+            params![run_id, attention_id], |row| row.get(0),
+        )?)
+    }
+
     pub fn projection(&self, run_id: &str) -> Result<RunProjection, StoreError> {
         load_projection(&self.connection, run_id)
     }

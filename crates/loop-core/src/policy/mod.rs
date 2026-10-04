@@ -2,6 +2,7 @@ mod cleanup;
 mod compute_class;
 mod failure;
 mod routing;
+mod stall;
 mod terminalization;
 mod verification;
 
@@ -18,6 +19,7 @@ pub use routing::{
     select_candidate, CapabilityRequirements, ComputeCandidate, ComputeCapabilities, Risk,
     RoutingError, TaskRouting,
 };
+pub use stall::{progress_freshness, ProgressFreshness};
 pub use terminalization::{
     DependencyTerminalization, IndependentBranchAction, RunFailureAction, TerminalizationOutcome,
     TerminalizationPolicy,

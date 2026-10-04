@@ -1293,6 +1293,13 @@
                 "type": "string"
               }
             },
+            "lastProgressMs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            },
             "resultSummary": {
               "type": [
                 "string",
@@ -1360,6 +1367,13 @@
             "summary"
           ],
           "properties": {
+            "openedAtMs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            },
             "id": {
               "type": "string"
             },
@@ -2058,6 +2072,13 @@
                 "type": "string"
               }
             },
+            "lastProgressMs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            },
             "resultSummary": {
               "type": [
                 "string",
@@ -2125,6 +2146,13 @@
             "summary"
           ],
           "properties": {
+            "openedAtMs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            },
             "id": {
               "type": "string"
             },
@@ -2825,6 +2853,13 @@
                 "type": "string"
               }
             },
+            "lastProgressMs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            },
             "resultSummary": {
               "type": [
                 "string",
@@ -2892,6 +2927,13 @@
             "summary"
           ],
           "properties": {
+            "openedAtMs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            },
             "id": {
               "type": "string"
             },

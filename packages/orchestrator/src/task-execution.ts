@@ -77,6 +77,14 @@ interface Options {
    * checks once on stable source before recording verification.
    */
   goalCriteria?: GoalCriterionInput[];
+  /**
+   * Stall watchdog budget: when no progress signal (provider stream event,
+   * lifecycle transition, completion-check milestone) arrives for this long,
+   * the attempt fails with a stalled-timeout worker result so the existing
+   * retry ladder and attention policy decide what happens next. Omitted =
+   * the compile-time default.
+   */
+  stallTimeoutMs?: number;
 }
 export function executeTask(options: Options): TaskExecution {
   const controller = new AbortController();
@@ -110,12 +118,39 @@ async function run(
     contextPolicy,
     codeMap,
     goalCriteria,
+    stallTimeoutMs,
   }: Options,
   signal: AbortSignal,
   execution: TaskExecution,
 ): Promise<void> {
   const taskId = context.task.id;
   const workerInput = { ...input, taskId, workerId };
+  // Stall watchdog: a worker that produces no observable progress (stream
+  // event, lifecycle transition, check milestone) for the whole budget fails
+  // the attempt instead of hanging the run. Lease renewal and owner health
+  // are deliberately NOT progress — a live coordinator awaiting a dead worker
+  // stays silent here and is failed like any other stall.
+  const stallThresholdMs = stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS;
+  let lastProgressAt = Date.now();
+  let rejectStalled!: (error: WorkerStalled) => void;
+  const stalled = new Promise<never>((_, reject) => {
+    rejectStalled = reject;
+  });
+  // Keep the rejection observed even when no race is parked on it at fire time.
+  void stalled.catch(() => {});
+  const watchdog = setInterval(
+    () => {
+      const silentMs = Date.now() - lastProgressAt;
+      if (silentMs >= stallThresholdMs)
+        rejectStalled(new WorkerStalled(silentMs, stallThresholdMs));
+    },
+    Math.min(5_000, Math.max(25, Math.floor(stallThresholdMs / 4))),
+  );
+  watchdog.unref?.();
+  const touchProgress = () => {
+    lastProgressAt = Date.now();
+  };
+  const raceStall = <T>(promise: Promise<T>): Promise<T> => Promise.race([promise, stalled]);
   const persona = resolvePersona({
     requested: context.task.persona,
     kind: context.task.kind,
@@ -152,6 +187,25 @@ async function run(
       summary,
     });
     throw new CleanupFailed(summary);
+  };
+  /** Bounded best-effort cancel: a provider cancel that never settles must
+   * not become a new hang path; the uncertain outcome goes to attention. */
+  const cancelWorker = async () => {
+    if (!handleId) return;
+    try {
+      await bounded(provider.cancel(handleId), 5_000, "Worker cancel did not respond");
+    } catch (error) {
+      if (!(error instanceof LifecycleTimeout)) throw error;
+      await control
+        .requestAttention({
+          ...input,
+          taskId,
+          attentionId: `cancel-${workerId}`,
+          kind: "failure",
+          summary: `Worker cancel outcome is unknown (${provider.id}, ${handleId}): ${redact(error, 500)}. Confirm the worker process stopped before reconciling.`,
+        })
+        .catch(() => {});
+    }
   };
   try {
     if (signal.aborted) {
@@ -232,29 +286,36 @@ async function run(
       // The subscription must stay attached even when raw recording is
       // suppressed: the mirroring layer renders sink lines from these events.
       unsubscribe = provider.subscribe?.(handle.id, (event) => {
-        if (event.type !== "output" || !recordRawActivity || Date.now() - lastActivity < 1000)
-          return;
-        const activity = redact(
-          event.text
-            // oxlint-disable-next-line eslint/no-control-regex -- intentional control-char match
-            .replace(/\u001b\[[0-9;]*[A-Za-z]/g, "")
-            .trim()
-            .split(/\r?\n/)
-            .at(-1) ?? "",
-          300,
-        );
+        // Any provider event is real worker progress for the stall watchdog,
+        // even when the activity recorder is suppressed or throttled.
+        touchProgress();
+        if (event.type !== "output" && event.type !== "lifecycle") return;
+        if (!recordRawActivity || Date.now() - lastActivity < 1000) return;
+        const activity =
+          event.type === "lifecycle"
+            ? `[lifecycle] ${event.status}`
+            : redact(
+                event.text
+                  // oxlint-disable-next-line eslint/no-control-regex -- intentional control-char match
+                  .replace(/\u001b\[[0-9;]*[A-Za-z]/g, "")
+                  .trim()
+                  .split(/\r?\n/)
+                  .at(-1) ?? "",
+                300,
+              );
         if (!activity) return;
         lastActivity = Date.now();
         void control.recordActivity({ ...input, taskId, activity }).catch(() => {});
       });
-      const received = await untilAborted(provider.result(handle.id), signal);
+      const received = await raceStall(untilAborted(provider.result(handle.id), signal));
       if (!received || signal.aborted) {
-        await provider.cancel(handle.id);
+        await cancelWorker();
         await release();
         await control.recordWorkerStopped(workerInput);
         return;
       }
       result = received;
+      touchProgress();
       const failureKind = result.failure?.kind;
       const fallbackEligible =
         result.failure !== undefined && (result.failure.retryable || failureKind === "quota");
@@ -333,11 +394,19 @@ async function run(
         sourceBeforeWorker && sourceBeforeChecks
           ? changedSourcePaths(sourceBeforeWorker, sourceBeforeChecks)
           : [];
-      const evidence = await verifier.verify(
-        context.task.completionChecks,
-        context.workingDirectory,
-        signal,
+      // Check runs are progress: announce the verification stage so the
+      // persisted last-progress timestamp and the stall watchdog both stay
+      // fed while checks execute (they can outlast any stream output).
+      await control.recordActivity({
+        ...input,
+        taskId,
+        activity: `Running ${context.task.completionChecks.length} completion check${context.task.completionChecks.length === 1 ? "" : "s"}`,
+      });
+      touchProgress();
+      const evidence = await raceStall(
+        verifier.verify(context.task.completionChecks, context.workingDirectory, signal),
       );
+      touchProgress();
       if (signal.aborted) {
         await control.stopVerification({ ...input, taskId });
         return;
@@ -388,8 +457,14 @@ async function run(
         }),
       );
       await control.recordCheckReceipts({ ...input, taskId, checks: receipts });
+      touchProgress();
       const checks = evidence.map(({ id, passed }) => ({ id, passed }));
       const passed = checks.every((check) => check.passed);
+      await control.recordActivity({
+        ...input,
+        taskId,
+        activity: `Completion checks finished: ${checks.filter((check) => check.passed).length}/${checks.length} passed`,
+      });
       let reason = evidence
         .filter((check) => !check.passed)
         .map(
@@ -433,12 +508,14 @@ async function run(
             taskId,
             activity: "Focused checks failed; returning evidence to the same worker session once.",
           });
-          const repaired = await untilAborted(
-            provider.repair(
-              handleId,
-              `Fix the failed completion checks, then report the change. Loop will rerun them independently.\n${redact(reason, 4_000)}`,
+          const repaired = await raceStall(
+            untilAborted(
+              provider.repair(
+                handleId,
+                `Fix the failed completion checks, then report the change. Loop will rerun them independently.\n${redact(reason, 4_000)}`,
+              ),
+              signal,
             ),
-            signal,
           );
           if (signal.aborted || !repaired) {
             await provider.cancel(handleId);
@@ -487,13 +564,13 @@ async function run(
     }
     // A failed start or check is durable evidence, not an unhandled owner exit.
     if (signal.aborted) {
-      if (handleId) await provider.cancel(handleId);
+      if (handleId) await cancelWorker();
       await release();
       if (!workerFinished) await control.recordWorkerStopped(workerInput);
       else await control.stopVerification({ ...input, taskId });
       return;
     }
-    if (handleId && !workerFinished) await provider.cancel(handleId);
+    if (handleId && !workerFinished) await cancelWorker();
     await release();
     if (!workerFinished)
       await control.recordWorkerResult({
@@ -510,6 +587,7 @@ async function run(
         reason: redact(error),
       });
   } finally {
+    clearInterval(watchdog);
     execution.steer = undefined;
     unsubscribe?.();
     // Deliberate: swallow the idempotent-release CleanupFailed backstop, but
@@ -542,6 +620,26 @@ async function untilAborted(
 class LifecycleTimeout extends Error {}
 class StartupUncertain extends Error {}
 class CleanupFailed extends Error {}
+
+/** Silence budget for one worker attempt before the stall watchdog fails it.
+ * Generous by design: long silent tool runs (builds, model thinking) are
+ * normal worker progress gaps, while genuinely hung workers must still be
+ * failed well before a run becomes untrustworthy. */
+export const DEFAULT_STALL_TIMEOUT_MS = 15 * 60_000;
+
+/** Thrown by the stall watchdog when an attempt produced no progress signal
+ * for the whole silence budget. The catch path records it as a failed worker
+ * result, so the existing retry ladder and attention policy take over. */
+class WorkerStalled extends Error {
+  constructor(
+    readonly silentMs: number,
+    readonly thresholdMs: number,
+  ) {
+    super(
+      `Worker stalled: no progress for ${Math.round(silentMs / 1000)}s (stall threshold ${Math.round(thresholdMs / 1000)}s); failing the attempt for the retry policy`,
+    );
+  }
+}
 async function bounded<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
   let timer!: ReturnType<typeof setTimeout>;
   try {

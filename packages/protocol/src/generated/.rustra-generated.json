@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "schemaHash": "c6879a1f6a3e283939e786bcb1d6bd987ae2327864faedf11424dd085142d215",
+  "schemaHash": "7f6a0ab3f2a181060194c1d75ee88799d6f566d2018130ff4e0e6c6085d175dc",
   "generatorVersion": "0.11.3",
   "files": [
     {
@@ -13,7 +13,7 @@
     },
     {
       "path": "contract.ts",
-      "sha256": "93d66095aa4ebda1b6a129666deb32004ed3be08543f200026817c5f0b8fdfbb"
+      "sha256": "3c524ac47b1325e8f7fc936e0b13593871060bf24547cceaf5eb03e124f21b42"
     },
     {
       "path": "events.ts",
@@ -21,7 +21,7 @@
     },
     {
       "path": "frame-codecs.ts",
-      "sha256": "a45e3871b054585cb2a0024152c0aeab0e9fe754f71b6e4fa275016c6fab16b8"
+      "sha256": "682916ab72604714a9cf5be826d2e19ea4e53c51af12a1c871fe6e628e7827cf"
     },
     {
       "path": "frame-registry.ts",
@@ -29,7 +29,7 @@
     },
     {
       "path": "types.ts",
-      "sha256": "fb1d8a841c8ab59ee647b490d74f30e0d57a9ef0953ef15ead80411ac2d65a3e"
+      "sha256": "8114dbb4903e01c54143b2c2cc77f4317ee97ad631bbede66305e769d03dca95"
     }
   ]
 }
