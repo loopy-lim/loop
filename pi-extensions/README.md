@@ -10,6 +10,7 @@ Generic [pi coding-agent](https://github.com/earendil-works/pi-coding-agent) ext
 | `todo-widget.ts` | `todo` tool plus a persistent live widget above the editor (todos + a distinct Tasks section for Loop runs), and a `/todos` overlay |
 | `usage.ts` | `/usage` command aggregating LLM spend (dollars + tokens) across all pi sessions, grouped by day, model, and project |
 | `session-tap.ts` | Fail-open live pi conversation mirror to the gateway session collector (interactive TUI included) |
+| `run-sound.ts` | Plays a system sound when a Loop run settles — success sound for `completed`, a distinct fail sound otherwise |
 
 ## Install locations
 
@@ -19,6 +20,12 @@ Generic [pi coding-agent](https://github.com/earendil-works/pi-coding-agent) ext
   ```bash
   cp pi-extensions/persona.ts pi-extensions/todo-widget.ts pi-extensions/usage.ts ~/.pi/agent/extensions/
   ```
+- **Run sound (`run-sound.ts`):** verify it transpiles, then install (Lead performs this after a run ends):
+  ```bash
+  bun build pi-extensions/run-sound.ts --outdir /tmp/pi-check-run-sound --target bun --external @earendil-works/pi-coding-agent
+  cp pi-extensions/run-sound.ts ~/.pi/agent/extensions/
+  ```
+  Restart pi or run `/reload` to pick it up. Success sound (`loop:run-end` with status `completed`) is `/System/Library/Sounds/Glass.aiff`; any other status plays `/System/Library/Sounds/Basso.aiff`. Override via `LOOP_RUN_SOUND` / `LOOP_RUN_SOUND_FAIL` (a file path or an `afplay` sound name); set either to `off` to silence it.
 - **Session tap registration:** add `"/Users/loopy/dev/ll3/loop/pi-extensions/session-tap.ts"` to the `extensions` array in `~/.pi/agent/settings.json` (or copy `session-tap.ts` to `~/.pi/agent/extensions/`). Restart pi or run `/reload`; pi loads extensions in interactive, RPC, JSON and print modes. The gateway must be running; override its collector path via `LOOP_GATEWAY_SESSION_SOCKET` (or set `LOOP_SESSION_TAP_SOCKET` for the tap only). Missing gateway never blocks pi. Do not configure both auto-discovery and the settings entry for the same tap.
 - **User-defined personas:** `~/.pi/agent/personas/*.md` (one Markdown file per persona). Built-in personas live in code; that directory is only for user overrides. These files are **not** installed by this repo — `pi-extensions/personas/*.md` is reference material only.
 
