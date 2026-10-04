@@ -51,6 +51,11 @@ export function Screen(props: { children: ReactNode; scrollable?: boolean; heade
           ]}
         >
           {props.children}
+          {/* Bottom inset on non-scrollable columns too (task
+           * `mobile-safearea-qr-scan`): screens that end in pinned controls
+           * (chats footer pills, settings, raw pane) must clear the home
+           * indicator even when their content manages its own scroll tail. */}
+          <View style={{ height: insets.bottom }} />
         </View>
       </View>
     );

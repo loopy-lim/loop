@@ -41,6 +41,9 @@ export function ConnectScreen(props: {
   autoConnect?: boolean;
   /** Restore/auto-connect failure notice from the parent (no token ever). */
   notice?: string | null;
+  /** Open the in-app camera QR scanner (task `mobile-safe-safearea-qr-scan`):
+   * optional so tests/showcase renders without it stay as-is. */
+  onScanQr?: () => void;
 }) {
   const [host, setHost] = useState(props.initialHost ?? DEFAULT_GATEWAY_HOST);
   const [port, setPort] = useState(props.initialPort ?? DEFAULT_GATEWAY_PORT);
@@ -79,8 +82,8 @@ export function ConnectScreen(props: {
     <KeyboardAvoidingView behavior="padding">
       <Text style={styles.heading}>Connect</Text>
       <Text style={styles.subheading}>
-        Loop gateway over Tailscale. Leave the token empty — tailnet membership is the credential. A
-        token is the fallback, stored in this device's keychain only: never logged, never displayed.
+        Loop gateway over Tailscale. Leave the token empty — tailnet membership is the credential;
+        a token is the fallback, kept in this device's keychain only.
       </Text>
 
       <Text style={styles.label}>HOST</Text>
@@ -128,6 +131,15 @@ export function ConnectScreen(props: {
           {connecting ? "Connecting…" : "Connect"}
         </Text>
       </TouchableOpacity>
+      {props.onScanQr !== undefined ? (
+        <TouchableOpacity
+          style={styles.scanEntry}
+          onPress={props.onScanQr}
+          activeOpacity={press.activeOpacity}
+        >
+          <Text style={styles.scanEntryText}>Scan pairing QR code</Text>
+        </TouchableOpacity>
+      ) : null}
     </KeyboardAvoidingView>
   );
 }
@@ -167,4 +179,18 @@ const styles = StyleSheet.create({
   ctaDisabled: { backgroundColor: colors.ctaDisabled },
   ctaText: { ...type.bodyStrong, color: colors.ctaInk },
   ctaTextDisabled: { color: colors.inkFaint },
+  // Quiet secondary entrance (guidance §4): never competes with the Connect
+  // CTA — bordered pill, muted ink, same vocabulary as App's QuietButton.
+  scanEntry: {
+    alignSelf: "stretch",
+    alignItems: "center",
+    marginTop: space.m,
+    minHeight: 44,
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    borderRadius: radius.pill,
+    paddingVertical: space.m,
+  },
+  scanEntryText: { ...type.captionStrong, color: colors.inkMute },
 });

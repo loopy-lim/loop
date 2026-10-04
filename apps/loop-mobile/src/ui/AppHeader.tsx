@@ -7,22 +7,20 @@ import { COLUMN_MAX_WIDTH } from "./Screen";
 import { colors, COLUMN_GUTTER, space, type } from "./tokens";
 
 /**
- * Status-bar-substitute header (task `header-statusbar-redesign`, operator
- * directive): the top chrome lives IN the status-bar zone instead of below
- * it. The system Dynamic Island stays the only centered element; app
- * content flanks it — the title anchors left, action icons anchor right —
- * with no centered bar of our own. Nothing renders under the island: the
- * row reserves ISLAND_RESERVE in the middle, the title truncates inside its
- * flank, and both flanks ride the device's horizontal safe insets. Screens
- * with headers (chats, conversation) render exactly one of these; content
- * begins below the zone's single hairline (minimal-design-spec S5).
+ * Top chrome header (task `header-statusbar-redesign`, revised by
+ * `conversation-safearea-fix`): the status-bar zone is cleared first —
+ * `paddingTop: insets.top` — and the chrome row (title left flank, action
+ * icons right flank) renders BELOW it, so no app content ever sits inside
+ * the status-bar/Dynamic-Island band. Both flanks still ride the device's
+ * horizontal safe insets for the landscape notch. Screens with headers
+ * (chats, conversation) render exactly one of these; content begins below
+ * the zone's single hairline (minimal-design-spec S5).
  */
 
-/** Reserved middle width so no app content flows under the Dynamic Island
- * (~125pt on island devices; the small surplus keeps the flanks honest, and
- * on non-island devices the reserve is just breathing room between the
- * title and the actions). Display-geometry constant, not a theme token. */
-export const ISLAND_RESERVE = 130;
+/** Chrome row height below the cleared status zone. The 44pt touch floor
+ * (ui-ux-guidance §8) keeps the back chevron and corner actions honest.
+ * Display-geometry constant, not a theme token. */
+export const HEADER_BAR_HEIGHT = 44;
 
 export function AppHeader(props: {
   title: string;
@@ -37,7 +35,7 @@ export function AppHeader(props: {
     <View
       style={[
         styles.zone,
-        { height: insets.top, paddingLeft: insets.left, paddingRight: insets.right },
+        { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right },
       ]}
     >
       <View style={styles.bar}>
@@ -47,9 +45,6 @@ export function AppHeader(props: {
             {props.title}
           </DynText>
         </View>
-        {/* The island's flank: reserved width, non-interactive — content
-         * can end at its edges but never flow beneath it. */}
-        <View style={styles.island} />
         <View style={styles.actions}>{props.actions}</View>
       </View>
     </View>
@@ -65,10 +60,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.hairline,
   },
-  // The bar rides the same centered column as the screens' content so the
-  // title aligns with the surface below it.
   bar: {
-    flex: 1,
+    height: HEADER_BAR_HEIGHT,
     flexDirection: "row",
     alignItems: "center",
     alignSelf: "center",
@@ -83,7 +76,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: space.s,
   },
-  island: { width: ISLAND_RESERVE, flexShrink: 0 },
   actions: {
     flexShrink: 0,
     flexDirection: "row",

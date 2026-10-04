@@ -33,6 +33,11 @@ export function Composer(props: {
   busy: boolean;
   /** True while the session turn is running AND a run targets the steer mailbox. */
   steerMode: boolean;
+  /** True while the run's session is not observed yet — sends stay locked
+   * (task `conversation-safearea-fix`): routing the draft to a brand-new
+   * run while the surface is still connecting reads as a silent failure.
+   * The waiting notice above the timeline owns the explanation. */
+  sendLocked?: boolean;
   error: string | null;
   /** Present only after a submit failure (C10): re-invokes the screen's
    * submit handler with the preserved draft. */
@@ -49,7 +54,7 @@ export function Composer(props: {
 }) {
   const hasText = props.draft.trim().length > 0;
   const empty = !hasText && props.attachments.length === 0;
-  const disabled = props.busy || empty;
+  const disabled = props.busy || empty || props.sendLocked === true;
   return (
     <View style={[styles.composer, { paddingBottom: props.paddingBottom }]}>
       {props.attachments.length > 0 ? (

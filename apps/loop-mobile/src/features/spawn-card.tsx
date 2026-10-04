@@ -21,7 +21,7 @@ import {
 import {
   SPAWN_TUI_BLOCKED,
   SPAWN_TUI_FAILED_PREFIX,
-  SPAWN_TUI_INVENTORY_UNAVAILABLE,
+  SPAWN_TUI_LIST_UNAVAILABLE,
   SPAWN_TUI_LABEL,
   SPAWN_TUI_SPAWNING,
   SPAWN_TUI_TIMEOUT_PREFIX,
@@ -86,7 +86,7 @@ export function SpawnSessionCard(props: SpawnCardProps) {
         // The inventory was unreadable before the spawn — a before/after
         // correlation could open a PRE-EXISTING session by accident, so the
         // honest move is to stop and point at the Sessions list.
-        setStatus({ kind: "done", text: SPAWN_TUI_INVENTORY_UNAVAILABLE, error: false });
+        setStatus({ kind: "done", text: SPAWN_TUI_LIST_UNAVAILABLE, error: false });
         return;
       }
       const discovery = await awaitSpawnedSession({

@@ -65,6 +65,10 @@ export type MockGateway = {
   disconnectAfterFirstFrame: () => void;
   /** Same, but for the next SESSION events connection. */
   disconnectNextSessionStreamAfterFirstFrame: () => void;
+  /** Scripted rate limiting: 429 the next N POST /v1/runs + steer requests. */
+  rateLimitNextPosts: (times: number, retryAfter?: string) => void;
+  /** Scripted rate limiting: 429 the next N SSE /events connections. */
+  rateLimitNextStreams: (times: number, retryAfter?: string) => void;
 };
 
 function problem(
@@ -101,6 +105,12 @@ export function createMockGateway(): MockGateway {
   const sessionEventLastEventIds: (string | null)[] = [];
   let dropNextStreamAfterFirstFrame = false;
   let dropNextSessionStreamAfterFirstFrame = false;
+  // Scripted 429 rate limiting (mobile-resilience): mirrors the gateway's
+  // capacity_exhausted surface (status 429 + Retry-After header). Default
+  // Retry-After "0" keeps tests fast; the delay policy itself is unit-tested.
+  let rateLimitedPosts = 0;
+  let rateLimitedStreams = 0;
+  let rateLimitRetryAfter = "0";
   // M2 upload state (D5): refs handed out by the upload endpoint resolve on
   // the input endpoint — mirrors the gateway's session-scoped store.
   const uploadedAttachments = new Map<string, { mimeType: string; byteLen: number }>();
@@ -149,6 +159,40 @@ export function createMockGateway(): MockGateway {
       if (authorization !== `Bearer ${TOKEN}`) {
         await record();
         return unauthorized();
+      }
+
+      // ── Scripted 429 capacity refusals (mobile-resilience) ──────────
+      const rateLimited = (): Response => {
+        const body = problem(
+          429,
+          "capacity_exhausted",
+          "Capacity exhausted",
+          "Too many in-flight submissions; retry later.",
+          serverRequestId,
+          true,
+        );
+        return Response.json(body, {
+          status: 429,
+          headers: {
+            "Content-Type": "application/problem+json",
+            "Retry-After": rateLimitRetryAfter,
+            ...reflectId,
+          },
+        });
+      };
+      if (
+        rateLimitedPosts > 0 &&
+        request.method === "POST" &&
+        (url.pathname === "/v1/runs" || /^\/v1\/runs\/[^/]+\/steer$/.test(url.pathname))
+      ) {
+        rateLimitedPosts -= 1;
+        await record();
+        return rateLimited();
+      }
+      if (rateLimitedStreams > 0 && request.method === "GET" && url.pathname.endsWith("/events")) {
+        rateLimitedStreams -= 1;
+        await record();
+        return rateLimited();
       }
 
       // ── POST /v1/runs ────────────────────────────────────────────────
@@ -828,6 +872,14 @@ export function createMockGateway(): MockGateway {
     },
     disconnectNextSessionStreamAfterFirstFrame: () => {
       dropNextSessionStreamAfterFirstFrame = true;
+    },
+    rateLimitNextPosts: (times: number, retryAfter = "0") => {
+      rateLimitedPosts = times;
+      rateLimitRetryAfter = retryAfter;
+    },
+    rateLimitNextStreams: (times: number, retryAfter = "0") => {
+      rateLimitedStreams = times;
+      rateLimitRetryAfter = retryAfter;
     },
     stop: () => server.stop(true),
   };

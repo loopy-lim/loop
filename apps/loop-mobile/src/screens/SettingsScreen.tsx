@@ -63,9 +63,6 @@ export function SettingsScreen(props: {
             </TouchableOpacity>
           ))}
         </View>
-        <DynText style={styles.note}>
-          Base size for viewer text ({FONT_SIZE_MIN}–{FONT_SIZE_MAX}).
-        </DynText>
       </View>
 
       <DynText style={styles.section}>Refresh interval</DynText>
@@ -84,10 +81,7 @@ export function SettingsScreen(props: {
             </TouchableOpacity>
           ))}
         </View>
-        <DynText style={styles.note}>
-          Foreground refresh for the run pane inventory. File content is loaded on open only — never
-          polled.
-        </DynText>
+        <DynText style={styles.note}>Foreground refresh for the run pane inventory.</DynText>
       </View>
 
       <TouchableOpacity

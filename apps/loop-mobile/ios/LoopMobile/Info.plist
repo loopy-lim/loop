@@ -12,9 +12,14 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
-	<!-- QR pairing (decision 2026-xx-qr-pairing D-B): the loop:// scheme is
-	     what a scanned pairing QR opens — the system camera turns the QR into
-	     this deep link and the app parses host/port from it. -->
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -26,25 +31,12 @@
 			</array>
 		</dict>
 	</array>
-	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleShortVersionString</key>
-	<string>$(MARKETING_VERSION)</string>
-	<key>CFBundleSignature</key>
-	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- The gateway transport is bearer-authenticated cleartext HTTP over the
-		     tailnet (ADR §2 D2). iOS 26 ignores NSAllowsArbitraryLoads for numeric
-		     IP literals (CGNAT 100.64/10 included), so the app addresses the
-		     gateway by its tailnet MagicDNS name and exempts exactly that host.
-		     TLS termination on the gateway retires this exception. -->
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 		<key>NSExceptionDomains</key>
@@ -57,7 +49,7 @@
 		</dict>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Loop needs camera access to attach a photo to a prompt.</string>
+	<string>Loop needs camera access to scan a pairing QR code and attach a photo to a prompt.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string></string>
 	<key>RCTNewArchEnabled</key>

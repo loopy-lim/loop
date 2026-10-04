@@ -6,6 +6,7 @@ import type { GatewayClient } from "../gateway-client/client";
 import type { RemoteSessionSummary } from "../gateway-client/conversation";
 import type { RemoteRunPage, RemoteRunStatus, RemoteRunSummary } from "../gateway-client/wire";
 import { sessionSubtitle, sessionTitles } from "./session-title";
+import { activeFirst, isActiveRun, isActiveSession } from "../state/activeView";
 import {
   splitSessions,
   type SessionNamingEvidence,
@@ -14,11 +15,12 @@ import {
 import { relativeTime } from "./time-format";
 import { DynText } from "../ui/DynText";
 import {
+  ACTIVE_ONLY_LABEL,
   CHATS_HEADING,
+  EMPTY_ACTIVE_NOTICE,
   EMPTY_RUNS_NOTICE,
-  REFRESH_LABEL,
-  REFRESHING_LABEL,
   SESSIONS_HEADING,
+  SHOW_ALL_LABEL,
 } from "../ui/copy";
 import { glyph } from "../ui/glyphs";
 import { colors, press, radius, space, type } from "../ui/tokens";
@@ -52,26 +54,33 @@ import { colors, press, radius, space, type } from "../ui/tokens";
  * edges clip it; the list is high-frequency surface and carries no
  * destructive control at all now (App gates the handler behind the header
  * confirmation alert).
+ *
+ * Session focus (task `session-focus`): the default view is the ACTIVE
+ * work only — non-terminal runs, live sessions — with the running loop
+ * leading (most recently updated first). The full inventory exists
+ * exclusively behind an explicit "Show all sessions" toggle, and the
+ * toggle itself appears only when something is actually hidden, so the
+ * quiet view stays quiet. Filtering/ordering live in the pure
+ * state/activeView.ts fold; this component only renders it.
  */
 
 /** Display-only truncation of the opaque run id (never parsed back). */
-function shortRunId(runId: string): string {
+export function shortRunId(runId: string): string {
   return runId.length <= 18 ? runId : `${runId.slice(0, 18)}…`;
 }
 
-function countsText(run: RemoteRunSummary): string {
+/** Non-zero task counts, closed readout vocabulary (§2 system readout):
+ * quiet when nothing is pending — zero rows are never spelled out. */
+export function countsText(run: { taskCounts: RemoteRunSummary["taskCounts"] }): string {
   const c = run.taskCounts;
   const parts: string[] = [];
   if (c.pending > 0) parts.push(`${c.pending} pending`);
   if (c.running > 0) parts.push(`${c.running} running`);
+  if (c.attention > 0) parts.push(`${c.attention} attention`);
   if (c.done > 0) parts.push(`${c.done} done`);
   if (c.failed > 0) parts.push(`${c.failed} failed`);
+  if (c.cancelled > 0) parts.push(`${c.cancelled} cancelled`);
   return parts.length > 0 ? parts.join(", ") : "no tasks";
-}
-
-function sessionBadge(session: RemoteSessionSummary | undefined): string {
-  if (session === undefined) return "";
-  return ` · session ${session.state}`;
 }
 
 /** Closed status → dot color mapping (§1; anything unknown stays muted). */
@@ -92,6 +101,10 @@ function runStatusColor(status: RemoteRunStatus): string {
 function RunRow(props: {
   run: RemoteRunSummary;
   session: RemoteSessionSummary | undefined;
+  /** Full-inventory view: the non-zero counts readout joins the meta line.
+   * The default (active) view keeps the meta to the relative time only —
+   * the status badge already carries the state. */
+  detailed: boolean;
   onOpen?: () => void;
 }) {
   const { run, session } = props;
@@ -115,10 +128,12 @@ function RunRow(props: {
           </DynText>
         </View>
       </View>
+      {/* Minimal meta (§1 quiet state): relative time always; the non-zero
+       * counts readout joins only in the full view — never zero rows, and
+       * never a duplicated state word (the badge above already says it). */}
       <DynText style={styles.rowMeta} numberOfLines={1}>
-        {relativeTime(run.updatedAt)} · {countsText(run)}
-        {run.terminal ? " · terminal" : ""}
-        {sessionBadge(session)}
+        {relativeTime(run.updatedAt)}
+        {props.detailed ? ` · ${countsText(run)}` : ""}
       </DynText>
     </TouchableOpacity>
   );
@@ -138,6 +153,9 @@ export function RunsList(props: {
   const [sessions, setSessions] = useState<RemoteSessionSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Session focus (task `session-focus`): the default is the active view;
+  // the full inventory is opt-in and never persists across mounts.
+  const [showAll, setShowAll] = useState(false);
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -159,13 +177,21 @@ export function RunsList(props: {
     reload();
   }, [reload]);
 
-  const runs = page?.runs ?? [];
+  const runs = activeFirst(page?.runs ?? []);
   const openRun = props.onOpenRun;
   const openSession = props.onOpenSession;
   // The scroll tail clears the home indicator when the content ends above
   // it (same inset handoff the shared Screen applies to scrollable screens).
   const insets = useSafeAreaInsets();
   const { byRunId, uncorrelated } = splitSessions(sessions ?? []);
+  // Default view: active work only (non-terminal runs, live sessions);
+  // the toggle is the only surface the full inventory appears on.
+  const visibleRuns = showAll ? runs : runs.filter(isActiveRun);
+  const visibleUncorrelated = showAll ? uncorrelated : uncorrelated.filter(isActiveSession);
+  // The toggle exists only while it can change something — nothing hidden,
+  // nothing to reveal (§1 quiet state: no controls that do nothing).
+  const hiddenCount = runs.length - visibleRuns.length + (uncorrelated.length - visibleUncorrelated.length);
+  const toggleVisible = showAll || hiddenCount > 0;
   // Naming rule (operator-approved): only OBSERVED sessions are named by
   // their first utterance; the rest keep the honest label/id fallbacks.
   const naming = props.naming;
@@ -191,43 +217,52 @@ export function RunsList(props: {
         <RefreshControl refreshing={loading} onRefresh={reload} tintColor={colors.inkMute} />
       }
     >
-      <View style={styles.headerRow}>
+      {/* Section label only (§2 readout): the list refreshes via its
+       * pull-to-refresh control — a second explicit refresh button was a
+       * duplicate control and is gone. The focus toggle rides the same row
+       * as a quiet caption action; the full list exists only behind it. */}
+      <View style={styles.headingRow}>
         <DynText style={styles.sectionLabel}>{CHATS_HEADING}</DynText>
-        {/* Touch target (C14): the label alone is ~17pt tall, so the slop
-         * lifts the tap area to ~45pt (44pt floor, ui-ux-guidance §8); the
-         * disabled refresh dims (visibility contract: a disabled control
-         * must read as disabled). */}
-        <TouchableOpacity
-          onPress={reload}
-          disabled={loading}
-          hitSlop={{ top: 14, bottom: 14, left: 12, right: 12 }}
-          activeOpacity={press.activeOpacity}
-        >
-          <DynText style={[styles.refresh, loading && styles.refreshDisabled]}>
-            {loading ? REFRESHING_LABEL : REFRESH_LABEL}
-          </DynText>
-        </TouchableOpacity>
+        {toggleVisible ? (
+          <TouchableOpacity
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            onPress={() => setShowAll(!showAll)}
+            activeOpacity={press.activeOpacity}
+          >
+            <DynText style={styles.toggleLabel}>
+              {showAll ? ACTIVE_ONLY_LABEL : SHOW_ALL_LABEL}
+            </DynText>
+          </TouchableOpacity>
+        ) : null}
       </View>
       {error !== null ? <DynText style={styles.error}>runs list: {error}</DynText> : null}
-      {error === null && !loading && runs.length === 0 ? (
+      {error === null && !loading && runs.length === 0 && uncorrelated.length === 0 ? (
         <DynText style={styles.empty}>{EMPTY_RUNS_NOTICE}</DynText>
       ) : null}
+      {error === null &&
+      !loading &&
+      runs.length + uncorrelated.length > 0 &&
+      visibleRuns.length === 0 &&
+      visibleUncorrelated.length === 0 ? (
+        <DynText style={styles.empty}>{EMPTY_ACTIVE_NOTICE}</DynText>
+      ) : null}
       <View style={styles.rows}>
-        {runs.map((run: RemoteRunSummary) => (
+        {visibleRuns.map((run: RemoteRunSummary) => (
           <RunRow
             key={run.runId}
             run={run}
             session={byRunId.get(run.runId)}
+            detailed={showAll}
             onOpen={openRun !== undefined ? () => openRun(run.runId) : undefined}
           />
         ))}
       </View>
 
-      {uncorrelated.length > 0 ? (
+      {visibleUncorrelated.length > 0 ? (
         <View style={styles.sessionsSection}>
           <DynText style={styles.sectionLabel}>{SESSIONS_HEADING}</DynText>
           <View style={styles.rows}>
-            {uncorrelated.map((session) => {
+            {visibleUncorrelated.map((session) => {
               const evidence = naming?.evidence(session.sessionId) ?? null;
               const title =
                 (evidence !== null ? namedTitles.get(session.sessionId) : undefined) ??
@@ -272,12 +307,6 @@ export function RunsList(props: {
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: space.l },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: space.m,
-  },
   // §2 system-readout section label: caption tier, uppercase, positive
   // tracking — hierarchy from weight + tracking, no color emphasis.
   sectionLabel: {
@@ -286,8 +315,16 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.6,
   },
-  refresh: { ...type.captionStrong, color: colors.inkMute },
-  refreshDisabled: { opacity: 0.5 },
+  // Heading row carries the label + the session-focus toggle on one line.
+  headingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: space.m,
+  },
+  // Quiet caption action — same readout tier as the meta text, no fill,
+  // no border: hierarchy from weight alone (§1).
+  toggleLabel: { ...type.captionStrong, color: colors.inkMute },
   rows: { gap: space.s },
   row: {
     backgroundColor: colors.surface,

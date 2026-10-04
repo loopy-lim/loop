@@ -48,7 +48,7 @@ import {
   RECONNECTING_NOTICE,
   SESSION_ENDED_NOTICE,
   STREAM_DISCONNECTED_NOTICE,
-  WAITING_FOR_INVENTORY_NOTICE,
+  WAITING_FOR_SESSION_NOTICE,
 } from "../ui/copy";
 import { DynText } from "../ui/DynText";
 import { AppHeader } from "../ui/AppHeader";
@@ -343,6 +343,12 @@ export function ConversationScreen(props: {
 
   const submit = () => {
     if (busy) return;
+    // Send lock (task `conversation-safearea-fix`): while the run's session
+    // is not observed yet, a send here would route the draft to a brand-new
+    // run and navigate away — reading as a silent failure. The composer's
+    // send control is locked and the waiting notice above the timeline owns
+    // the explanation; the lock lifts the moment the session appears.
+    if (sessionId === null) return;
     if (pendingAttachmentsRef.current.length > 0) {
       submitWithAttachments();
       return;
@@ -543,7 +549,7 @@ export function ConversationScreen(props: {
   // ended/waiting stay at the muted baseline (§1, intensity proportional).
   const notices: { key: string; text: string; warn: boolean }[] = [];
   if (sessionId === null)
-    notices.push({ key: "waiting", text: WAITING_FOR_INVENTORY_NOTICE, warn: false });
+    notices.push({ key: "waiting", text: WAITING_FOR_SESSION_NOTICE, warn: false });
   if (view?.stale === true) notices.push({ key: "stale", text: RECONNECTING_NOTICE, warn: true });
   if (view?.ended === true || view?.sessionEnded === true)
     notices.push({ key: "ended", text: SESSION_ENDED_NOTICE, warn: false });
@@ -705,6 +711,7 @@ export function ConversationScreen(props: {
             onSubmit={submit}
             busy={busy}
             steerMode={steerMode}
+            sendLocked={sessionId === null}
             error={composerError}
             onRetry={composerError !== null ? submit : undefined}
             attachments={pendingAttachments}
@@ -780,7 +787,17 @@ const styles = StyleSheet.create({
   notice: { ...type.caption, color: colors.inkMute, marginBottom: space.xxs },
   timeline: { flex: 1 },
   timelineContent: { paddingBottom: space.l },
-  rawHeading: { ...type.bodyStrong, color: colors.ink, marginBottom: space.s, marginTop: space.m },
+  // §2 system-readout section label (same readout tier as the run screen's
+  // Terminals label and the chats list's section labels — one hierarchy
+  // vocabulary across surfaces).
+  rawHeading: {
+    ...type.captionStrong,
+    color: colors.inkFaint,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: space.s,
+    marginTop: space.m,
+  },
   paneRow: {
     paddingVertical: space.m,
     paddingHorizontal: space.l,

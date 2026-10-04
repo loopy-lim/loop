@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { StyleSheet, TouchableOpacity, View } from "react-native";
 
 import type { GatewayClient } from "../gateway-client/client";
+import { countsText, shortRunId } from "../features/run-list";
 import { RunProjection, type OutputEntry, type RunProjectionState } from "../state/runProjection";
-import type { RemotePaneSummary, RemoteTask } from "../gateway-client/wire";
+import type { RemotePaneSummary } from "../gateway-client/wire";
 import { DynText } from "../ui/DynText";
 import { glyph } from "../ui/glyphs";
 import { colors, press, radius, space, type } from "../ui/tokens";
@@ -166,18 +167,12 @@ export function RunScreen(props: {
       ) : (
         <View>
           <DynText style={styles.heading}>
-            {run.runId} — {run.status}
+            {shortRunId(run.runId)} — {run.status}
             {run.terminal ? " (terminal)" : ""}
           </DynText>
-          <DynText style={styles.taskCounts}>
-            tasks: pending {run.taskCounts.pending}, running {run.taskCounts.running}, attention{" "}
-            {run.taskCounts.attention}, done {run.taskCounts.done}
-          </DynText>
-          {run.tasks.map((task: RemoteTask) => (
-            <DynText key={task.taskId} style={styles.taskLine} numberOfLines={1}>
-              {task.taskId}: {task.status}
-            </DynText>
-          ))}
+          {/* Non-zero counts only (quiet readout): zero rows are noise —
+           * the same closed formatter the chats rows use. */}
+          <DynText style={styles.taskCounts}>{countsText(run)}</DynText>
           {run.attention !== null ? (
             <DynText style={styles.attention}>⚠ {run.attention.message}</DynText>
           ) : null}
@@ -216,7 +211,6 @@ export function RunScreen(props: {
 const styles = StyleSheet.create({
   heading: { ...type.title, color: colors.ink, marginBottom: space.s },
   taskCounts: { ...type.caption, color: colors.inkMute, marginBottom: space.xs },
-  taskLine: { ...type.caption, color: colors.inkMute, marginBottom: space.xxs },
   // Attention is the one warn semantic on the run view (same as desktop).
   attention: { ...type.captionStrong, color: colors.warn, marginTop: space.xs },
   stale: { ...type.caption, color: colors.inkMute, marginTop: space.xs },

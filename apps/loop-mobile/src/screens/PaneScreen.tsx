@@ -19,6 +19,7 @@ import {
   UNOBSERVED_NOTICE,
 } from "../ui/terminalLayout";
 import { colors, radius, space, type } from "../ui/tokens";
+import { STREAM_DISCONNECTED_NOTICE } from "../ui/copy";
 
 /**
  * Screen 4 — live worker pane terminal view (terminal mirror v1, decision D6).
@@ -118,7 +119,9 @@ export function PaneScreen(props: { client: GatewayClient; paneId: string }) {
           {notice}
         </Text>
       ))}
-      {streamError !== null ? <Text style={styles.notice}>Stream: {streamError}</Text> : null}
+      {streamError !== null ? (
+        <Text style={styles.notice}>{STREAM_DISCONNECTED_NOTICE}</Text>
+      ) : null}
       <View style={styles.screen}>
         <ScrollView
           ref={scrollRef}
@@ -131,12 +134,19 @@ export function PaneScreen(props: { client: GatewayClient; paneId: string }) {
           </Text>
         </ScrollView>
       </View>
-      <Text style={styles.meta}>
-        rev {view?.revision ?? "–"}
-        {view?.truncated ? " · truncated" : ""}
-        {view?.stale ? " · reconnecting" : ""}
-        {following ? " · following" : " · paused (scrolled up)"}
-      </Text>
+      {/* Deviations only (quiet state, §1): a healthy attached tail says
+       * nothing — rev/truncation/reconnect/scroll state appear when true. */}
+      {view?.truncated === true || view?.stale === true || !following ? (
+        <Text style={styles.meta}>
+          {[
+            view?.truncated === true ? "truncated" : null,
+            view?.stale === true ? "reconnecting" : null,
+            following ? null : "paused (scrolled up)",
+          ]
+            .filter((part): part is string => part !== null)
+            .join(" · ")}
+        </Text>
+      ) : null}
     </View>
   );
 }

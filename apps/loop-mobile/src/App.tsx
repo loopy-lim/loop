@@ -15,6 +15,7 @@ import { settingsKeychainStorage } from "./auth/settingsKeychainStorage";
 import { ConnectScreen } from "./screens/ConnectScreen";
 import { ConversationScreen } from "./screens/ConversationScreen";
 import { PaneScreen } from "./screens/PaneScreen";
+import { QRScannerScreen } from "./screens/QRScannerScreen";
 import { RunSplitScreen } from "./screens/RunSplitScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { SubmitScreen } from "./screens/SubmitScreen";
@@ -78,6 +79,10 @@ export function App(props: { showcase?: ShowcaseConfig } | undefined) {
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   /** Connect-screen prefill from saved credentials or a dropped session. */
   const [prefill, setPrefill] = useState<{ host?: string; port?: string } | undefined>(undefined);
+  /** In-app camera QR scanner (task `mobile-safearea-qr-scan`): open from
+   * the Connect screen; an accepted scan funnels through the SAME adopted
+   * connection path as the deep link (probe → connect → persist). */
+  const [scanOpen, setScanOpen] = useState(false);
   /** Non-blocking notice for auto-connect/restore failures (no token ever). */
   const [notice, setNotice] = useState<string | null>(null);
   /** Remote spawn learned gate (decision 2026-xx-session-spawn §D-D): the
@@ -287,6 +292,26 @@ export function App(props: { showcase?: ShowcaseConfig } | undefined) {
 
   function renderScreen(): ReactElement {
     if (client === null) {
+      if (scanOpen) {
+        // Full-bleed camera: applies its own safe-area insets to the chrome
+        // (cancel pill, hint) so the frame covers the notch zone cleanly.
+        return (
+          <QRScannerScreen
+            onPaired={(host, port) => {
+              setScanOpen(false);
+              setPrefill({ host, port: String(port) });
+              try {
+                adoptConfig(createConnectionConfig(host, port));
+              } catch (error) {
+                setNotice(
+                  error instanceof Error ? error.message : "pairing payload is not usable",
+                );
+              }
+            }}
+            onCancel={() => setScanOpen(false)}
+          />
+        );
+      }
       if (phase === "restoring") {
         return (
           <Screen>
@@ -303,6 +328,7 @@ export function App(props: { showcase?: ShowcaseConfig } | undefined) {
             initialBearer={connectDriven.current ? undefined : showcase?.bearer}
             autoConnect={showcase?.autoConnect === true && !connectDriven.current}
             notice={notice}
+            onScanQr={() => setScanOpen(true)}
           />
         </Screen>
       );
@@ -378,9 +404,12 @@ export function App(props: { showcase?: ShowcaseConfig } | undefined) {
         />
         {/* Split-viewer design §B entries (chats footer): the viewer is a
          * screen, not a modal over the conversation; settings lives beside
-         * it. Quiet pills, same pattern as the raw-pane back button. */}
-        <QuietButton label="Files & reports" onPress={() => setShowFiles(true)} />
-        <QuietButton label="Settings" onPress={() => setShowSettings(true)} />
+         * it. Quiet pills, same pattern as the raw-pane back button — one
+         * row so the footer stays a single quiet band. */}
+        <View style={styles.footerRow}>
+          <QuietButton label="Files & reports" onPress={() => setShowFiles(true)} />
+          <QuietButton label="Settings" onPress={() => setShowSettings(true)} />
+        </View>
       </Screen>
     );
   }
@@ -409,7 +438,6 @@ function prefillOf(config: ConnectionConfig): { host: string; port: string } {
  * handler — an accidental tap deletes nothing. */
 function confirmLogout(logout: () => void): () => void {
   return () => {
-    console.log("[dbg] confirmLogout: opening alert");
     Alert.alert(LOGOUT_CONFIRM_TITLE, LOGOUT_CONFIRM_MESSAGE, [
       { text: LOGOUT_CONFIRM_CANCEL, style: "cancel" },
       { text: LOGOUT_LABEL, style: "destructive", onPress: logout },
@@ -422,7 +450,6 @@ function confirmLogout(logout: () => void): () => void {
  * touch floor inside the status-bar-substitute zone. Confirmation-gated
  * (mis-tap safe); the handler stays App-owned (credential D2-4). */
 function LogoutButton(props: { onPress: () => void }) {
-  console.log("[dbg] LogoutButton mounted");
   return (
     <TouchableOpacity
       style={styles.logoutButton}
@@ -454,6 +481,7 @@ function QuietButton(props: { label: string; onPress: () => void }) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   restoring: { ...type.body, color: colors.inkMute },
+  footerRow: { flexDirection: "row", gap: space.s },
   quietButton: {
     alignSelf: "flex-start",
     marginTop: space.l,

@@ -27,7 +27,15 @@ import {
   type RemoteSessionList,
   type SteerAccepted,
 } from "./conversation";
-import { GatewayError, parseProblem, throwProblem } from "./problem";
+import { GatewayError, parseProblem, responseError, throwProblem } from "./problem";
+import {
+  BACKOFF_MAX_MS,
+  POST_429_MAX_ATTEMPTS,
+  STREAM_429_MAX_RETRIES,
+  freshJitterMs,
+  post429DelayMs,
+  streamRetryDelayMs,
+} from "./retry";
 import { SseParser, Utf8ChunkDecoder, type SseFrame } from "./sse";
 import { openXhrSse } from "./xhr-sse";
 import {
@@ -216,8 +224,12 @@ export class GatewayClient {
   }
 
   /**
-   * Submit a raw prompt. Idempotency is NOT provided by v1: callers must not
-   * retry on network failure; they reconcile via listRuns/getRun instead.
+   * Submit a raw prompt. Network failures and non-429 problems are NEVER
+   * retried here (submit is not idempotent; callers reconcile via
+   * listRuns/getRun or the composer's user-driven Resend). The one exception
+   * is 429 capacity_exhausted: the gateway refuses BEFORE accepting, so a
+   * bounded Retry-After-respecting retry cannot double-submit. Past
+   * POST_429_MAX_ATTEMPTS the last GatewayError propagates (user-visible).
    */
   async submitPrompt(prompt: string, clientContext?: ClientContext): Promise<SubmitPromptAccepted> {
     const invalid = validatePrompt(prompt);
@@ -228,15 +240,25 @@ export class GatewayClient {
       prompt,
       clientContext: clientContext ?? null,
     };
-    const response = await this.fetchImpl(this.url("/runs"), {
-      method: "POST",
-      headers: this.headers({ "Content-Type": "application/json; charset=utf-8" }),
-      body: JSON.stringify(input),
-    });
-    if (response.status !== 202) {
-      await throwProblem(response);
+    const body = JSON.stringify(input);
+    for (let attempt = 1; ; attempt += 1) {
+      const response = await this.fetchImpl(this.url("/runs"), {
+        method: "POST",
+        headers: this.headers({ "Content-Type": "application/json; charset=utf-8" }),
+        body,
+      });
+      if (response.status !== 429) {
+        if (response.status !== 202) {
+          await throwProblem(response);
+        }
+        return (await response.json()) as SubmitPromptAccepted;
+      }
+      const error = await responseError(response);
+      if (attempt >= POST_429_MAX_ATTEMPTS) {
+        throw error;
+      }
+      await sleep(post429DelayMs(attempt, error.retryAfterMs, freshJitterMs()));
     }
-    return (await response.json()) as SubmitPromptAccepted;
   }
 
   async listRuns(limit?: number, cursor?: string): Promise<RemoteRunPage> {
@@ -381,6 +403,7 @@ export class GatewayClient {
   ): Promise<void> {
     let cursor = options.lastEventId;
     let backoffMs = 1_000;
+    let rateLimited = 0; // consecutive 429s; reset when a frame is delivered
 
     for (;;) {
       if (options.signal?.aborted) {
@@ -408,6 +431,7 @@ export class GatewayClient {
               cursor = frame.id;
             }
             onEvent(event);
+            rateLimited = 0; // a delivered frame proves the stream recovered
             if (event.kind === "pane_reset" && event.frame.reason === "paneGone") {
               sawGone = true;
               break;
@@ -426,13 +450,23 @@ export class GatewayClient {
           return;
         }
         if (error instanceof GatewayError && !error.retryable) {
-          throw error;
+          throw error; // 401/404/… — the server said do not retry
         }
-        const jitter = Math.floor(Math.random() * 250);
-        const delay = Math.min(backoffMs, 30_000) + jitter;
+        if (error instanceof GatewayError && error.problem.status === 429) {
+          rateLimited += 1;
+          if (rateLimited > STREAM_429_MAX_RETRIES) {
+            throw error; // persistent capacity refusal: give up, user-visible
+          }
+        }
+        // A Retry-After hint wins verbatim; otherwise exp backoff + jitter.
+        const delay = streamRetryDelayMs(
+          error instanceof GatewayError ? error.retryAfterMs : null,
+          backoffMs,
+          freshJitterMs(),
+        );
         options.onRetryableError?.(error, delay);
         await sleep(delay, options.signal);
-        backoffMs = Math.min(backoffMs * 2, 30_000);
+        backoffMs = Math.min(backoffMs * 2, BACKOFF_MAX_MS);
         continue;
       }
     }
@@ -580,35 +614,47 @@ export class GatewayClient {
    * MAX_PROMPT_BYTES) and rejects before any network round trip. The mailbox
    * delivers the guidance at the next turn boundary; the conversation stream
    * mirrors acceptance as a `steer_queued` frame and the tap surfaces the
-   * `source=steer` user message (D4 §4). Like submit, steer is not retried.
+   * `source=steer` user message (D4 §4). Like submit, steer is not retried
+   * on network failure — the single 429 exception follows submitPrompt
+   * (a 429 refusal precedes acceptance, so the retry cannot double-steer).
    */
   async steerRun(runId: string, message: string): Promise<SteerAccepted> {
     const invalid = validatePrompt(message);
     if (invalid !== null) {
       throw new PromptValidationError(invalid);
     }
-    const response = await this.fetchImpl(this.url(`/runs/${encodeURIComponent(runId)}/steer`), {
-      method: "POST",
-      headers: this.headers({ "Content-Type": "application/json; charset=utf-8" }),
-      body: JSON.stringify({ message }),
-    });
-    if (response.status !== 202) {
-      await throwProblem(response);
+    const body = JSON.stringify({ message });
+    for (let attempt = 1; ; attempt += 1) {
+      const response = await this.fetchImpl(this.url(`/runs/${encodeURIComponent(runId)}/steer`), {
+        method: "POST",
+        headers: this.headers({ "Content-Type": "application/json; charset=utf-8" }),
+        body,
+      });
+      if (response.status !== 429) {
+        if (response.status !== 202) {
+          await throwProblem(response);
+        }
+        // The steer id is optional feedback (D4 §4 pairs markers by order, not id).
+        let steerBody: unknown = null;
+        try {
+          steerBody = await response.json();
+        } catch {
+          steerBody = null;
+        }
+        const steerId =
+          typeof steerBody === "object" &&
+          steerBody !== null &&
+          typeof (steerBody as { steerId?: unknown }).steerId === "string"
+            ? (steerBody as { steerId: string }).steerId
+            : null;
+        return { steerId };
+      }
+      const error = await responseError(response);
+      if (attempt >= POST_429_MAX_ATTEMPTS) {
+        throw error;
+      }
+      await sleep(post429DelayMs(attempt, error.retryAfterMs, freshJitterMs()));
     }
-    // The steer id is optional feedback (D4 §4 pairs markers by order, not id).
-    let body: unknown = null;
-    try {
-      body = await response.json();
-    } catch {
-      body = null;
-    }
-    const steerId =
-      typeof body === "object" &&
-      body !== null &&
-      typeof (body as { steerId?: unknown }).steerId === "string"
-        ? (body as { steerId: string }).steerId
-        : null;
-    return { steerId };
   }
 
   /**
@@ -624,6 +670,7 @@ export class GatewayClient {
   ): Promise<void> {
     let cursor = options.lastEventId;
     let backoffMs = 1_000;
+    let rateLimited = 0; // consecutive 429s; reset when a frame is delivered
 
     for (;;) {
       if (options.signal?.aborted) {
@@ -651,6 +698,7 @@ export class GatewayClient {
               cursor = frame.id;
             }
             onEvent(event);
+            rateLimited = 0; // a delivered frame proves the stream recovered
             if (event.kind === "conversation_reset" && event.frame.reason === "sessionGone") {
               sawGone = true;
               break;
@@ -669,13 +717,23 @@ export class GatewayClient {
           return;
         }
         if (error instanceof GatewayError && !error.retryable) {
-          throw error;
+          throw error; // 401/404/… — the server said do not retry
         }
-        const jitter = Math.floor(Math.random() * 250);
-        const delay = Math.min(backoffMs, 30_000) + jitter;
+        if (error instanceof GatewayError && error.problem.status === 429) {
+          rateLimited += 1;
+          if (rateLimited > STREAM_429_MAX_RETRIES) {
+            throw error; // persistent capacity refusal: give up, user-visible
+          }
+        }
+        // A Retry-After hint wins verbatim; otherwise exp backoff + jitter.
+        const delay = streamRetryDelayMs(
+          error instanceof GatewayError ? error.retryAfterMs : null,
+          backoffMs,
+          freshJitterMs(),
+        );
         options.onRetryableError?.(error, delay);
         await sleep(delay, options.signal);
-        backoffMs = Math.min(backoffMs * 2, 30_000);
+        backoffMs = Math.min(backoffMs * 2, BACKOFF_MAX_MS);
         continue;
       }
     }
@@ -687,7 +745,9 @@ export class GatewayClient {
    * - Non-retryable problems (401/404/406, `retryable: false` error events)
    *   throw GatewayError.
    * - Clean non-terminal disconnects reconnect immediately with Last-Event-ID.
-   * - `error` events with `retryable: true` back off 1s..30s (+jitter).
+   * - `error` events and 429s back off 1s..30s (+jitter); a Retry-After hint
+   *   wins verbatim, and more than STREAM_429_MAX_RETRIES consecutive 429s
+   *   give up with the GatewayError (user-visible via streamError).
    */
   async observeRun(
     runId: string,
@@ -696,6 +756,7 @@ export class GatewayClient {
   ): Promise<void> {
     let cursor = options.lastEventId;
     let backoffMs = 1_000;
+    let rateLimited = 0; // consecutive 429s; reset when a frame is delivered
 
     for (;;) {
       if (options.signal?.aborted) {
@@ -728,6 +789,7 @@ export class GatewayClient {
               throw new GatewayError(event.frame);
             }
             onEvent(event);
+            rateLimited = 0; // a delivered frame proves the stream recovered
             if (event.kind === "terminal") {
               sawTerminal = true;
               break;
@@ -746,13 +808,23 @@ export class GatewayClient {
           return;
         }
         if (error instanceof GatewayError && !error.retryable) {
-          throw error;
+          throw error; // 401/404/… — the server said do not retry
         }
-        const jitter = Math.floor(Math.random() * 250);
-        const delay = Math.min(backoffMs, 30_000) + jitter;
+        if (error instanceof GatewayError && error.problem.status === 429) {
+          rateLimited += 1;
+          if (rateLimited > STREAM_429_MAX_RETRIES) {
+            throw error; // persistent capacity refusal: give up, user-visible
+          }
+        }
+        // A Retry-After hint wins verbatim; otherwise exp backoff + jitter.
+        const delay = streamRetryDelayMs(
+          error instanceof GatewayError ? error.retryAfterMs : null,
+          backoffMs,
+          freshJitterMs(),
+        );
         options.onRetryableError?.(error, delay);
         await sleep(delay, options.signal);
-        backoffMs = Math.min(backoffMs * 2, 30_000);
+        backoffMs = Math.min(backoffMs * 2, BACKOFF_MAX_MS);
         continue;
       }
     }

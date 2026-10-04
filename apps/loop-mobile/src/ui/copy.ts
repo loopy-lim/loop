@@ -17,9 +17,11 @@ export const EMPTY_RESULT_NOTICE = "(no output)";
 export const EMPTY_TIMELINE_TITLE = "Nothing here yet";
 export const EMPTY_TIMELINE_HINT = "Send a prompt below to start the conversation.";
 
-/** Honest notices (C10): kind-owned phrases, tone chosen at the call site. */
-export const WAITING_FOR_INVENTORY_NOTICE =
-  "No session observed for this run yet — waiting for the inventory…";
+/** Honest notices (C10): kind-owned phrases, tone chosen at the call site.
+ * Plain language only — internal vocabulary (inventory, observation) never
+ * reaches the user (task `conversation-safearea-fix`). */
+export const WAITING_FOR_SESSION_NOTICE =
+  "Connecting to this task's session — you can send once it appears.";
 export const RECONNECTING_NOTICE = "reconnecting — replaying recent frames";
 export const SESSION_ENDED_NOTICE = "session ended";
 /** Stream failures render as a one-line state summary — never a raw
@@ -57,7 +59,7 @@ export const PHOTO_LIBRARY_DENIED_NOTICE =
 export const PHOTOS_UNAVAILABLE_NOTICE = "Photo attachments are unavailable on this install.";
 export const ATTACH_LIMIT_NOTICE = "At most 8 photos per message.";
 export const ATTACH_SESSION_REQUIRED_NOTICE =
-  "Attach needs an observed session — waiting for the inventory…";
+  "Attachments need the task's session — still connecting…";
 
 /** Chats-list surface phrases (§7: phrases are owned constants, never
  * composed inline at call sites). Values are display-stable — the section
@@ -67,9 +69,16 @@ export const ATTACH_SESSION_REQUIRED_NOTICE =
 export const APP_TITLE = "Loop";
 export const CHATS_HEADING = "Chats";
 export const SESSIONS_HEADING = "Sessions";
-export const REFRESH_LABEL = "Refresh";
-export const REFRESHING_LABEL = "loading…";
 export const EMPTY_RUNS_NOTICE = "No runs yet — submit a prompt to start one.";
+
+/** Session-focus toggle (task `session-focus`): the list shows only active
+ * work by default; the full inventory exists exclusively behind this
+ * explicit toggle, and the toggle is the only way back to the quiet view. */
+export const SHOW_ALL_LABEL = "Show all sessions";
+export const ACTIVE_ONLY_LABEL = "Active only";
+/** Quiet default-view empty state: runs exist but none are active — the
+ * honest mark (the generic "No runs yet" would be false here). */
+export const EMPTY_ACTIVE_NOTICE = "No active loops.";
 
 /** Header-corner logout (task `header-statusbar-redesign`, superseding the
  * list-footer placement): the destructive, low-frequency action is a small
@@ -86,7 +95,7 @@ export const LOGOUT_CONFIRM_CANCEL = "Cancel";
 /** Remote spawn surface (task `spawn-app-ui`, decision
  * 2026-xx-session-spawn §D-D). Owned phrases — never composed inline at
  * call sites. The honest grammar: the app opens the window; the SESSION is
- * discovered from the inventory once the tap registers, and every waiting
+ * discovered from the session list once the tap registers, and every waiting
  * message says so instead of claiming a session that is not observed yet. */
 export const SPAWN_TUI_LABEL = "New TUI session";
 export const SPAWN_TUI_SPAWNING = "Opening a new pi TUI on the host…";
@@ -96,8 +105,8 @@ export const SPAWN_TUI_WAITING = "Window opened — waiting for the session to a
 export const SPAWN_TUI_TIMEOUT_PREFIX =
   "The window opened but no session was observed yet — check the Sessions list (";
 export const SPAWN_TUI_TIMEOUT_SUFFIX = ").";
-export const SPAWN_TUI_INVENTORY_UNAVAILABLE =
-  "Window opened — the session inventory is unavailable, so the session cannot be auto-opened. Check the Sessions list once it recovers.";
+export const SPAWN_TUI_LIST_UNAVAILABLE =
+  "Window opened — the session list is unavailable, so the session cannot be auto-opened. Check the Sessions list once it recovers.";
 export const SPAWN_TUI_BLOCKED =
   "Spawning is turned off on this gateway — ask the operator to enable it.";
 export const SPAWN_TUI_FAILED_PREFIX = "Spawn failed — ";
