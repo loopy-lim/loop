@@ -23,7 +23,15 @@ import { observeRun, spawnOwner, waitForOwnerReady } from "./dispatcher";
 import { nightlyDisposition, withNightlyLock } from "./nightly";
 import { classifyRunHealth } from "./health";
 import { guidanceStatus } from "./guidance-status";
+import { formatGoalLedger, goalLedger } from "./goal-ledger";
 import { runPairCommand } from "./pair";
+import {
+  ensureGatewayRunning,
+  formatGatewayStatusJson,
+  formatGatewayStatusText,
+  gatewayStop,
+  readGatewayStatus,
+} from "./gateway";
 import type { AgentComparisonReport, BenchmarkReport } from "@loop/orchestrator";
 import type { ProviderRegistry } from "@loop/providers";
 import type { GoalCriterionInput, SnapshotOutput, TaskSpecInput } from "@loop/protocol";
@@ -87,10 +95,48 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
       return await doctor(config, parsed.json, parsed.auth, io, options.probe ?? probeCommand);
     }
     if (parsed.command === "pair") {
-      return await runPairCommand({ env: process.env, probe: options.probe ?? probeCommand }, io, {
-        hostFlag: parsed.host,
-        json: parsed.json,
-      });
+      return await runPairCommand(
+        {
+          env: process.env,
+          probe: options.probe ?? probeCommand,
+          // Auto-start (decision: loop pair auto-spawn): reuse a live gateway,
+          // otherwise spawn the composition root as a detached daemon with a
+          // Tailscale bind IP, a free port, and the default database path.
+          ensureGateway: async () => {
+            await ensureGatewayRunning({
+              env: process.env,
+              probe: options.probe ?? probeCommand,
+              databasePath: parsed.databasePath,
+              executablePath: options.executablePath ?? process.execPath,
+            });
+          },
+        },
+        io,
+        {
+          hostFlag: parsed.host,
+          json: parsed.json,
+        },
+      );
+    }
+    if (parsed.command === "gateway") {
+      const subcommand = parsed.operands[0] ?? "status";
+      if (subcommand !== "status" && subcommand !== "stop") {
+        throw new UsageError("gateway requires 'status' or 'stop'");
+      }
+      const gatewayDeps = {
+        env: process.env,
+        probe: options.probe ?? probeCommand,
+        databasePath: parsed.databasePath,
+        executablePath: options.executablePath ?? process.execPath,
+      };
+      if (subcommand === "status") {
+        const status = await readGatewayStatus(gatewayDeps);
+        io.stdout(parsed.json ? formatGatewayStatusJson(status) : formatGatewayStatusText(status));
+        return 0;
+      }
+      const stop = await gatewayStop(gatewayDeps);
+      io.stdout(`${stop.message}\n`);
+      return stop.exitCode;
     }
     if (parsed.command === "models") {
       const config = configuration(parsed);
@@ -300,6 +346,44 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
           }\n`,
         );
       return 0;
+    }
+    if (parsed.command === "goal-ledger") {
+      const runId = parsed.operands[0];
+      if (!runId) throw new UsageError("goal-ledger requires <run-id>");
+      const config = configuration(parsed);
+      const protocol = await loadProtocol();
+      await protocol.rustra.ready();
+      const input = { databasePath: config.databasePath, runId };
+      const snapshot = await protocol.getSnapshot(input);
+      const events: import("@loop/protocol").EventOutput[] = [];
+      let afterSequence = 0;
+      while (true) {
+        const batch = await protocol.subscribeEvents({
+          databasePath: config.databasePath,
+          runId,
+          afterSequence,
+          limit: 500,
+        });
+        events.push(...batch);
+        if (events.length > 100_000)
+          throw new Error("goal-ledger history exceeds the bounded read limit");
+        if (batch.length < 500) break;
+        const last = batch.at(-1);
+        if (last === undefined) break; // length >= 1 이 at(-1) 을 보장한다
+        afterSequence = Number(last.sequence);
+      }
+      const view = goalLedger(
+        {
+          runId: snapshot.runId,
+          runState: snapshot.state,
+          tasks: snapshot.tasks.map((task) => ({ id: task.id, state: task.state })),
+          criteria: snapshot.goalCriteria,
+        },
+        events,
+      );
+      if (parsed.json) io.stdout(`${JSON.stringify(view)}\n`);
+      else io.stdout(formatGoalLedger(view, config.output));
+      return view.total > 0 && view.verified === view.total ? 0 : 1;
     }
     if (parsed.command === "add-task") {
       const runId = parsed.operands[0];
@@ -1271,7 +1355,9 @@ Usage:
   loop attention <run-id>
   loop models [--json]
   loop pair [--host <tailscale-host>] [--json]
-                                    Print the loop:// pairing URL and QR for the running gateway
+                                    Print the loop:// pairing URL and QR; spawns the gateway daemon first when none is running
+  loop gateway status [--json]      Show whether the Loop gateway daemon is running
+  loop gateway stop                Gracefully stop the gateway daemon loop started; stale pid records are cleaned up
   loop cancel <run-id>
   loop pause <run-id>               Finish active tasks, stop scheduling
   loop resume <run-id>              Continue the saved graph in the background
@@ -1280,6 +1366,7 @@ Usage:
   loop reconcile <run-id> <task-id> stopped  Confirm an orphaned task stopped before retrying
   loop task <run-id> <task-id>       Show context, results and verification evidence
   loop guidance <run-id> <task-id>   Show recorded, delivered, and post-delivery checked guidance
+  loop goal-ledger <run-id>          Show the goal criterion ledger with owning tasks, check evidence, and steer provenance
   loop add-task <run-id> --json      Read TaskSpecInput JSON from stdin and add it atomically
   loop add-goal-task <run-id> --json Read task and criteria JSON from stdin and add them atomically
   loop steer <run-id> <task-id|all> <message>

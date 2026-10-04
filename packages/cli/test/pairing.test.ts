@@ -6,6 +6,9 @@
  */
 
 import { expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   QR_MAX_BYTES,
@@ -17,10 +20,14 @@ import {
   renderAsciiQr,
 } from "../src/qr";
 import {
+  GATEWAY_RUNTIME_FILE_ENV,
+  GATEWAY_RUNTIME_FILE_NAME,
   PAIR_URL_PREFIX,
   buildPairUrl,
   formatPairText,
+  gatewayRuntimeRecordPath,
   isIpLiteralHost,
+  parseGatewayRuntimeRecord,
   parsePairUrl,
   resolvePair,
   runPairCommand,
@@ -268,11 +275,14 @@ function pairDeps(overrides: Partial<PairDeps> = {}): PairDeps {
   return {
     env: { LOOP_GATEWAY_PORT: "18477", LOOP_GATEWAY_HOST: "100.80.133.120" },
     probe: async () => ({ exitCode: 1, output: "" }),
+    // Hermetic by default: no test reaches the real user config directory;
+    // record-backed cases inject a LOOP_GATEWAY_RUNTIME_FILE temp path.
+    readRuntimeFile: () => null,
     ...overrides,
   };
 }
 
-test("resolvePair prefers the flag, then MagicDNS, then the gateway env host", async () => {
+test("resolvePair prefers the flag, then MagicDNS, then the record, then the env host", async () => {
   const byFlag = await resolvePair(pairDeps(), "operator.tail42f248.ts.net");
   expect(byFlag).toMatchObject({ host: "operator.tail42f248.ts.net", port: 18477, source: "flag" });
 
@@ -298,12 +308,170 @@ test("resolvePair prefers the flag, then MagicDNS, then the gateway env host", a
   });
 });
 
-test("resolvePair fails closed on a missing or invalid gateway port", async () => {
-  await expect(resolvePair(pairDeps({ env: {} }))).rejects.toMatchObject({
-    code: "gateway-env-missing",
+// ---------------------------------------------------------------------------
+// Port resolution: env first, gateway runtime record fallback, explicit error.
+// Temp-path injection via LOOP_GATEWAY_RUNTIME_FILE keeps the suite off the
+// real user config directory.
+// ---------------------------------------------------------------------------
+
+function withTempRecord(): { root: string; recordPath: string } {
+  const root = mkdtempSync(join(tmpdir(), "loop-pair-record-"));
+  return { root, recordPath: join(root, GATEWAY_RUNTIME_FILE_NAME) };
+}
+
+test("runtime record path follows the loop config directory convention with an override", () => {
+  expect(gatewayRuntimeRecordPath({ [GATEWAY_RUNTIME_FILE_ENV]: "/tmp/x/gw.json" })).toBe(
+    "/tmp/x/gw.json",
+  );
+  expect(gatewayRuntimeRecordPath({ LOOP_CONFIG_DIR: "/cfg/loop" })).toBe(
+    join("/cfg/loop", GATEWAY_RUNTIME_FILE_NAME),
+  );
+  expect(gatewayRuntimeRecordPath({ XDG_CONFIG_HOME: "/xdg" })).toBe(
+    join("/xdg", "loop", GATEWAY_RUNTIME_FILE_NAME),
+  );
+});
+
+test("parseGatewayRuntimeRecord accepts only a clean connection pair; extra or secret fields are ignored", () => {
+  expect(parseGatewayRuntimeRecord(null)).toBeNull();
+  expect(parseGatewayRuntimeRecord("")).toBeNull();
+  expect(parseGatewayRuntimeRecord("not json")).toBeNull();
+  expect(parseGatewayRuntimeRecord('{"host":"h.ts.net"}')).toBeNull();
+  expect(parseGatewayRuntimeRecord('{"port":18477}')).toBeNull();
+  expect(parseGatewayRuntimeRecord('{"host":"http://h.ts.net","port":18477}')).toBeNull();
+  expect(parseGatewayRuntimeRecord('{"host":"h.ts.net:18477","port":18477}')).toBeNull();
+  expect(parseGatewayRuntimeRecord('{"host":"h.ts.net","port":0}')).toBeNull();
+  expect(parseGatewayRuntimeRecord('{"host":"h.ts.net","port":70000}')).toBeNull();
+  expect(parseGatewayRuntimeRecord('{"host":"h.ts.net","port":18477,"token":"leak"}')).toEqual({
+    host: "h.ts.net",
+    port: 18477,
   });
-  await expect(resolvePair(pairDeps({ env: { LOOP_GATEWAY_PORT: "0" } }))).rejects.toThrow();
-  await expect(resolvePair(pairDeps({ env: { LOOP_GATEWAY_PORT: "nope" } }))).rejects.toThrow();
+});
+
+test("resolvePair falls back to the gateway runtime record for the port and the host", async () => {
+  const { root, recordPath } = withTempRecord();
+  try {
+    // A MagicDNS-name record: the host comes from the record too — iOS ATS
+    // accepts DNS names, so no warning fires (decision: MagicDNS-first).
+    writeFileSync(recordPath, JSON.stringify({ host: "gw.tailnet.ts.net", port: 19001 }), "utf8");
+    const byRecord = await resolvePair(
+      pairDeps({
+        env: { [GATEWAY_RUNTIME_FILE_ENV]: recordPath, LOOP_GATEWAY_HOST: "100.80.133.120" },
+        readRuntimeFile: (path) => readFileSync(path, "utf8"),
+      }),
+    );
+    expect(byRecord).toMatchObject({
+      host: "gw.tailnet.ts.net",
+      port: 19001,
+      source: "record",
+      ipAtsWarning: false,
+    });
+    expect(parsePairUrl(byRecord.url)).toEqual({ host: "gw.tailnet.ts.net", port: 19001 });
+
+    // A bare-IP record still resolves (pre-MagicDNS gateways) with the ATS warning.
+    writeFileSync(recordPath, JSON.stringify({ host: "100.80.133.120", port: 19001 }), "utf8");
+    const byIpRecord = await resolvePair(
+      pairDeps({
+        env: { [GATEWAY_RUNTIME_FILE_ENV]: recordPath, LOOP_GATEWAY_HOST: "gw.env.ts.net" },
+        readRuntimeFile: (path) => readFileSync(path, "utf8"),
+      }),
+    );
+    expect(byIpRecord).toMatchObject({
+      host: "100.80.133.120",
+      port: 19001,
+      source: "record",
+      ipAtsWarning: true,
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a MagicDNS name wins over a recorded or env host; a flag wins over everything", async () => {
+  const { root, recordPath } = withTempRecord();
+  try {
+    writeFileSync(recordPath, JSON.stringify({ host: "record.ts.net", port: 19001 }), "utf8");
+    const base = {
+      env: {
+        [GATEWAY_RUNTIME_FILE_ENV]: recordPath,
+        LOOP_GATEWAY_PORT: "18477",
+        LOOP_GATEWAY_HOST: "100.80.133.120",
+      },
+      readRuntimeFile: undefined as PairDeps["readRuntimeFile"],
+    };
+    const deps = (probe: PairDeps["probe"]): PairDeps => ({
+      ...base,
+      probe,
+      readRuntimeFile: (path) => readFileSync(path, "utf8"),
+    });
+
+    // MagicDNS beats the record host and the env host.
+    const byMagicDns = await resolvePair(
+      deps(async () => ({
+        exitCode: 0,
+        output: JSON.stringify({ Self: { DNSName: "magic.ts.net." } }),
+      })),
+    );
+    expect(byMagicDns).toMatchObject({ host: "magic.ts.net", source: "magicdns" });
+
+    // An explicit flag still overrides MagicDNS (operator intent wins).
+    const byFlag = await resolvePair(
+      deps(async () => ({ exitCode: 0, output: JSON.stringify({ Self: { DNSName: "magic.ts.net" } }) })),
+      "operator.ts.net",
+    );
+    expect(byFlag).toMatchObject({ host: "operator.ts.net", source: "flag" });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a set LOOP_GATEWAY_PORT wins over the runtime record", async () => {
+  const byEnv = await resolvePair(
+    pairDeps({
+      env: {
+        LOOP_GATEWAY_PORT: "18477",
+        LOOP_GATEWAY_HOST: "100.80.133.120",
+        [GATEWAY_RUNTIME_FILE_ENV]: "/nonexistent-loop-pair/gateway.json",
+      },
+    }),
+  );
+  expect(byEnv.port).toBe(18477);
+});
+
+test("a set but invalid LOOP_GATEWAY_PORT fails closed instead of silently falling back", async () => {
+  const { root, recordPath } = withTempRecord();
+  try {
+    writeFileSync(recordPath, JSON.stringify({ host: "gw.tailnet.ts.net", port: 19001 }), "utf8");
+    for (const badPort of ["0", "nope", "70000"]) {
+      await expect(
+        resolvePair(
+          pairDeps({ env: { LOOP_GATEWAY_PORT: badPort, [GATEWAY_RUNTIME_FILE_ENV]: recordPath } }),
+        ),
+      ).rejects.toThrow(/integer in 1\.\.65535/);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolvePair fails closed on a missing or invalid gateway port", async () => {
+  const { root, recordPath } = withTempRecord();
+  try {
+    // Neither source: the error names LOOP_GATEWAY_PORT and the record path.
+    const failure = await resolvePair(
+      pairDeps({ env: { [GATEWAY_RUNTIME_FILE_ENV]: recordPath } }),
+    ).catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: "pair-port-unresolved" });
+    expect((failure as Error).message).toContain("LOOP_GATEWAY_PORT");
+    expect((failure as Error).message).toContain(recordPath);
+
+    // A malformed record is ignored, degrading to the same explicit error.
+    writeFileSync(recordPath, "{ not json", "utf8");
+    await expect(
+      resolvePair(pairDeps({ env: { [GATEWAY_RUNTIME_FILE_ENV]: recordPath } })),
+    ).rejects.toMatchObject({ code: "pair-port-unresolved" });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("resolvePair tolerates a broken tailscale probe output", async () => {
@@ -315,6 +483,63 @@ test("resolvePair tolerates a broken tailscale probe output", async () => {
     pairDeps({ probe: async () => ({ exitCode: 0, output: JSON.stringify({ Self: {} }) }) }),
   );
   expect(emptyDns.source).toBe("env");
+});
+
+test("MagicDNS probe falls back to the macOS app bundle CLI when PATH has no tailscale", async () => {
+  const probed: string[] = [];
+  const resolved = await resolvePair(
+    pairDeps({
+      probe: async (command, args) => {
+        probed.push(`${command} ${args.join(" ")}`);
+        // PATH lookup fails (spawn error); the app bundle CLI answers on
+        // the first (peers-less) arg variant.
+        if (command === "tailscale") throw new Error("spawn tailscale ENOENT");
+        return {
+          exitCode: 0,
+          output: JSON.stringify({ Self: { DNSName: `${PAYLOAD_HOST}.` } }),
+        };
+      },
+    }),
+  );
+  expect(resolved).toMatchObject({ host: PAYLOAD_HOST, source: "magicdns" });
+  expect(probed).toEqual([
+    "tailscale status --json --peers=false",
+    "tailscale status --json",
+    "/Applications/Tailscale.app/Contents/MacOS/Tailscale status --json --peers=false",
+  ]);
+});
+
+test("MagicDNS probe falls through to plain --json when the CLI rejects --peers=false", async () => {
+  const resolved = await resolvePair(
+    pairDeps({
+      probe: async (_command, args) =>
+        args.includes("--peers=false")
+          ? { exitCode: 1, output: "unknown flag: --peers" }
+          : {
+              exitCode: 0,
+              output: JSON.stringify({ Self: { DNSName: `${PAYLOAD_HOST}.` } }),
+            },
+    }),
+  );
+  expect(resolved).toMatchObject({ host: PAYLOAD_HOST, source: "magicdns" });
+});
+
+test("MagicDNS probe prefers PATH tailscale and skips the bundle when PATH answers", async () => {
+  const probed: string[] = [];
+  const resolved = await resolvePair(
+    pairDeps({
+      probe: async (command, args) => {
+        probed.push(`${command} ${args.join(" ")}`);
+        expect(command).toBe("tailscale");
+        return {
+          exitCode: 0,
+          output: JSON.stringify({ Self: { DNSName: `${PAYLOAD_HOST}.` } }),
+        };
+      },
+    }),
+  );
+  expect(resolved).toMatchObject({ source: "magicdns" });
+  expect(probed).toEqual(["tailscale status --json --peers=false"]);
 });
 
 test("runPairCommand output parses back to the same host and port; JSON stays machine-readable", async () => {

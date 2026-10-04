@@ -36,6 +36,19 @@ export function stripIpv6Zone(host: string): string {
   return host.toLowerCase().split("%")[0] ?? host.toLowerCase();
 }
 
+/** Pure predicate: is this an IPv4 literal inside the Tailscale CGNAT range
+ * 100.64.0.0/10 (the only tailnet-facing range the bind policy accepts)?
+ * Used to decide when a bound host describes the tailnet interface and may be
+ * re-labeled with the machine's MagicDNS name for pairing records. */
+export function isCgnatIpv4(host: string): boolean {
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host.trim());
+  if (match === null) return false;
+  const octets = match.slice(1).map((value) => Number.parseInt(value, 10));
+  if (octets.some((value) => value > 255)) return false;
+  const [a, b] = octets as [number, number];
+  return a === 100 && b >= CGNAT_SECOND_OCTET_MIN && b <= CGNAT_SECOND_OCTET_MAX;
+}
+
 /** Pure decision core over an injected interface snapshot. */
 export function validateBindableHost(host: string, interfaces: InterfaceSnapshot[]): void {
   const reject = (reason: string) => {

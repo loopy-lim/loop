@@ -38,6 +38,10 @@
  *                                (decision 2026-xx-gui-conversation; default on)
  *   LOOP_GATEWAY_SESSION_SOCKET  tap ingress unix socket override
  *                                (default: defaultSessionSocketPath())
+ *   LOOP_GATEWAY_RUNTIME_FILE    well-known runtime record path override
+ *                                (default: <loop config dir>/gateway.json —
+ *                                see runtime-record.ts); records ONLY the
+ *                                bound host:port, never any secret
  *
  * Session spawn (decision 2026-xx-session-spawn):
  *   LOOP_GATEWAY_SPAWN                    on (default) | off — master gate for
@@ -81,11 +85,20 @@ import {
 import { defaultHerdrSocketPath, HerdrPaneSource } from "./herdr-pane-source";
 import { HerdrAgentSessionRegistrar } from "./herdr-agent-session";
 import { RunEventLog } from "./events";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
 import { FileViewer } from "./files";
 import { orchestratorPlanner, type RunExecutionPort } from "./planner";
 import { PaneEventLog } from "./pane-events";
 import { PaneMirror } from "./pane-mirror";
 import { ProblemError } from "./problem";
+import {
+  gatewayRuntimeRecordPath,
+  magicDnsNameFromStatusOutput,
+  pairingRecordHost,
+  writeGatewayRuntimeRecord,
+} from "./runtime-record";
 import { AGENT_SESSION_POLL_MS, REPLAY_BUFFER_FRAMES } from "./wire";
 import { defaultSessionSocketPath, SessionCollector } from "./session-collector";
 import { defaultResolveDir, nodeSpawnExec, spawnConfigFromEnv, TmuxSpawner } from "./spawn";
@@ -392,6 +405,24 @@ export type BootedGateway = GatewayServer & {
   abortRuns(): void;
 };
 
+const execFileProm = promisify(execFile);
+
+/** Fail-observer MagicDNS probe (decision: loop pair MagicDNS-first). Runs
+ * `tailscale status --json` and extracts Self.DNSName; any failure — tailscale
+ * absent, not running, slow, or unparseable output — yields null so the
+ * runtime record degrades to the bound host verbatim. The probe never blocks
+ * or fails the boot: it only refines what the record says about the bind. */
+async function probeMagicDnsName(): Promise<string | null> {
+  try {
+    const { stdout } = await execFileProm("tailscale", ["status", "--json"], {
+      timeout: 3_000,
+    });
+    return magicDnsNameFromStatusOutput(stdout);
+  } catch {
+    return null;
+  }
+}
+
 export async function bootGatewayFromEnv(
   env: Record<string, string | undefined> = process.env,
 ): Promise<BootedGateway> {
@@ -490,6 +521,26 @@ export async function bootGatewayFromEnv(
     // rooted at the configured project root, same confinement as spawn.
     files: new FileViewer({ root: projectRoot }),
   });
+  // Well-known runtime record (loop pair port fallback): written only AFTER
+  // startGateway returned, so the file always describes a successful bind and
+  // a failed boot leaves any previous record untouched. The primary
+  // (tailnet-facing) listener is what pair payloads describe. Fail-observer:
+  // an unwritable record degrades to a warning; the gateway still serves.
+  // MagicDNS-first (decision: loop pair MagicDNS-first): a tailnet bind is
+  // recorded under the machine's MagicDNS name when Tailscale reports one,
+  // so the phone scans a DNS name (iOS ATS-safe) instead of a bare IP.
+  try {
+    const dnsName = await probeMagicDnsName();
+    writeGatewayRuntimeRecord(gatewayRuntimeRecordPath(env), {
+      host: pairingRecordHost(server.hostname, dnsName),
+      port: server.port,
+    });
+  } catch (error) {
+    console.error(
+      `gateway runtime record not written: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
   panes?.start();
   agentSessions?.start(AGENT_SESSION_POLL_MS);
   const innerStop = server.stop.bind(server); // capture before Object.assign overwrites it

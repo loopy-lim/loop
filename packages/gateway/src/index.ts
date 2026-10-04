@@ -19,6 +19,7 @@ export * from "./pane-port";
 export * from "./planner";
 export * from "./problem";
 export * from "./projection";
+export * from "./runtime-record";
 export * from "./service";
 export * from "./session-collector";
 export * from "./session-events";

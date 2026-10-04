@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -82,10 +82,39 @@ test("benchmark usage errors are stable and never touch providers", async () => 
 
 test("benchmark manifest selects its fake-provider config without a CLI config override", async () => {
   await protocol.rustra.ready();
-  const capture = output();
-  const databasePath = join(mkdtempSync(join(tmpdir(), "loop-cli-agent-fake-config-")), "runs.db");
-  const manifest = join(root, "scripts", "benchmark", "manifest.json");
+  const tempRoot = mkdtempSync(join(tmpdir(), "loop-cli-agent-fake-config-"));
+  const databasePath = join(tempRoot, "runs.db");
+  // Git metadata cannot be committed, so rebuild the fixture as a clean temp
+  // repository per scripts/benchmark/README.md instead of trusting the checkout.
+  const source = mkdtempSync(join(tmpdir(), "loop-cli-agent-fake-source-"));
+  cpSync(join(root, "scripts", "benchmark", "fixture"), source, { recursive: true });
+  const git = (...args: string[]) => {
+    const result = spawnSync("git", ["-C", source, ...args], { encoding: "utf8" });
+    if (result.status !== 0) throw new Error(result.stderr);
+  };
+  git("init", "-q");
+  git("add", "src", "tests");
+  git(
+    "-c",
+    "user.name=Loop Fixture",
+    "-c",
+    "user.email=fixture@localhost",
+    "commit",
+    "-qm",
+    "test: record failing normalization contract",
+  );
+  const committed = readFileSync(join(root, "scripts", "benchmark", "manifest.json"), "utf8");
+  const manifest = join(tempRoot, "manifest.json");
+  writeFileSync(
+    manifest,
+    JSON.stringify({
+      ...JSON.parse(committed),
+      sourceDirectory: source,
+      configDirectory: join(root, "config", "benchmark"),
+    }),
+  );
 
+  const capture = output();
   expect(
     await runCli(["benchmark", "agents", manifest, "--database", databasePath, "--json"], {
       io: capture.io,
