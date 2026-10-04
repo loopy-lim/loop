@@ -97,6 +97,15 @@ pub enum EventKind {
     },
     TaskCreated(Task),
     TaskReady(TaskId),
+    /// Wires a new prerequisite onto a not-yet-running task. The directive
+    /// path (`add_task` failure resolution) is the only emitter: a corrective
+    /// task created after the fact becomes a dependency of the failed task so
+    /// the re-dispatch cannot outrun its repair. The reducer re-validates the
+    /// whole graph (existence, duplication, cycles) on this event.
+    TaskDependencyAdded {
+        task_id: TaskId,
+        depends_on: TaskId,
+    },
     WorkerStarted {
         task_id: TaskId,
         worker_id: String,

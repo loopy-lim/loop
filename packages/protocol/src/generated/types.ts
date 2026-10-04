@@ -367,6 +367,14 @@ export type CheckResultInput = {
  */
 export type WorkerState = 'starting' | 'running' | 'completed' | 'lost' | 'cancelled';
 
+export type CorrectiveTaskInput = {
+  id: string;
+  title: string;
+  writeScope: string[];
+  requirements: string[];
+  completionChecks: CompletionCheckInput[];
+};
+
 export type ComputeCandidateInput = {
   id: string;
   computeClass: ComputeClass;
@@ -760,6 +768,8 @@ export type ResolveAttentionInput = {
   runId: string;
   attentionId: string;
   resolution: string;
+  /** Corrective-task contract, required by — and only valid with — the `add_task` failure directive. */
+  correctiveTask?: CorrectiveTaskInput | null;
 };
 
 export type SelectCandidateInput = {

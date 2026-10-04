@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::attention::{Attention, AttentionState};
+use crate::graph::{GraphError, TaskGraph};
 use crate::policy::{is_check_side_effect_path, next_compute_class, ArtifactKind, FailureClass};
 use crate::run::RunState;
 use crate::task::{Task, TaskId, TaskState, TaskTransitionError};
@@ -282,6 +283,37 @@ impl RunProjection {
                         return Err(ProjectionError::UnsafeReadyTransition(task_id.clone()));
                     }
                 }
+            }
+            EventKind::TaskDependencyAdded {
+                task_id,
+                depends_on,
+            } => {
+                self.require_controllable()?;
+                if !self.tasks.contains_key(depends_on) {
+                    return Err(ProjectionError::TaskNotFound(depends_on.clone()));
+                }
+                let task = self.task_mut(task_id)?;
+                if !matches!(
+                    task.state,
+                    TaskState::Pending
+                        | TaskState::Ready
+                        | TaskState::Attention
+                        | TaskState::Failed
+                ) {
+                    return Err(ProjectionError::DependencyAddState(task_id.clone()));
+                }
+                if task.dependencies.contains(depends_on) {
+                    return Err(ProjectionError::DependencyAlreadyPresent {
+                        task: task_id.clone(),
+                        dependency: depends_on.clone(),
+                    });
+                }
+                task.dependencies.push(depends_on.clone());
+                // The wired graph must stay acyclic and fully resolved. The
+                // fresh-plan validation (missing dependency, cycle) is the
+                // same bar a submitted plan passes, so post-hoc wiring can
+                // never weaken it.
+                TaskGraph::new(self.tasks.values().cloned())?;
             }
             EventKind::WorkerStarted { task_id, worker_id } => {
                 if self.run_state != Some(RunState::Active) || self.has_open_attention() {
@@ -728,4 +760,10 @@ pub enum ProjectionError {
     Transition(#[from] TaskTransitionError),
     #[error(transparent)]
     Attention(#[from] crate::attention::AttentionError),
+    #[error(transparent)]
+    Graph(#[from] GraphError),
+    #[error("dependencies can only be added to pending, ready, attention, or failed work: {0}")]
+    DependencyAddState(TaskId),
+    #[error("task {task} already depends on {dependency}")]
+    DependencyAlreadyPresent { task: TaskId, dependency: TaskId },
 }

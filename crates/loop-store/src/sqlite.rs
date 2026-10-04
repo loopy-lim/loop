@@ -552,6 +552,17 @@ fn apply_indexes(transaction: &Transaction<'_>, event: &Event) -> Result<(), Sto
         EventKind::TaskReady(task_id) => {
             update_task_state(transaction, &event.run_id, task_id.as_str(), "ready")?;
         }
+        EventKind::TaskDependencyAdded {
+            task_id,
+            depends_on,
+        } => {
+            // The reducer rejects duplicates before this insert runs, so the
+            // (run_id, task_id, dependency_id) primary key cannot collide.
+            transaction.execute(
+                "INSERT INTO edges (run_id, task_id, dependency_id) VALUES (?1, ?2, ?3)",
+                params![event.run_id, task_id.as_str(), depends_on.as_str()],
+            )?;
+        }
         EventKind::WorkerStarted { task_id, worker_id } => {
             update_task_state(transaction, &event.run_id, task_id.as_str(), "running")?;
             transaction.execute(

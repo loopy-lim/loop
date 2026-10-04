@@ -53,6 +53,7 @@ impl TraceSummary {
                 | EventKind::CheckReceiptsRecorded { .. }
                 | EventKind::TaskActivityRecorded { .. }
                 | EventKind::TaskReady(_)
+                | EventKind::TaskDependencyAdded { .. }
                 | EventKind::DecisionRecorded { .. }
                 | EventKind::RunCompleted
                 | EventKind::RunPauseRequested

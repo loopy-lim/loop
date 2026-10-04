@@ -3,9 +3,8 @@
 //! shared wire-input → core-`Task` converters used across the bridge.
 
 use super::{
-    append_and_notify, append_and_notify_owned, append_batch_and_notify,
+    OperationOutput, append_and_notify, append_and_notify_owned, append_batch_and_notify,
     append_batch_and_notify_owned, append_owned, bridge_error, notify_run_changed, store,
-    OperationOutput,
 };
 use loop_core::attention::{Attention, AttentionKind};
 use loop_core::event::{Event, EventKind};
@@ -189,9 +188,7 @@ pub struct TaskIdsOutput {
     pub task_ids: Vec<String>,
 }
 
-pub(crate) fn register_task_plan(
-    builder: rustra::PackageBuilder,
-) -> rustra::PackageBuilder {
+pub(crate) fn register_task_plan(builder: rustra::PackageBuilder) -> rustra::PackageBuilder {
     register!(
         builder,
         submit_plan,
@@ -201,9 +198,7 @@ pub(crate) fn register_task_plan(
     )
 }
 
-pub(crate) fn register_task_workers(
-    builder: rustra::PackageBuilder,
-) -> rustra::PackageBuilder {
+pub(crate) fn register_task_workers(builder: rustra::PackageBuilder) -> rustra::PackageBuilder {
     register!(
         builder,
         record_worker_started,
@@ -212,9 +207,7 @@ pub(crate) fn register_task_workers(
     )
 }
 
-pub(crate) fn register_task_stop(
-    builder: rustra::PackageBuilder,
-) -> rustra::PackageBuilder {
+pub(crate) fn register_task_stop(builder: rustra::PackageBuilder) -> rustra::PackageBuilder {
     register!(builder, record_worker_stopped)
 }
 
@@ -666,11 +659,11 @@ pub(crate) fn task_from_input(input: TaskSpecInput) -> Result<Task> {
 #[cfg(test)]
 mod claim_relay_tests {
     use super::*;
-    use crate::commands::guidance::{
-        request_attention, resolve_attention, RequestAttentionInput, ResolveAttentionInput,
-    };
-    use crate::commands::run::{create_run, pause_run, resume_run, CreateRunInput, RunInput};
     use crate::commands::SubmitPlanInput;
+    use crate::commands::guidance::{
+        RequestAttentionInput, ResolveAttentionInput, request_attention, resolve_attention,
+    };
+    use crate::commands::run::{CreateRunInput, RunInput, create_run, pause_run, resume_run};
     use loop_core::policy::ComputeClass;
     use loop_core::task::TaskKind;
 
@@ -748,6 +741,7 @@ mod claim_relay_tests {
             run_id: run_id.into(),
             attention_id: "hold-1".into(),
             resolution: "approved".into(),
+            corrective_task: None,
         })
         .unwrap();
         let resumed = claim(&database_path, run_id, vec![]);

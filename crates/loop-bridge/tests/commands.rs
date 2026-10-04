@@ -1,13 +1,14 @@
+use loop_bridge::RecordCheckReceiptsInput;
 use loop_bridge::{
     CheckResultInput, ClaimRunnableTasksInput, CleanupRunInput, CompareTracesInput,
-    CompletionCheckInput, CreateRunInput, GetTraceInput, RequestAttentionInput,
-    ResolveAttentionInput, RunInput, SubmitPlanInput, TaskContextInput, TaskSpecInput,
-    VerificationInput, WorkerInput, WorkerResultInput, cancel_run, claim_runnable_tasks,
-    cleanup_run, compare_traces, create_run, get_run_plan, get_snapshot, get_task_context,
-    get_trace, loop_package, record_check_receipts, record_verification, record_worker_result, record_worker_started,
-    request_attention, resolve_attention, submit_plan,
+    CompletionCheckInput, CorrectiveTaskInput, CreateRunInput, GetTraceInput,
+    RequestAttentionInput, ResolveAttentionInput, RunInput, SubmitPlanInput, TaskContextInput,
+    TaskSpecInput, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput, cancel_run,
+    claim_runnable_tasks, cleanup_run, compare_traces, create_run, get_run_plan, get_snapshot,
+    get_task_context, get_trace, loop_package, record_check_receipts, record_verification,
+    record_worker_result, record_worker_started, request_attention, resolve_attention, submit_plan,
+    update_task,
 };
-use loop_bridge::RecordCheckReceiptsInput;
 use loop_core::attention::AttentionKind;
 use loop_core::event::{CheckReceipt, SourceReceipt};
 use loop_core::policy::ComputeClass;
@@ -50,10 +51,19 @@ fn successful_check_cannot_complete_after_source_drift_and_scope_observation_is_
     let dir = tempfile::tempdir().unwrap();
     let database_path = dir.path().join("loop.db").display().to_string();
     let run_id = "source-receipt";
-    create_run(CreateRunInput { database_path: database_path.clone(), run_id: run_id.into() }).unwrap();
+    create_run(CreateRunInput {
+        database_path: database_path.clone(),
+        run_id: run_id.into(),
+    })
+    .unwrap();
     let mut task = research("change");
     task.write_scope = vec!["src/**".into()];
-    submit_plan(SubmitPlanInput { database_path: database_path.clone(), run_id: run_id.into(), tasks: vec![task] }).unwrap();
+    submit_plan(SubmitPlanInput {
+        database_path: database_path.clone(),
+        run_id: run_id.into(),
+        tasks: vec![task],
+    })
+    .unwrap();
     claim_and_work(&database_path, run_id, "change", "worker");
     finish_worker(&database_path, run_id, "change", "worker", true);
     record_check_receipts(RecordCheckReceiptsInput {
@@ -61,25 +71,54 @@ fn successful_check_cannot_complete_after_source_drift_and_scope_observation_is_
         run_id: run_id.into(),
         task_id: "change".into(),
         checks: vec![CheckReceipt {
-            id: "tests".into(), command: "true".into(), args: vec![], working_directory: ".".into(),
-            exit_code: 0, stdout: String::new(), stderr: String::new(), timed_out: false, duration_ms: 1,
+            id: "tests".into(),
+            command: "true".into(),
+            args: vec![],
+            working_directory: ".".into(),
+            exit_code: 0,
+            stdout: String::new(),
+            stderr: String::new(),
+            timed_out: false,
+            duration_ms: 1,
             output_artifact: None,
             source: Some(SourceReceipt {
-                before_fingerprint: "before".into(), after_fingerprint: "after".into(),
+                before_fingerprint: "before".into(),
+                after_fingerprint: "after".into(),
                 observed_changed_paths: vec!["src/change.rs".into(), "docs/user.md".into()],
                 observed_outside_write_scope: Vec::new(),
             }),
         }],
         execution_owner: None,
-    }).unwrap();
+    })
+    .unwrap();
     let context = get_task_context(TaskContextInput {
-        database_path: database_path.clone(), run_id: run_id.into(), task_id: "change".into(),
-    }).unwrap();
-    assert_eq!(context.previous_checks[0].source.as_ref().unwrap().observed_outside_write_scope, vec!["docs/user.md"]);
+        database_path: database_path.clone(),
+        run_id: run_id.into(),
+        task_id: "change".into(),
+    })
+    .unwrap();
+    assert_eq!(
+        context.previous_checks[0]
+            .source
+            .as_ref()
+            .unwrap()
+            .observed_outside_write_scope,
+        vec!["docs/user.md"]
+    );
     pass_verification(&database_path, run_id, "change");
-    let snapshot = get_snapshot(RunInput { database_path, run_id: run_id.into() }).unwrap();
+    let snapshot = get_snapshot(RunInput {
+        database_path,
+        run_id: run_id.into(),
+    })
+    .unwrap();
     assert_ne!(snapshot.tasks[0].state, TaskState::Done);
-    assert!(snapshot.tasks[0].last_failure.as_deref().unwrap_or_default().contains("Source changed during completion checks"));
+    assert!(
+        snapshot.tasks[0]
+            .last_failure
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Source changed during completion checks")
+    );
 }
 
 #[test]
@@ -87,10 +126,19 @@ fn check_receipts_do_not_attribute_system_state_paths_to_workers() {
     let dir = tempfile::tempdir().unwrap();
     let database_path = dir.path().join("loop.db").display().to_string();
     let run_id = "system-state-attribution";
-    create_run(CreateRunInput { database_path: database_path.clone(), run_id: run_id.into() }).unwrap();
+    create_run(CreateRunInput {
+        database_path: database_path.clone(),
+        run_id: run_id.into(),
+    })
+    .unwrap();
     let mut task = research("change");
     task.write_scope = vec!["src/**".into()];
-    submit_plan(SubmitPlanInput { database_path: database_path.clone(), run_id: run_id.into(), tasks: vec![task] }).unwrap();
+    submit_plan(SubmitPlanInput {
+        database_path: database_path.clone(),
+        run_id: run_id.into(),
+        tasks: vec![task],
+    })
+    .unwrap();
     claim_and_work(&database_path, run_id, "change", "worker");
     finish_worker(&database_path, run_id, "change", "worker", true);
     record_check_receipts(RecordCheckReceiptsInput {
@@ -98,11 +146,19 @@ fn check_receipts_do_not_attribute_system_state_paths_to_workers() {
         run_id: run_id.into(),
         task_id: "change".into(),
         checks: vec![CheckReceipt {
-            id: "tests".into(), command: "true".into(), args: vec![], working_directory: ".".into(),
-            exit_code: 0, stdout: String::new(), stderr: String::new(), timed_out: false, duration_ms: 1,
+            id: "tests".into(),
+            command: "true".into(),
+            args: vec![],
+            working_directory: ".".into(),
+            exit_code: 0,
+            stdout: String::new(),
+            stderr: String::new(),
+            timed_out: false,
+            duration_ms: 1,
             output_artifact: None,
             source: Some(SourceReceipt {
-                before_fingerprint: "stable".into(), after_fingerprint: "stable".into(),
+                before_fingerprint: "stable".into(),
+                after_fingerprint: "stable".into(),
                 observed_changed_paths: vec![
                     "/Users/loopy/.config/loop/loop.sqlite.artifacts/run-1/change/check.txt".into(),
                     "../outside/notes.md".into(),
@@ -112,18 +168,33 @@ fn check_receipts_do_not_attribute_system_state_paths_to_workers() {
             }),
         }],
         execution_owner: None,
-    }).unwrap();
+    })
+    .unwrap();
     let context = get_task_context(TaskContextInput {
-        database_path: database_path.clone(), run_id: run_id.into(), task_id: "change".into(),
-    }).unwrap();
+        database_path: database_path.clone(),
+        run_id: run_id.into(),
+        task_id: "change".into(),
+    })
+    .unwrap();
     // Absolute paths outside the audited working directory (including Loop's
     // own state under ~/.config/loop) and `..`-escaping relatives are never
     // attributed to the worker; a repository-relative out-of-scope edit still
     // is recorded.
-    assert_eq!(context.previous_checks[0].source.as_ref().unwrap().observed_outside_write_scope, vec!["docs/user.md"]);
+    assert_eq!(
+        context.previous_checks[0]
+            .source
+            .as_ref()
+            .unwrap()
+            .observed_outside_write_scope,
+        vec!["docs/user.md"]
+    );
     // With stable source the receipt no longer poisons verification.
     pass_verification(&database_path, run_id, "change");
-    let snapshot = get_snapshot(RunInput { database_path, run_id: run_id.into() }).unwrap();
+    let snapshot = get_snapshot(RunInput {
+        database_path,
+        run_id: run_id.into(),
+    })
+    .unwrap();
     assert_eq!(snapshot.tasks[0].state, TaskState::Done);
 }
 
@@ -239,6 +310,7 @@ fn approval_attention_pauses_claims_until_it_is_resolved() {
         run_id: "approval-run".into(),
         attention_id: "approval-1".into(),
         resolution: "approved".into(),
+        corrective_task: None,
     })
     .unwrap();
     let resumed = claim_runnable_tasks(ClaimRunnableTasksInput {
@@ -278,6 +350,7 @@ fn approval_attention_rejects_plain_answers_and_rejection_cancels() {
             run_id: "approval-resolution".into(),
             attention_id: "approval".into(),
             resolution: "yes".into(),
+            corrective_task: None,
         })
         .is_err()
     );
@@ -286,6 +359,7 @@ fn approval_attention_rejects_plain_answers_and_rejection_cancels() {
         run_id: "approval-resolution".into(),
         attention_id: "approval".into(),
         resolution: "rejected: unsafe".into(),
+        corrective_task: None,
     })
     .unwrap();
     assert_eq!(
@@ -360,6 +434,7 @@ fn exhausted_worker_failure_creates_retryable_human_attention() {
         run_id: "failure-run".into(),
         attention_id: paused.open_attention_ids[0].clone(),
         resolution: "retry".into(),
+        corrective_task: None,
     })
     .unwrap();
     let resumed = get_snapshot(RunInput {
@@ -445,6 +520,7 @@ fn connection_error_worker_result_takes_the_attention_path_not_terminal_failure(
         run_id: "transport-run".into(),
         attention_id: interrupted.open_attention_ids[0].clone(),
         resolution: "retry".into(),
+        corrective_task: None,
     })
     .unwrap();
     let resumed = get_snapshot(RunInput {
@@ -553,6 +629,7 @@ fn connection_error_verification_failure_takes_the_attention_path_not_terminal_f
         run_id: "transport-verify-run".into(),
         attention_id: interrupted.open_attention_ids[0].clone(),
         resolution: "retry".into(),
+        corrective_task: None,
     })
     .unwrap();
     let resumed = get_snapshot(RunInput {
@@ -603,6 +680,7 @@ fn retry_resolution_is_idempotent_for_ready_tasks() {
         run_id: "retry-ready".into(),
         attention_id: "provider-failure".into(),
         resolution: "retry".into(),
+        corrective_task: None,
     })
     .unwrap();
     let snapshot = get_snapshot(RunInput {
@@ -674,6 +752,7 @@ fn retry_cannot_bypass_reconciliation_for_verifying_work() {
             run_id: "retry-verifying".into(),
             attention_id: "recovery".into(),
             resolution: "retry".into(),
+            corrective_task: None,
         })
         .is_err()
     );
@@ -832,6 +911,7 @@ fn resolving_one_attention_keeps_the_other_request_blocking() {
         run_id: "multi".into(),
         attention_id: "one".into(),
         resolution: "approved".into(),
+        corrective_task: None,
     })
     .unwrap();
     let snapshot = get_snapshot(RunInput {
@@ -1151,6 +1231,7 @@ fn get_trace_counts_retries_failures_and_attention() {
         run_id: "trace-retry".into(),
         attention_id: snapshot.open_attention_ids[0].clone(),
         resolution: "retry".into(),
+        corrective_task: None,
     })
     .unwrap();
     record_worker_started(WorkerInput {
@@ -1234,6 +1315,7 @@ fn compare_traces_ranks_runs_by_deterministic_score() {
         run_id: "bench-retried".into(),
         attention_id: snapshot.open_attention_ids[0].clone(),
         resolution: "retry".into(),
+        corrective_task: None,
     })
     .unwrap();
     record_worker_started(WorkerInput {
@@ -1348,4 +1430,319 @@ fn task_spec_persona_is_accepted_at_plan_boundary_but_not_durable_yet() {
     })
     .unwrap();
     assert_eq!(plan.tasks[0].persona, None);
+}
+
+/// Runs a task to terminal worker failure with one exhausted attempt, leaving
+/// the run paused on a single open failure attention.
+fn exhausted_failure_attention(database_path: &str, run_id: &str, task_id: &str) -> String {
+    create_run(CreateRunInput {
+        database_path: database_path.into(),
+        run_id: run_id.into(),
+    })
+    .unwrap();
+    let mut task = research(task_id);
+    task.max_attempts = 1;
+    submit_plan(SubmitPlanInput {
+        database_path: database_path.into(),
+        run_id: run_id.into(),
+        tasks: vec![task],
+    })
+    .unwrap();
+    claim_runnable_tasks(ClaimRunnableTasksInput {
+        database_path: database_path.into(),
+        run_id: run_id.into(),
+        running_task_ids: vec![],
+        max_workers: 1,
+        max_frontier_workers: 1,
+        execution_owner: None,
+    })
+    .unwrap();
+    record_worker_started(WorkerInput {
+        database_path: database_path.into(),
+        run_id: run_id.into(),
+        task_id: task_id.into(),
+        worker_id: "worker-1".into(),
+        execution_owner: None,
+        state: None,
+    })
+    .unwrap();
+    record_worker_result(WorkerResultInput {
+        database_path: database_path.into(),
+        run_id: run_id.into(),
+        task_id: task_id.into(),
+        worker_id: "worker-1".into(),
+        success: false,
+        summary: "failed after escalation".into(),
+        execution_owner: None,
+        state: None,
+    })
+    .unwrap();
+    let snapshot = get_snapshot(RunInput {
+        database_path: database_path.into(),
+        run_id: run_id.into(),
+    })
+    .unwrap();
+    assert_eq!(snapshot.state, RunState::Attention);
+    assert_eq!(snapshot.open_attention_ids.len(), 1);
+    snapshot.open_attention_ids[0].clone()
+}
+
+fn corrective_contract(id: &str) -> Option<CorrectiveTaskInput> {
+    Some(CorrectiveTaskInput {
+        id: id.into(),
+        title: "Repair the broken check".into(),
+        write_scope: vec!["src/repair/**".into()],
+        requirements: vec!["the failing check passes deterministically".into()],
+        completion_checks: vec![CompletionCheckInput {
+            id: "tests".into(),
+            command: "true".into(),
+            args: vec![],
+            working_directory: None,
+            timeout_ms: 1_000,
+        }],
+    })
+}
+
+#[test]
+fn failure_attention_resolves_only_through_directives_and_free_text_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let database_path = dir.path().join("loop.db").display().to_string();
+    let attention_id = exhausted_failure_attention(&database_path, "directive-pin", "fragile");
+
+    // Pinned contract: a failure attention cannot be resolved with free text.
+    // The resolution vocabulary is the directive set (retry, add_task, defer,
+    // cancel); prose must travel through a question attention instead.
+    assert!(
+        resolve_attention(ResolveAttentionInput {
+            database_path: database_path.clone(),
+            run_id: "directive-pin".into(),
+            attention_id: attention_id.clone(),
+            resolution: "please just rerun it".into(),
+            corrective_task: None,
+        })
+        .is_err()
+    );
+    let held = get_snapshot(RunInput {
+        database_path: database_path.clone(),
+        run_id: "directive-pin".into(),
+    })
+    .unwrap();
+    assert_eq!(held.state, RunState::Attention);
+    assert_eq!(held.open_attention_ids, vec![attention_id.clone()]);
+
+    // The malformed add_task payload is rejected the same way.
+    assert!(
+        resolve_attention(ResolveAttentionInput {
+            database_path: database_path.clone(),
+            run_id: "directive-pin".into(),
+            attention_id,
+            resolution: "add_task".into(),
+            corrective_task: None,
+        })
+        .is_err()
+    );
+
+    // The directive vocabulary itself resolves.
+    resolve_attention(ResolveAttentionInput {
+        database_path: database_path.clone(),
+        run_id: "directive-pin".into(),
+        attention_id: held.open_attention_ids[0].clone(),
+        resolution: "retry".into(),
+        corrective_task: None,
+    })
+    .unwrap();
+    let resumed = get_snapshot(RunInput {
+        database_path,
+        run_id: "directive-pin".into(),
+    })
+    .unwrap();
+    assert_eq!(resumed.state, RunState::Active);
+    assert_eq!(resumed.open_attention_ids.len(), 0);
+}
+
+#[test]
+fn defer_directive_parks_the_failed_task_without_redispatch() {
+    let dir = tempfile::tempdir().unwrap();
+    let database_path = dir.path().join("loop.db").display().to_string();
+    let attention_id = exhausted_failure_attention(&database_path, "defer-run", "fragile");
+
+    resolve_attention(ResolveAttentionInput {
+        database_path: database_path.clone(),
+        run_id: "defer-run".into(),
+        attention_id,
+        resolution: "defer".into(),
+        corrective_task: None,
+    })
+    .unwrap();
+    let parked = get_snapshot(RunInput {
+        database_path: database_path.clone(),
+        run_id: "defer-run".into(),
+    })
+    .unwrap();
+    // The run resumes and the attention closes, but the failed task stays
+    // parked: re-dispatch remains an explicit later decision.
+    assert_eq!(parked.state, RunState::Active);
+    assert_eq!(parked.tasks[0].state, TaskState::Attention);
+    let claimed = claim_runnable_tasks(ClaimRunnableTasksInput {
+        database_path: database_path.clone(),
+        run_id: "defer-run".into(),
+        running_task_ids: vec![],
+        max_workers: 2,
+        max_frontier_workers: 2,
+        execution_owner: None,
+    })
+    .unwrap();
+    assert!(claimed.task_ids.is_empty());
+
+    // The deferred re-dispatch is the deterministic updateTask transition.
+    update_task(UpdateTaskInput {
+        database_path: database_path.clone(),
+        run_id: "defer-run".into(),
+        task_id: "fragile".into(),
+        state: TaskState::Ready,
+    })
+    .unwrap();
+    let claimed = claim_runnable_tasks(ClaimRunnableTasksInput {
+        database_path: database_path.clone(),
+        run_id: "defer-run".into(),
+        running_task_ids: vec![],
+        max_workers: 2,
+        max_frontier_workers: 2,
+        execution_owner: None,
+    })
+    .unwrap();
+    assert_eq!(claimed.task_ids, vec!["fragile"]);
+}
+
+#[test]
+fn add_task_directive_lands_the_corrective_contract_then_redispatches_through_the_graph() {
+    let dir = tempfile::tempdir().unwrap();
+    let database_path = dir.path().join("loop.db").display().to_string();
+    let attention_id = exhausted_failure_attention(&database_path, "repair-run", "fragile");
+
+    resolve_attention(ResolveAttentionInput {
+        database_path: database_path.clone(),
+        run_id: "repair-run".into(),
+        attention_id,
+        resolution: "add_task".into(),
+        corrective_task: corrective_contract("repair"),
+    })
+    .unwrap();
+    let snapshot = get_snapshot(RunInput {
+        database_path: database_path.clone(),
+        run_id: "repair-run".into(),
+    })
+    .unwrap();
+    assert_eq!(snapshot.state, RunState::Active);
+    let fragile = snapshot.tasks.iter().find(|t| t.id == "fragile").unwrap();
+    let repair = snapshot.tasks.iter().find(|t| t.id == "repair").unwrap();
+    // The corrective contract becomes a prerequisite of the failed task.
+    assert_eq!(fragile.dependencies, vec!["repair".to_string()]);
+    assert_eq!(repair.state, TaskState::Pending);
+    assert_eq!(repair.write_scope, vec!["src/repair/**".to_string()]);
+
+    // The corrective is dispatched first; the failed task waits behind it.
+    let claimed = claim_runnable_tasks(ClaimRunnableTasksInput {
+        database_path: database_path.clone(),
+        run_id: "repair-run".into(),
+        running_task_ids: vec![],
+        max_workers: 2,
+        max_frontier_workers: 2,
+        execution_owner: None,
+    })
+    .unwrap();
+    assert_eq!(claimed.task_ids, vec!["repair"]);
+    record_worker_started(WorkerInput {
+        database_path: database_path.clone(),
+        run_id: "repair-run".into(),
+        task_id: "repair".into(),
+        worker_id: "repair-worker".into(),
+        execution_owner: None,
+        state: None,
+    })
+    .unwrap();
+    let held_back = claim_runnable_tasks(ClaimRunnableTasksInput {
+        database_path: database_path.clone(),
+        run_id: "repair-run".into(),
+        running_task_ids: vec!["repair".into()],
+        max_workers: 2,
+        max_frontier_workers: 2,
+        execution_owner: None,
+    })
+    .unwrap();
+    assert!(held_back.task_ids.is_empty());
+
+    finish_worker(
+        &database_path,
+        "repair-run",
+        "repair",
+        "repair-worker",
+        true,
+    );
+    pass_verification(&database_path, "repair-run", "repair");
+    let claimed = claim_runnable_tasks(ClaimRunnableTasksInput {
+        database_path: database_path.clone(),
+        run_id: "repair-run".into(),
+        running_task_ids: vec![],
+        max_workers: 2,
+        max_frontier_workers: 2,
+        execution_owner: None,
+    })
+    .unwrap();
+    // Only after the repair is Done does the failed task re-dispatch.
+    assert_eq!(claimed.task_ids, vec!["fragile"]);
+}
+
+#[test]
+fn add_task_directive_rejects_missing_malformed_or_colliding_corrective_contracts() {
+    let dir = tempfile::tempdir().unwrap();
+    let database_path = dir.path().join("loop.db").display().to_string();
+    let attention_id = exhausted_failure_attention(&database_path, "repair-guard", "fragile");
+
+    // The payload is only valid with the add_task directive.
+    assert!(
+        resolve_attention(ResolveAttentionInput {
+            database_path: database_path.clone(),
+            run_id: "repair-guard".into(),
+            attention_id: attention_id.clone(),
+            resolution: "retry".into(),
+            corrective_task: corrective_contract("repair"),
+        })
+        .is_err()
+    );
+
+    // A corrective contract without checks is not a durable decision record.
+    let mut malformed = corrective_contract("repair").unwrap();
+    malformed.completion_checks = vec![];
+    assert!(
+        resolve_attention(ResolveAttentionInput {
+            database_path: database_path.clone(),
+            run_id: "repair-guard".into(),
+            attention_id: attention_id.clone(),
+            resolution: "add_task".into(),
+            corrective_task: Some(malformed),
+        })
+        .is_err()
+    );
+
+    // The corrective id must be fresh: it becomes a new graph node.
+    assert!(
+        resolve_attention(ResolveAttentionInput {
+            database_path: database_path.clone(),
+            run_id: "repair-guard".into(),
+            attention_id: attention_id.clone(),
+            resolution: "add_task".into(),
+            corrective_task: corrective_contract("fragile"),
+        })
+        .is_err()
+    );
+
+    // Every rejection left the attention open and the graph unchanged.
+    let held = get_snapshot(RunInput {
+        database_path,
+        run_id: "repair-guard".into(),
+    })
+    .unwrap();
+    assert_eq!(held.state, RunState::Attention);
+    assert_eq!(held.tasks.len(), 1);
 }

@@ -6324,6 +6324,17 @@
           },
           "resolution": {
             "type": "string"
+          },
+          "correctiveTask": {
+            "description": "Corrective-task contract, required by — and only valid with — the `add_task` failure directive.",
+            "anyOf": [
+              {
+                "$ref": "#/definitions/CorrectiveTaskInput"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -6339,7 +6350,79 @@
           }
         }
       },
-      "execution": "sync"
+      "execution": "sync",
+      "definitions": {
+        "CorrectiveTaskInput": {
+          "type": "object",
+          "required": [
+            "completionChecks",
+            "id",
+            "requirements",
+            "title",
+            "writeScope"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "writeScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "requirements": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "completionChecks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/CompletionCheckInput"
+              }
+            }
+          }
+        },
+        "CompletionCheckInput": {
+          "type": "object",
+          "required": [
+            "args",
+            "command",
+            "id",
+            "timeoutMs"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "workingDirectory": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
     },
     {
       "name": "resumeRun",

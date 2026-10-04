@@ -227,3 +227,25 @@ fn write_capable_tasks_require_an_explicit_write_scope() {
     .build();
     assert!(result.is_err());
 }
+
+#[test]
+fn redispatch_of_a_ready_task_waits_for_its_corrective_prerequisite() {
+    // The add_task failure directive leaves the failed task Ready with a
+    // freshly created corrective prerequisite. Claimability stays a scheduler
+    // verdict: the corrective is claimed first, and the failed task only
+    // after the corrective is Done.
+    let mut graph = TaskGraph::new([
+        task("impl", TaskKind::Implementation, &["repair"], &["src/**"]),
+        task("repair", TaskKind::Implementation, &[], &["src/**"]),
+    ])
+    .unwrap();
+    graph.task_mut(&TaskId::from("impl")).unwrap().state = TaskState::Ready;
+
+    let scheduler = Scheduler::new(Capacity::new(2, 2));
+    let claimed = scheduler.claim_runnable(&graph, &[]);
+    assert_eq!(claimed, vec![TaskId::from("repair")]);
+
+    graph.task_mut(&TaskId::from("repair")).unwrap().state = TaskState::Done;
+    let claimed = scheduler.claim_runnable(&graph, &[]);
+    assert_eq!(claimed, vec![TaskId::from("impl")]);
+}

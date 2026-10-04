@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-use loop_core::event::{Event, EventKind, RunProjection};
+use loop_core::event::{Event, EventKind, ProjectionError, RunProjection};
+use loop_core::graph::GraphError;
 use loop_core::policy::ComputeClass;
 use loop_core::run::RunState;
 use loop_core::task::{
@@ -24,17 +25,29 @@ fn implementation_task() -> Task {
 fn new_tasks_are_rejected_while_run_is_pausing_or_cancelling() {
     for state in [RunState::Pausing, RunState::Cancelling] {
         let mut projection = RunProjection::default();
-        projection.apply(&Event::new("run-1", EventKind::RunCreated)).unwrap();
+        projection
+            .apply(&Event::new("run-1", EventKind::RunCreated))
+            .unwrap();
         projection.run_state = Some(state);
-        let result = projection.apply(&Event::new("run-1", EventKind::TaskCreated(implementation_task())));
+        let result = projection.apply(&Event::new(
+            "run-1",
+            EventKind::TaskCreated(implementation_task()),
+        ));
         assert!(result.is_err(), "task inserted while {state}");
         assert!(projection.tasks.is_empty());
     }
     for state in [RunState::Active, RunState::Paused, RunState::Attention] {
         let mut projection = RunProjection::default();
-        projection.apply(&Event::new("run-1", EventKind::RunCreated)).unwrap();
+        projection
+            .apply(&Event::new("run-1", EventKind::RunCreated))
+            .unwrap();
         projection.run_state = Some(state);
-        projection.apply(&Event::new("run-1", EventKind::TaskCreated(implementation_task()))).unwrap();
+        projection
+            .apply(&Event::new(
+                "run-1",
+                EventKind::TaskCreated(implementation_task()),
+            ))
+            .unwrap();
         assert_eq!(projection.tasks.len(), 1);
     }
 }
@@ -222,4 +235,224 @@ fn generic_ready_event_cannot_bypass_verification_reconciliation() {
         projection.tasks[&TaskId::from("impl")].state,
         TaskState::Verifying
     );
+}
+
+fn corrective_task() -> Task {
+    Task::builder(
+        TaskId::from("repair"),
+        "corrective repair",
+        TaskKind::Implementation,
+    )
+    .ownership(WorkOwnership::new(std::iter::empty::<&str>(), ["src/**"]))
+    .compute(ComputeClass::Fast, ComputeClass::Tiny, ComputeClass::Strong)
+    .completion_contract(CompletionContract::new([CompletionCheck::new("tests")]))
+    .build()
+    .unwrap()
+}
+
+fn failed_task_projection() -> RunProjection {
+    let mut projection = RunProjection::default();
+    for event in [
+        Event::new("run-1", EventKind::RunCreated),
+        Event::new("run-1", EventKind::TaskCreated(implementation_task())),
+        Event::new("run-1", EventKind::TaskReady(TaskId::from("impl"))),
+        Event::new(
+            "run-1",
+            EventKind::WorkerStarted {
+                task_id: TaskId::from("impl"),
+                worker_id: "worker-1".into(),
+            },
+        ),
+        Event::new(
+            "run-1",
+            EventKind::WorkerFailed {
+                task_id: TaskId::from("impl"),
+                worker_id: "worker-1".into(),
+                reason: "exhausted".into(),
+            },
+        ),
+    ] {
+        projection.apply(&event).unwrap();
+    }
+    projection
+}
+
+#[test]
+fn add_task_directive_wiring_creates_a_corrective_prerequisite_then_redispatches() {
+    let mut projection = failed_task_projection();
+    assert_eq!(
+        projection.tasks[&TaskId::from("impl")].state,
+        TaskState::Failed
+    );
+    // The bridge's add_task directive emits exactly this sequence: the
+    // corrective contract lands as a new task, becomes a prerequisite of the
+    // failed task, then the failed task re-enters dispatch.
+    for event in [
+        Event::new("run-1", EventKind::TaskCreated(corrective_task())),
+        Event::new(
+            "run-1",
+            EventKind::TaskDependencyAdded {
+                task_id: TaskId::from("impl"),
+                depends_on: TaskId::from("repair"),
+            },
+        ),
+        Event::new("run-1", EventKind::TaskReady(TaskId::from("impl"))),
+    ] {
+        projection.apply(&event).unwrap();
+    }
+    assert_eq!(
+        projection.tasks[&TaskId::from("impl")].dependencies,
+        vec![TaskId::from("repair")]
+    );
+    assert_eq!(
+        projection.tasks[&TaskId::from("impl")].state,
+        TaskState::Ready
+    );
+    assert_eq!(
+        projection.tasks[&TaskId::from("repair")].state,
+        TaskState::Pending
+    );
+}
+
+#[test]
+fn add_task_directive_wiring_rejects_missing_duplicate_and_cyclic_dependencies() {
+    // Missing corrective: the dependency must exist.
+    let mut projection = failed_task_projection();
+    let missing = projection.apply(&Event::new(
+        "run-1",
+        EventKind::TaskDependencyAdded {
+            task_id: TaskId::from("impl"),
+            depends_on: TaskId::from("repair"),
+        },
+    ));
+    assert!(
+        matches!(missing, Err(ProjectionError::TaskNotFound(id)) if id == TaskId::from("repair"))
+    );
+
+    // Duplicate wiring: the dependency is already present.
+    let mut projection = failed_task_projection();
+    projection
+        .apply(&Event::new(
+            "run-1",
+            EventKind::TaskCreated(corrective_task()),
+        ))
+        .unwrap();
+    let added = Event::new(
+        "run-1",
+        EventKind::TaskDependencyAdded {
+            task_id: TaskId::from("impl"),
+            depends_on: TaskId::from("repair"),
+        },
+    );
+    projection.apply(&added).unwrap();
+    assert!(matches!(
+        projection.apply(&added),
+        Err(ProjectionError::DependencyAlreadyPresent { .. })
+    ));
+
+    // Cycle: the corrective task must not depend on its own dependent.
+    let mut projection = failed_task_projection();
+    projection
+        .apply(&Event::new(
+            "run-1",
+            EventKind::TaskCreated(corrective_task()),
+        ))
+        .unwrap();
+    projection
+        .apply(&Event::new(
+            "run-1",
+            EventKind::TaskDependencyAdded {
+                task_id: TaskId::from("impl"),
+                depends_on: TaskId::from("repair"),
+            },
+        ))
+        .unwrap();
+    assert!(matches!(
+        projection.apply(&Event::new(
+            "run-1",
+            EventKind::TaskDependencyAdded {
+                task_id: TaskId::from("repair"),
+                depends_on: TaskId::from("impl"),
+            },
+        )),
+        Err(ProjectionError::Graph(GraphError::Cycle { .. }))
+    ));
+}
+
+#[test]
+fn add_task_directive_wiring_is_rejected_for_dispatched_or_terminal_work() {
+    for (task_state, prepare) in [
+        (
+            TaskState::Running,
+            vec![
+                Event::new("run-1", EventKind::TaskReady(TaskId::from("impl"))),
+                Event::new(
+                    "run-1",
+                    EventKind::WorkerStarted {
+                        task_id: TaskId::from("impl"),
+                        worker_id: "worker-1".into(),
+                    },
+                ),
+            ],
+        ),
+        (
+            TaskState::Done,
+            vec![
+                Event::new("run-1", EventKind::TaskReady(TaskId::from("impl"))),
+                Event::new(
+                    "run-1",
+                    EventKind::WorkerStarted {
+                        task_id: TaskId::from("impl"),
+                        worker_id: "worker-1".into(),
+                    },
+                ),
+                Event::new(
+                    "run-1",
+                    EventKind::WorkerFinished {
+                        task_id: TaskId::from("impl"),
+                        worker_id: "worker-1".into(),
+                    },
+                ),
+                Event::new(
+                    "run-1",
+                    EventKind::VerificationPassed {
+                        task_id: TaskId::from("impl"),
+                        evidence: VerificationEvidence::new([("tests", true)]),
+                    },
+                ),
+            ],
+        ),
+    ] {
+        let mut projection = RunProjection::default();
+        projection
+            .apply(&Event::new("run-1", EventKind::RunCreated))
+            .unwrap();
+        projection
+            .apply(&Event::new(
+                "run-1",
+                EventKind::TaskCreated(implementation_task()),
+            ))
+            .unwrap();
+        projection
+            .apply(&Event::new(
+                "run-1",
+                EventKind::TaskCreated(corrective_task()),
+            ))
+            .unwrap();
+        for event in prepare {
+            projection.apply(&event).unwrap();
+        }
+        assert_eq!(projection.tasks[&TaskId::from("impl")].state, task_state);
+        let wired = projection.apply(&Event::new(
+            "run-1",
+            EventKind::TaskDependencyAdded {
+                task_id: TaskId::from("impl"),
+                depends_on: TaskId::from("repair"),
+            },
+        ));
+        assert!(
+            matches!(wired, Err(ProjectionError::DependencyAddState(_))),
+            "{task_state:?} work must not accept new prerequisites"
+        );
+    }
 }
