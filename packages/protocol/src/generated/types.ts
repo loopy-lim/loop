@@ -60,6 +60,11 @@ export type GoalCriterionInput = {
   checkIds: string[];
 };
 
+/**
+ * Flat variant tag of [`ClaimDecision`] — the wire-shaped dispatch verdict. The bridge output carries this tag next to the claimed ids; snake_case values (`claimed`, `paused`, `attention_held`, `empty`) match the core enum vocabulary so orchestrator callers read domain causes, not bit flags.
+ */
+export type ClaimOutcome = 'claimed' | 'paused' | 'attention_held' | 'empty';
+
 export type SkippedArtifactOutput = {
   artifact: string;
   reason: string;
@@ -446,7 +451,11 @@ export type ClaimRunnableTasksInput = {
   executionOwner?: string | null;
 };
 
+/**
+ * Wire mirror of loop-core's `ClaimDecision`: why a `claimRunnableTasks` attempt returned what it returned. `task_ids` is empty unless the outcome is `claimed`; the bridge never decides, it relays the scheduler verdict (claimed / paused / attention-held / empty) so the orchestrator can tell a hold apart from genuinely exhausted work without a snapshot race.
+ */
 export type TaskIdsOutput = {
+  outcome: ClaimOutcome;
   taskIds: string[];
 };
 
@@ -718,6 +727,16 @@ export type WorkerInput = {
   workerId: string;
   executionOwner?: string | null;
   state?: WorkerState | null;
+};
+
+export type RecycleInterruptedInput = {
+  databasePath: string;
+  runId: string;
+  executionOwner: string;
+};
+
+export type RecycleInterruptedOutput = {
+  recycledTaskIds: string[];
 };
 
 export type ReleaseExecutionInput = {

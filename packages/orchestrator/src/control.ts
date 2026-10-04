@@ -12,6 +12,7 @@ export type OrchestrationControl = Pick<
   | "claimExecution"
   | "renewExecution"
   | "releaseExecution"
+  | "recycleInterruptedExecution"
   | "pauseRun"
   | "confirmPaused"
   | "recordWorkerStopped"

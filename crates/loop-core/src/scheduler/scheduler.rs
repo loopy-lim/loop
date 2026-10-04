@@ -1,7 +1,9 @@
 use crate::graph::TaskGraph;
 use crate::policy::ComputeClass;
+use crate::run::RunState;
 use crate::task::{SemanticAccess, Task, TaskId, TaskState};
 
+use super::decision::{ClaimDecision, DispatchGate};
 use super::{write_scopes_overlap, Capacity};
 
 #[derive(Clone, Copy, Debug)]
@@ -12,6 +14,37 @@ pub struct Scheduler {
 impl Scheduler {
     pub const fn new(capacity: Capacity) -> Self {
         Self { capacity }
+    }
+
+    /// Decides one dispatch attempt: run-state and attention gates first, then
+    /// the capacity and conflict rules of [`Self::claim_runnable`]. This is
+    /// the deterministic pause/attention/empty verdict for dispatch — bridge
+    /// commands relay it verbatim and must not re-derive it from projection
+    /// fields.
+    ///
+    /// Gate order: a run that is neither active nor in its attention state is
+    /// `Paused` (lifecycle is the strongest hold, including a paused run with
+    /// a still-open attention); an active run or an attention-state run with
+    /// an open attention is `AttentionHeld`; only an active, attention-free
+    /// run reaches the capacity/conflict scheduler.
+    pub fn claim(
+        &self,
+        graph: &TaskGraph,
+        running: &[TaskId],
+        gate: DispatchGate,
+    ) -> ClaimDecision {
+        match gate.run_state {
+            Some(RunState::Active | RunState::Attention) if gate.has_open_attention => {
+                return ClaimDecision::AttentionHeld;
+            }
+            Some(RunState::Attention) => return ClaimDecision::AttentionHeld,
+            Some(RunState::Active) => {}
+            _ => return ClaimDecision::Paused,
+        }
+        match self.claim_runnable(graph, running) {
+            claimed if claimed.is_empty() => ClaimDecision::Empty,
+            claimed => ClaimDecision::Claimed(claimed),
+        }
     }
 
     pub fn claim_runnable(&self, graph: &TaskGraph, running: &[TaskId]) -> Vec<TaskId> {

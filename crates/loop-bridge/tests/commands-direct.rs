@@ -454,3 +454,68 @@ fn subscribe_events_streams_events_after_a_sequence_cursor() {
     .unwrap();
     assert!(drained.is_empty(), "a caught-up cursor yields no events");
 }
+
+#[test]
+fn pause_run_and_confirm_paused_map_unknown_runs_to_append_failures_and_stay_idempotent() {
+    let dir = tempfile::tempdir().unwrap();
+    let database_path = dir.path().join("pause-errors.db").display().to_string();
+
+    let missing_pause = pause_run(RunInput {
+        database_path: database_path.clone(),
+        run_id: "no-such-run".into(),
+    })
+    .unwrap_err();
+    assert!(missing_pause.to_string().contains("event_append_failed"));
+
+    let missing_confirm = confirm_paused(RunInput {
+        database_path: database_path.clone(),
+        run_id: "no-such-run".into(),
+    })
+    .unwrap_err();
+    assert!(missing_confirm.to_string().contains("event_append_failed"));
+
+    create_run(CreateRunInput {
+        database_path: database_path.clone(),
+        run_id: "pause-idempotent".into(),
+    })
+    .unwrap();
+    pause_run(RunInput {
+        database_path: database_path.clone(),
+        run_id: "pause-idempotent".into(),
+    })
+    .unwrap();
+    // A repeated request collapses to the same terminal pause state.
+    confirm_paused(RunInput {
+        database_path: database_path.clone(),
+        run_id: "pause-idempotent".into(),
+    })
+    .unwrap();
+    confirm_paused(RunInput {
+        database_path: database_path.clone(),
+        run_id: "pause-idempotent".into(),
+    })
+    .unwrap();
+    let paused = get_run(RunInput {
+        database_path,
+        run_id: "pause-idempotent".into(),
+    })
+    .unwrap();
+    assert_eq!(paused.state, RunState::Paused);
+}
+
+#[test]
+fn subscribe_events_maps_unknown_runs_to_events_failed() {
+    let dir = tempfile::tempdir().unwrap();
+    let database_path = dir.path().join("events-errors.db").display().to_string();
+
+    // An unknown run is indistinguishable from a caught-up cursor: the
+    // stream is empty rather than an error.
+    let unknown = subscribe_events(SubscribeEventsInput {
+        database_path,
+        run_id: "no-such-run".into(),
+        after_sequence: 0,
+        limit: 10,
+    })
+    .unwrap();
+    assert!(unknown.is_empty());
+}

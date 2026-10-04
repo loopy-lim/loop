@@ -6,7 +6,7 @@
 // DO NOT EDIT — changes will be overwritten and fail codegen --check.
 // ────────────────────────────────────────────────────────────
 
-import type { AddGoalTaskInput, AddTaskInput, AppendGoalCriteriaInput, Array_of_EventOutput, Array_of_RunListOutput, ClaimRunnableTasksInput, CleanupDispositionOutput, CleanupRunInput, CleanupRunOutput, CompareTracesInput, CompareTracesOutput, ConfigureRunInput, CreateRunInput, DecisionInput, EvaluateCleanupDispositionInput, EvaluateFailurePolicyInput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, ExecutionLeaseInput, FailurePolicyOutput, GetTraceInput, GetTraceOutput, ListRunsInput, OperationOutput, PolicyEvaluationOutput, PrepareGoalRunInput, PrepareRunInput, PrepareRunPreflightInput, PromoteSteerInput, PromoteSteerOutput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, RecordGuidanceDeliveredInput, RecordTaskOutputInput, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RunGraphInput, RunGraphOutput, RunInput, RunPlanOutput, SelectCandidateInput, SelectCandidateOutput, SnapshotOutput, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
+import type { AddGoalTaskInput, AddTaskInput, AppendGoalCriteriaInput, Array_of_EventOutput, Array_of_RunListOutput, ClaimRunnableTasksInput, CleanupDispositionOutput, CleanupRunInput, CleanupRunOutput, CompareTracesInput, CompareTracesOutput, ConfigureRunInput, CreateRunInput, DecisionInput, EvaluateCleanupDispositionInput, EvaluateFailurePolicyInput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, ExecutionLeaseInput, FailurePolicyOutput, GetTraceInput, GetTraceOutput, ListRunsInput, OperationOutput, PolicyEvaluationOutput, PrepareGoalRunInput, PrepareRunInput, PrepareRunPreflightInput, PromoteSteerInput, PromoteSteerOutput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, RecordGuidanceDeliveredInput, RecordTaskOutputInput, RecycleInterruptedInput, RecycleInterruptedOutput, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RunGraphInput, RunGraphOutput, RunInput, RunPlanOutput, SelectCandidateInput, SelectCandidateOutput, SnapshotOutput, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
 import { createGeneratedFields2, invokeGenerated, invokeGeneratedFields1, invokeGeneratedFields3 } from '@rustra/types';
 import type { InvokeOptions } from '@rustra/types';
 
@@ -57,12 +57,12 @@ export const confirmPaused = createGeneratedFields2<RunInput, OperationOutput>(1
 export const createRun = createGeneratedFields2<CreateRunInput, SnapshotOutput>(1, 'createRun', "databasePath", "runId", 'createRun');
 
 export function evaluateCleanupDisposition(input: EvaluateCleanupDispositionInput, options?: InvokeOptions): Promise<CleanupDispositionOutput> {
-  return invokeGeneratedFields1<CleanupDispositionOutput>(46, 'evaluateCleanupDisposition', input, input["refusalCode"], options);
+  return invokeGeneratedFields1<CleanupDispositionOutput>(47, 'evaluateCleanupDisposition', input, input["refusalCode"], options);
 }
 evaluateCleanupDisposition.commandId = 'evaluateCleanupDisposition';
 
 export function evaluateFailurePolicy(input: EvaluateFailurePolicyInput, options?: InvokeOptions): Promise<FailurePolicyOutput> {
-  return invokeGenerated<FailurePolicyOutput>(45, 'evaluateFailurePolicy', input, options);
+  return invokeGenerated<FailurePolicyOutput>(46, 'evaluateFailurePolicy', input, options);
 }
 evaluateFailurePolicy.commandId = 'evaluateFailurePolicy';
 
@@ -92,7 +92,7 @@ getTaskContext.commandId = 'getTaskContext';
 export const getTrace = createGeneratedFields2<GetTraceInput, GetTraceOutput>(24, 'getTrace', "databasePath", "runId", 'getTrace');
 
 export function listRuns(input: ListRunsInput, options?: InvokeOptions): Promise<Array_of_RunListOutput> {
-  return invokeGeneratedFields1<Array_of_RunListOutput>(43, 'listRuns', input, input["databasePath"], options);
+  return invokeGeneratedFields1<Array_of_RunListOutput>(44, 'listRuns', input, input["databasePath"], options);
 }
 listRuns.commandId = 'listRuns';
 
@@ -109,7 +109,7 @@ export function prepareRun(input: PrepareRunInput, options?: InvokeOptions): Pro
 prepareRun.commandId = 'prepareRun';
 
 export function prepareRunPreflight(input: PrepareRunPreflightInput, options?: InvokeOptions): Promise<OperationOutput> {
-  return invokeGenerated<OperationOutput>(47, 'prepareRunPreflight', input, options);
+  return invokeGenerated<OperationOutput>(48, 'prepareRunPreflight', input, options);
 }
 prepareRunPreflight.commandId = 'prepareRunPreflight';
 
@@ -152,7 +152,7 @@ recordDecision.commandId = 'recordDecision';
  * delivery record fails here instead of regressing the projection.
  */
 export function recordGuidanceDelivered(input: RecordGuidanceDeliveredInput, options?: InvokeOptions): Promise<OperationOutput> {
-  return invokeGenerated<OperationOutput>(48, 'recordGuidanceDelivered', input, options);
+  return invokeGenerated<OperationOutput>(49, 'recordGuidanceDelivered', input, options);
 }
 recordGuidanceDelivered.commandId = 'recordGuidanceDelivered';
 
@@ -181,6 +181,19 @@ export function recordWorkerStopped(input: WorkerInput, options?: InvokeOptions)
 }
 recordWorkerStopped.commandId = 'recordWorkerStopped';
 
+/**
+ * Recovery judgment for an interrupted dispatcher (D1/D3): the current
+ * execution lease holder proves its predecessor dead by durable fact — a
+ * lapsed lease can never append again, so leftover running/verifying claims
+ * are abandoned work, not live work. Recycling returns each task to ready
+ * and resolves the stale failure attentions bound to it, so the dispatch
+ * loop proceeds instead of demanding human confirmation.
+ */
+export function recycleInterruptedExecution(input: RecycleInterruptedInput, options?: InvokeOptions): Promise<RecycleInterruptedOutput> {
+  return invokeGeneratedFields3<RecycleInterruptedOutput>(43, 'recycleInterruptedExecution', input, input["databasePath"], input["runId"], input["executionOwner"], options);
+}
+recycleInterruptedExecution.commandId = 'recycleInterruptedExecution';
+
 export function releaseExecution(input: ReleaseExecutionInput, options?: InvokeOptions): Promise<OperationOutput> {
   return invokeGeneratedFields3<OperationOutput>(41, 'releaseExecution', input, input["databasePath"], input["runId"], input["owner"], options);
 }
@@ -204,7 +217,7 @@ resolveAttention.commandId = 'resolveAttention';
 export const resumeRun = createGeneratedFields2<RunInput, OperationOutput>(17, 'resumeRun', "databasePath", "runId", 'resumeRun');
 
 export function selectCandidate(input: SelectCandidateInput, options?: InvokeOptions): Promise<SelectCandidateOutput> {
-  return invokeGenerated<SelectCandidateOutput>(44, 'selectCandidate', input, options);
+  return invokeGenerated<SelectCandidateOutput>(45, 'selectCandidate', input, options);
 }
 selectCandidate.commandId = 'selectCandidate';
 

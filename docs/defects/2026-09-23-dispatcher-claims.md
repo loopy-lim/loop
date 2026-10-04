@@ -1,11 +1,13 @@
 # Defect: 디스패처 워커 클레임·재시도 결함 3건 (좀비 클레임, attempts UNIQUE 충돌, resume 미디스패치)
 
-- **상태**: open (2026-09-23 기록; 2026-10-04 WIP 착지 대비 재판정 — 세 결함 모두 open 유지, 아래 판정 참조)
+- **상태**: resolved (2026-10-04 수정 착지 — 아래 "수정 착지(2026-10-04)" 섹션의 증거 참조.
+  2026-09-23 기록, 2026-10-04 WIP 착지 대비 재판정에서는 세 결함 모두 open 유지였음)
 - **영향**: 워커 프로세스가 비정상 종료되면 (1) 클레임이 영구 좀비화되고, (2) reconcile 후 재시도가
   attempts UNIQUE 제약으로 반드시 실패하며, (3) `loop resume`은 준비된 태스크를 디스패치하지 않는다.
   세 결함은 합쳐져 wedged run의 자가 복구 경로를 전무하게 만든다.
 - **관측 런**: `loop-fc0ffbc6` (2026-09-23, implement-visibility 태스크 wedged → run cancelled)
-- **비고**: 이 문서는 기록 전용이다. 코드 변경 없음. 근거 문자열은 관측값과 소스 위치를 그대로 인용한다.
+- **비고**: 재현·근거 섹션은 관측 당시의 기록이다. 수정과 증거는 문서 말미의
+  "수정 착지(2026-10-04)" 섹션이 담당한다.
 
 ---
 
@@ -191,3 +193,75 @@ recovery 가드가 좀비 클레임을 판정 없이 소비하는 것이 동작 
 
 결론: 이번 착지는 세 결함을 해소하지 않는다. 문서 상태는 open으로 유지하며, 결함 수정은
 별도 과제로 진행한다.
+
+---
+
+## 수정 착지 (2026-10-04)
+
+세 결함을 한 구조로 수습한다: 실행 임대(lease)가 사망 판정의 근거가 되고, 그 판정의
+후속 조치(재활용)가 곧 D3의 resume 진행이 된다. 레이어 배치는 AGENTS.md 경계를 따른다 —
+판정 근거 수집은 store, 판정 후 이벤트 합성은 bridge, 판정 시점은 coordinator가 소유한다.
+
+### 구조 (3개 레이어)
+
+1. **store — 판정 근거의 저장소 조립** (`crates/loop-store/src/sqlite.rs`)
+   `recover_run`(관측자가 OS 프로세스를 대조해야 했던 수동 API)을 삭제하고
+   `interrupted_execution_claims(run_id)`로 대체: 활성 워커(running)와 검증 중(verifying)
+   태스크를 저장소 사실만으로 나열한다. 누가 죽었는지의 판단은 임대와 함께 있다 —
+   임대를 취득한 디스패처는 하트비트(1초 갱신, 5초 TTL)가 끊긴 이전 소유자가
+   다시 append할 수 없음을 지속 팩트로 증명한다.
+2. **bridge — 판정의 후속 조치** (`crates/loop-bridge/src/execution.rs`)
+   신규 커맨드 `recycle_interrupted_execution`: 임대 소유를 검증한 뒤
+   `interrupted_execution_claims`의 각 클레임에 `TaskExecutionReconciled`(태스크 → ready,
+   workers/attempts 행 → cancelled)를 남기고, 해당 태스크에 묶인 열린 failure attention을
+   `AttentionResolved(Retry)`로 해소한다. reconcile을 먼저 적용하는 순서가 필요하다 —
+   running/verifying 태스크는 Retry 해소가 거부되기 때문이다.
+   (생성 프로토콜 동반 갱신: `packages/protocol/src/generated/*`)
+3. **coordinator — 판정 시점** (`packages/orchestrator/src/coordinator.ts`)
+   임대 획득 직후 수동 reconcile을 요구하던 판정 없는 recovery 가드(구 115–127행 부근)를
+   `recycleInterruptedExecution` 호출 한 줄로 대체한다. 재시도 한도 소진(진짜 실패)만이
+   여전히 사람의 attention을 요구한다.
+
+### 결함별 증거
+
+- **D1 — resolved.** 좀비 running 클레임은 다음 임대 소유자가 OS 프로세스 대조 없이 자동 판정·회수한다.
+  - 소스: `crates/loop-store/src/sqlite.rs` `interrupted_execution_claims`,
+    `crates/loop-bridge/src/execution.rs` `recycle_interrupted_execution`,
+    `packages/orchestrator/src/coordinator.ts` (recycle 호출).
+  - 회귀 테스트: `crates/loop-store/tests/recovery.rs`
+    `interrupted_claims_list_running_workers_and_verifying_tasks` (신규 API — 수정 전에는 존재하지 않아 실패),
+    `packages/orchestrator/test/recovery-dispatch.test.ts` "resume recycles a dead dispatcher's running claim"
+    (수정 전 HEAD coordinator에서 실행 시 `expected "completed", received "attention"`으로 실패 확인,
+    수정 후 통과).
+- **D2 — resolved.** reconcile이 시도 번호를 소비하지 않는다는 설계를 유지하면서(중단은 재시도
+  예산이 아니다), 저장소가 동일 (run_id, task_id, attempt) 재삽입을 행 재사용으로 흡수한다.
+  - 소스: `crates/loop-store/src/sqlite.rs` `WorkerStarted` 분기의 attempts 삽입 —
+    `ON CONFLICT(run_id, task_id, attempt) DO UPDATE ... SET state = 'running'`으로 취소된 행을
+    재활성화(행 재사용). 시도 번호 증가는 VerificationFailed 한 경로(리트라이 예산)로 유지된다.
+  - 회귀 테스트: `crates/loop-store/tests/recovery.rs`
+    `reconciled_attempt_row_is_cancelled_then_reused_on_redispatch` — 수정 전(충돌 처리 없는
+    단순 INSERT) 실행 시 결함 문서가 관측한 것과 동일한
+    `UNIQUE constraint failed: attempts.run_id, attempts.task_id, attempts.attempt`으로 실패함을 확인,
+    수정 후 통과. e2e로는 recovery-dispatch.test.ts의 verifying 클레임 재실행이 동일 경로를 검증한다.
+- **D3 — resolved.** resume이 준비된 태스크를 실제로 디스패치한다. 좀비 클레임이 recycle되어
+  ready로 돌아오므로 recovery 가드가 매 resume마다 소진되는 구조가 사라졌다.
+  - 소스: `packages/orchestrator/src/coordinator.ts` (임대 획득 직후 recycle → 디스패치 루프 진행).
+  - 회귀 테스트: `packages/orchestrator/test/recovery-dispatch.test.ts`
+    "resume recycles a dead dispatcher's running/verifying claim and dispatches the ready task"
+    (running/verifying 두 모드 모두 수정 전 "attention" 실패 → 수정 후 "completed", open attention 0),
+    "resume on a clean run is unaffected by recovery" (정상 런 무영향).
+
+### 검증
+
+- `cargo test -p loop-store` 9바이너리 전부 ok (경고 0)
+- `cargo test -p loop-bridge` 전부 ok (32+24+7+2+4)
+- `bun test packages/orchestrator` 188 pass / 0 fail
+- `bun run codegen:check` 통과 · `bun run typecheck` 통과
+
+### 남는 경계 (설계상 의도된 한계)
+
+- 태스크에 묶이지 않은 열린 failure attention(예: 옛 실패가 남긴 `dispatcher-<owner>`)은
+  recycle이 해소하지 않는다 — 진짜 실패 진단은 사람의 판단 대상으로 유지한다. 신규 코드는
+  이 attention을 만들지 않으므로(UNIQUE 충돌 경로 제거) 회귀하지 않는다.
+- 실행 임대 TTL(5초) 대비 하트비트(1초) 지연으로, 이벤트 루프가 5초 넘게 막힌 디스패처는
+  새 소유자에게 판정될 수 있다 — in-run 침묵은 stall watchdog(`0ec7db5`)이 담당한다.

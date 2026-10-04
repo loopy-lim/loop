@@ -730,11 +730,16 @@
       },
       "outputSchema": {
         "title": "TaskIdsOutput",
+        "description": "Wire mirror of loop-core's `ClaimDecision`: why a `claimRunnableTasks` attempt returned what it returned. `task_ids` is empty unless the outcome is `claimed`; the bridge never decides, it relays the scheduler verdict (claimed / paused / attention-held / empty) so the orchestrator can tell a hold apart from genuinely exhausted work without a snapshot race.",
         "type": "object",
         "required": [
+          "outcome",
           "taskIds"
         ],
         "properties": {
+          "outcome": {
+            "$ref": "#/definitions/ClaimOutcome"
+          },
           "taskIds": {
             "type": "array",
             "items": {
@@ -743,7 +748,19 @@
           }
         }
       },
-      "execution": "sync"
+      "execution": "sync",
+      "definitions": {
+        "ClaimOutcome": {
+          "description": "Flat variant tag of [`ClaimDecision`] — the wire-shaped dispatch verdict. The bridge output carries this tag next to the claimed ids; snake_case values (`claimed`, `paused`, `attention_held`, `empty`) match the core enum vocabulary so orchestrator callers read domain causes, not bit flags.",
+          "type": "string",
+          "enum": [
+            "claimed",
+            "paused",
+            "attention_held",
+            "empty"
+          ]
+        }
+      }
     },
     {
       "name": "cleanupRun",
@@ -1443,7 +1460,7 @@
     },
     {
       "name": "evaluateCleanupDisposition",
-      "commandId": 46,
+      "commandId": 47,
       "inputType": "EvaluateCleanupDispositionInput",
       "outputType": "CleanupDispositionOutput",
       "inputSchema": {
@@ -1518,7 +1535,7 @@
     },
     {
       "name": "evaluateFailurePolicy",
-      "commandId": 45,
+      "commandId": 46,
       "inputType": "EvaluateFailurePolicyInput",
       "outputType": "FailurePolicyOutput",
       "inputSchema": {
@@ -3867,7 +3884,7 @@
     },
     {
       "name": "listRuns",
-      "commandId": 43,
+      "commandId": 44,
       "inputType": "ListRunsInput",
       "outputType": "Array_of_RunListOutput",
       "inputSchema": {
@@ -4505,7 +4522,7 @@
     },
     {
       "name": "prepareRunPreflight",
-      "commandId": 47,
+      "commandId": 48,
       "inputType": "PrepareRunPreflightInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -5662,7 +5679,7 @@
     },
     {
       "name": "recordGuidanceDelivered",
-      "commandId": 48,
+      "commandId": 49,
       "inputType": "RecordGuidanceDeliveredInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -6080,6 +6097,49 @@
       }
     },
     {
+      "name": "recycleInterruptedExecution",
+      "commandId": 43,
+      "inputType": "RecycleInterruptedInput",
+      "outputType": "RecycleInterruptedOutput",
+      "inputSchema": {
+        "title": "RecycleInterruptedInput",
+        "type": "object",
+        "required": [
+          "databasePath",
+          "executionOwner",
+          "runId"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "executionOwner": {
+            "type": "string"
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "RecycleInterruptedOutput",
+        "type": "object",
+        "required": [
+          "recycledTaskIds"
+        ],
+        "properties": {
+          "recycledTaskIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "execution": "sync",
+      "description": "Recovery judgment for an interrupted dispatcher (D1/D3): the current\nexecution lease holder proves its predecessor dead by durable fact — a\nlapsed lease can never append again, so leftover running/verifying claims\nare abandoned work, not live work. Recycling returns each task to ready\nand resolves the stale failure attentions bound to it, so the dispatch\nloop proceeds instead of demanding human confirmation."
+    },
+    {
       "name": "releaseExecution",
       "commandId": 41,
       "inputType": "ReleaseExecutionInput",
@@ -6318,7 +6378,7 @@
     },
     {
       "name": "selectCandidate",
-      "commandId": 44,
+      "commandId": 45,
       "inputType": "SelectCandidateInput",
       "outputType": "SelectCandidateOutput",
       "inputSchema": {

@@ -8,6 +8,6 @@ mod sqlite;
 mod trace;
 
 pub use sqlite::{
-    EventRecord, ObservedWorkerState, RecoveredRun, RecoveredWorkerState, SqliteStore, StoreError,
+    EventRecord, InterruptedClaim, InterruptedExecution, SqliteStore, StoreError,
 };
 pub use trace::{RunTraceReport, TaskTrace};

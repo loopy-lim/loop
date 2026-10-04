@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use loop_core::attention::AttentionKind;
@@ -297,40 +297,35 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn recover_run(
+    /// Unfinished execution claims left by previous dispatcher processes.
+    /// The loss judgment itself lives with the lease (a dispatcher that
+    /// acquired the execution lease knows the previous owner can never append
+    /// again); this method only assembles the durable facts: every running
+    /// worker, and every task parked in verification, has no terminal event
+    /// and can never transition again once the lease changed hands.
+    pub fn interrupted_execution_claims(
         &self,
         run_id: &str,
-        observed_workers: &BTreeMap<String, ObservedWorkerState>,
-    ) -> Result<RecoveredRun, StoreError> {
-        let events = self.events(run_id)?;
-        if events.is_empty() {
-            return Err(StoreError::RunNotFound(run_id.to_string()));
+    ) -> Result<InterruptedExecution, StoreError> {
+        let projection = load_projection(&self.connection, run_id)?;
+        let mut claims: Vec<InterruptedClaim> = projection
+            .active_workers
+            .iter()
+            .map(|(worker_id, task_id)| InterruptedClaim {
+                worker_id: Some(worker_id.clone()),
+                task_id: task_id.to_string(),
+            })
+            .collect();
+        for task in projection.tasks.values() {
+            if task.state == TaskState::Verifying {
+                claims.push(InterruptedClaim {
+                    worker_id: None,
+                    task_id: task.id.to_string(),
+                });
+            }
         }
-        let mut projection = RunProjection::default();
-        for event in &events {
-            projection.apply(event)?;
-        }
-        let mut workers = BTreeMap::new();
-        for (worker_id, task_id) in projection.active_workers.clone() {
-            let state = match observed_workers.get(&worker_id) {
-                Some(ObservedWorkerState::Running) => RecoveredWorkerState::Running,
-                Some(ObservedWorkerState::Completed) => RecoveredWorkerState::CompletedNeedsResult,
-                None => {
-                    if let Some(task) = projection.tasks.get_mut(&task_id) {
-                        task.state = TaskState::Attention;
-                    }
-                    projection.run_state = Some(RunState::Attention);
-                    projection.active_workers.remove(&worker_id);
-                    RecoveredWorkerState::Lost
-                }
-            };
-            workers.insert(worker_id, state);
-        }
-        Ok(RecoveredRun {
-            projection,
-            workers,
-            events: events.len(),
-        })
+        claims.sort();
+        Ok(InterruptedExecution { claims })
     }
 
     pub fn artifacts(&self, run_id: &str) -> Result<Vec<Artifact>, StoreError> {
@@ -783,24 +778,18 @@ fn update_run_state(
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ObservedWorkerState {
-    Running,
-    Completed,
+/// One unfinished claim from a previous dispatcher process: a running
+/// worker (with its worker id) or a task abandoned mid-verification.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct InterruptedClaim {
+    pub worker_id: Option<String>,
+    pub task_id: String,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RecoveredWorkerState {
-    Running,
-    CompletedNeedsResult,
-    Lost,
-}
-
-#[derive(Clone, Debug)]
-pub struct RecoveredRun {
-    pub projection: RunProjection,
-    pub workers: BTreeMap<String, RecoveredWorkerState>,
-    pub events: usize,
+/// Durable interruption facts for the lease-based loss judgment.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct InterruptedExecution {
+    pub claims: Vec<InterruptedClaim>,
 }
 
 #[derive(Clone, Debug)]

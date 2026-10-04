@@ -264,35 +264,12 @@ export class Orchestrator {
     };
     heartbeat.unref();
     try {
-      // A fresh process never guesses that old OS work has disappeared.
-      const previous = await this.#control.getSnapshot(input);
-      if (
-        previous.activeWorkers.length > 0 ||
-        previous.tasks.some((task) => task.state === "verifying")
-      ) {
-        for (const task of previous.tasks.filter((task) => task.state === "verifying")) {
-          await this.#control.requestAttention({
-            ...executionInput,
-            attentionId: `recovery-${request.runId}-${task.id}-verification`,
-            kind: "failure",
-            taskId: task.id,
-            summary: `Verification was interrupted. Confirm its process stopped, then run: loop reconcile ${request.runId} ${task.id} stopped; loop resume ${request.runId}.`,
-          });
-        }
-        for (const worker of previous.activeWorkers) {
-          const id = `recovery-${request.runId}-${worker.id}`;
-          if (!previous.openAttentionIds.includes(id))
-            await this.#control.requestAttention({
-              ...executionInput,
-              attentionId: id,
-              kind: "failure",
-              taskId: worker.taskId,
-              summary: `Execution owner restarted. Confirm worker ${worker.id} has stopped, then run: loop reconcile ${request.runId} ${worker.taskId} stopped; loop resume ${request.runId}.`,
-            });
-        }
-        summary.status = "attention";
-        return summary;
-      }
+      // Recovery is judged, not deferred (D1/D3): holding the lease proves
+      // the previous owner can never append again, so its running/verifying
+      // claims are abandoned by durable fact. Recycle them onto the ready
+      // queue — stale recovery attentions resolved — and dispatch on. Only
+      // bounded retry exhaustion (not interruption) may park work on a human.
+      await this.#control.recycleInterruptedExecution({ ...executionInput });
       // Read-only GuidanceAdded tap filling per-worker mailboxes; drains only
       // happen at safe boundaries (mailbox.ts) and never touch run state.
       // The lease owner authorizes the mailbox's GuidanceDelivered appends.
@@ -345,6 +322,17 @@ export class Orchestrator {
           maxWorkers: this.#maxWorkers,
           maxFrontierWorkers: this.#maxFrontierWorkers,
         });
+        // The bridge relays loop-core's dispatch verdict. A hold (paused run,
+        // open attention) re-enters the loop after the bounded poll below:
+        // the state checks at the top settle the run and return the right
+        // summary. Only a genuinely empty claim on an active run may justify
+        // the blocked attention below. The wait is not optional politeness —
+        // without it the loop spins without yielding, which starves the
+        // heartbeat renewal and the workers' own timers.
+        if (claims.outcome === "paused" || claims.outcome === "attention_held") {
+          await Promise.race([delay(50), ...[...active.values()].map((task) => task.done)]);
+          continue;
+        }
         for (const taskId of claims.taskIds) {
           // Controls can arrive while earlier workers are being prepared.
           snapshot = await this.#control.getSnapshot(input);
