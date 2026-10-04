@@ -55,6 +55,7 @@ function loopConfig(workerVisibility: LoopConfig["output"]["workerVisibility"]):
   return {
     configDirectory: "/config",
     databasePath: "/tmp/loop-visibility.sqlite",
+    recovery: { stallTimeoutMs: 900_000 },
     scheduler: { maxWorkers: 2, maxFrontierWorkers: 1 },
     routing: {
       defaultComputeClass: "fast",

@@ -24,6 +24,7 @@ import {
   type ContextLifecyclePolicy,
 } from "./context-lifecycle";
 import { withCodeMapEntry, type CodeMapProvider } from "./code-map";
+import { DEFAULT_STALL_TIMEOUT_MS } from "./config";
 
 export interface TaskExecution {
   done: Promise<void>;
@@ -622,10 +623,9 @@ class StartupUncertain extends Error {}
 class CleanupFailed extends Error {}
 
 /** Silence budget for one worker attempt before the stall watchdog fails it.
- * Generous by design: long silent tool runs (builds, model thinking) are
- * normal worker progress gaps, while genuinely hung workers must still be
- * failed well before a run becomes untrustworthy. */
-export const DEFAULT_STALL_TIMEOUT_MS = 15 * 60_000;
+ * Canonical value lives in config.ts (parsed policy `[recovery].stall_timeout_ms`
+ * falls back to it); re-exported here for the execution-layer call sites. */
+export { DEFAULT_STALL_TIMEOUT_MS };
 
 /** Thrown by the stall watchdog when an attempt produced no progress signal
  * for the whole silence budget. The catch path records it as a failed worker

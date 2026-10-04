@@ -1,17 +1,20 @@
-import { expect, test } from "bun:test";
+import { expect, test, beforeAll } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { TaskContextOutput } from "@loop/protocol";
+import type { TaskContextOutput, TaskSpecInput } from "@loop/protocol";
+import * as protocol from "@loop/protocol";
 import {
   FakeProvider,
+  ProviderRegistry,
   type ProviderEvent,
   type StartWorkerInput,
   type WorkerResult,
 } from "@loop/providers";
 
 import { CompletionVerifier } from "../src/completion";
+import { Orchestrator } from "../src/coordinator";
 import { executeTask } from "../src/task-execution";
 
 const verifier = new CompletionVerifier({
@@ -174,4 +177,55 @@ test("check runs emit persisted progress around verification", async () => {
   const { activities } = await dispatch(new FakeProvider("fake", ["fast"], { delayMs: 5 }));
   expect(activities).toContain("Running 1 completion check");
   expect(activities).toContain("Completion checks finished: 1/1 passed");
+});
+
+beforeAll(() => protocol.rustra.ready());
+
+function stallTaskSpec(_directory: string): TaskSpecInput {
+  return {
+    id: "t1",
+    title: "t1",
+    kind: "implementation",
+    dependencies: [],
+    readScope: ["src/**"],
+    writeScope: ["src/**"],
+    requirements: ["completion contract line"],
+    completionChecks: [
+      { id: "check", command: "true", args: [], workingDirectory: null, timeoutMs: 1000 },
+    ],
+    preferredCompute: "fast",
+    minimumCompute: "fast",
+    maximumCompute: "fast",
+    maxAttempts: 1,
+  };
+}
+
+test("the orchestrator threads the configured stall timeout into the watchdog", async () => {
+  const provider = new HangingProvider(0);
+  const directory = mkdtempSync(join(tmpdir(), "loop-stall-config-"));
+  const input = { databasePath: join(directory, "run.db"), runId: "stall-config" };
+  const orchestrator = new Orchestrator({
+    control: protocol,
+    providers: new ProviderRegistry([provider]),
+    maxWorkers: 1,
+    completionVerifier: verifier,
+    // 1.5s configured budget: if the orchestrator dropped the option and the
+    // watchdog fell back to the 15-minute default, this run could not finish.
+    stallTimeoutMs: 1_500,
+  });
+  const startedAt = Date.now();
+  const result = await orchestrator.run({
+    ...input,
+    tasks: [stallTaskSpec(directory)],
+    workingDirectory: directory,
+  });
+  const elapsedMs = Date.now() - startedAt;
+
+  // The single attempt was failed by the watchdog well inside the run.
+  expect(elapsedMs).toBeLessThan(30_000);
+  expect(provider.cancelled).toBe(1);
+  expect(result.providersByTask.t1).toEqual(["hanging"]);
+  expect(["failed", "attention"]).toContain(result.status);
+  const snapshot = await protocol.getSnapshot(input);
+  expect(snapshot.tasks.every((task) => task.state !== "done")).toBe(true);
 });

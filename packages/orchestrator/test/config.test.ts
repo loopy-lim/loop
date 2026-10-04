@@ -43,6 +43,9 @@ test("loads the repository configuration into typed runtime data", () => {
     provider: "openai-codex",
     model: "gpt-6.1-sol",
   });
+  // Repository policy.toml defines no [recovery] section: the stall watchdog
+  // silence budget stays at the compile-time default.
+  expect(config.recovery.stallTimeoutMs).toBe(900_000);
   expect(config.providers.codex?.command).toBe("codex");
 
   const registry = new ModelRegistry(config.models);
@@ -400,6 +403,42 @@ function configurationDirectory(policyText: string): string {
   writeFileSync(join(directory, "providers.toml"), providers("valid"));
   return directory;
 }
+
+test("recovery.stall_timeout_ms falls back to the default when the section is unset", () => {
+  const config = loadLoopConfig({
+    configDirectory: configurationDirectory(policy(2, 2)),
+    databasePath: "/tmp/loop-config-test.sqlite",
+  });
+  expect(config.recovery.stallTimeoutMs).toBe(900_000);
+});
+
+test("recovery.stall_timeout_ms parses an explicit stall watchdog budget", () => {
+  const policyText = `${policy(2, 2)}\n[recovery]\nstall_timeout_ms = 45000\n`;
+  const config = loadLoopConfig({
+    configDirectory: configurationDirectory(policyText),
+    databasePath: "/tmp/loop-config-test.sqlite",
+  });
+  expect(config.recovery.stallTimeoutMs).toBe(45_000);
+});
+
+test("invalid recovery.stall_timeout_ms values fail closed with the config path", () => {
+  for (const invalid of ["0", "-5", "1.5", "true"]) {
+    const policyText = `${policy(2, 2)}\n[recovery]\nstall_timeout_ms = ${invalid}\n`;
+    let threw = false;
+    try {
+      loadLoopConfig({
+        configDirectory: configurationDirectory(policyText),
+        databasePath: "/tmp/loop-config-test.sqlite",
+      });
+    } catch (error) {
+      threw = true;
+      if (!(error instanceof ConfigError)) throw error;
+      expect(error.code).toBe("config.invalid");
+      expect(error.message).toContain("recovery.stall_timeout_ms");
+    }
+    if (!threw) throw new Error(`expected ConfigError for stall_timeout_ms = ${invalid}`);
+  }
+});
 
 function providers(scenario: string): string {
   const lead = `[lead]\ncommand = "pi"\nprovider = "zai"\nmodel = "glm-5.3-flashx"\n`;

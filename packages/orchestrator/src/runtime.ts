@@ -46,6 +46,12 @@ export interface LoopRuntimeOptions {
   usageLedger?: UsageLedger;
   /** Dispatch-scaling provider-selection bias; omitted = "cheapest" (configured default). */
   computeSelection?: import("./compute-selection").ComputeSelection;
+  /**
+   * Stall watchdog silence budget handed to every task execution (configured
+   * `recovery.stall_timeout_ms`); omitted = the task-execution compile-time
+   * default (DEFAULT_STALL_TIMEOUT_MS).
+   */
+  stallTimeoutMs?: number;
 }
 
 export interface StartRunInput {
@@ -81,6 +87,7 @@ export class LoopRuntime {
       codeMapInjection: options.codeMapInjection,
       usageLedger: options.usageLedger,
       computeSelection: options.computeSelection,
+      stallTimeoutMs: options.stallTimeoutMs,
     });
   }
 

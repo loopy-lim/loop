@@ -95,6 +95,14 @@ export interface LoopConfig {
    * resolves to DEFAULT_CONTEXT_LIFECYCLE_POLICY via resolveContextPolicy.
    */
   context?: ContextLifecyclePolicy;
+  /**
+   * policy.toml `[recovery]`: thresholds that turn a wedged attempt into a
+   * retry-class failure. `stallTimeoutMs` is the stall watchdog silence
+   * budget; absent key resolves to DEFAULT_STALL_TIMEOUT_MS.
+   */
+  recovery: {
+    stallTimeoutMs: number;
+  };
   lead: {
     command: string;
     provider: string;
@@ -224,6 +232,7 @@ export function loadLoopConfig(options: LoadLoopConfigOptions = {}): LoopConfig 
       codeMapInjection: codeMapInjection(output.code_map_injection),
     },
     context: resolveContextPolicy(policyDocument.context),
+    recovery: resolveRecoveryPolicy(policyDocument.recovery),
     lead: {
       command: text(lead.command, "lead.command"),
       provider: text(lead.provider, "lead.provider"),
@@ -537,6 +546,31 @@ export function resolveContextPolicy(section: unknown): ContextLifecyclePolicy {
       value.summary_byte_cap === undefined
         ? DEFAULT_CONTEXT_LIFECYCLE_POLICY.summaryByteCap
         : positiveInteger(value.summary_byte_cap, "context.summary_byte_cap"),
+  };
+}
+
+/**
+ * Silence budget for one worker attempt before the stall watchdog fails it
+ * (canonical default; task-execution re-exports the symbol). Generous by
+ * design: long silent tool runs (builds, model thinking) are normal worker
+ * progress gaps, while genuinely hung workers must still be failed well
+ * before a run becomes untrustworthy.
+ */
+export const DEFAULT_STALL_TIMEOUT_MS = 15 * 60_000;
+
+/**
+ * policy.toml `[recovery]`. The whole section is optional; `stall_timeout_ms`
+ * falls back to the compile-time default when unset. Invalid values fail
+ * closed: a malformed silence budget must never silently become "unlimited".
+ */
+export function resolveRecoveryPolicy(section: unknown): { stallTimeoutMs: number } {
+  if (section === undefined || section === null) return { stallTimeoutMs: DEFAULT_STALL_TIMEOUT_MS };
+  const value = record(section, "recovery");
+  return {
+    stallTimeoutMs:
+      value.stall_timeout_ms === undefined
+        ? DEFAULT_STALL_TIMEOUT_MS
+        : positiveInteger(value.stall_timeout_ms, "recovery.stall_timeout_ms"),
   };
 }
 
