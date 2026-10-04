@@ -1,6 +1,6 @@
 # Defect: 디스패처 워커 클레임·재시도 결함 3건 (좀비 클레임, attempts UNIQUE 충돌, resume 미디스패치)
 
-- **상태**: open (2026-09-23 기록)
+- **상태**: open (2026-09-23 기록; 2026-10-04 WIP 착지 대비 재판정 — 세 결함 모두 open 유지, 아래 판정 참조)
 - **영향**: 워커 프로세스가 비정상 종료되면 (1) 클레임이 영구 좀비화되고, (2) reconcile 후 재시도가
   attempts UNIQUE 제약으로 반드시 실패하며, (3) `loop resume`은 준비된 태스크를 디스패치하지 않는다.
   세 결함은 합쳐져 wedged run의 자가 복구 경로를 전무하게 만든다.
@@ -159,3 +159,35 @@ recovery 가드가 좀비 클레임을 판정 없이 소비하는 것이 동작 
 ```
 
 세 결함 모두 2026-09-23 런 `loop-fc0ffbc6`에서 관측되었으며, 이 문서 기준 코드 변경은 없다.
+
+---
+
+## 착지 판정 (2026-10-04, WIP 커밋 대비)
+
+2026-10-04에 미커밋 WIP 32파일을 논리 커밋으로 착지했다. 각 결함 관련 커밋:
+
+- `0f455ee` feat(orchestrator): stall 감시 예산을 `recovery.stall_timeout_ms` 설정으로 구성 가능
+- `aaedc4b` feat(loop-store): 이벤트 밀리초 타임스탬프 기록 (`last_progress_ms` 정밀도 개선)
+- `8d13598`/`0acca7f`/`99656c5`/`fd5a2e3`/`df926eb`/`79ebe1d` — promote-steer CLI, 테스트 타임아웃,
+  병렬 런 허용, attention 렌더링 모듈, run-sound 확장, pi-loop tsconfig
+
+판정:
+
+- **D1 — open 유지.** `0f455ee`는 기존 stall 감시의 침묵 예산을 `policy.toml [recovery]`로
+  설정 가능하게 한 것으로, 좀비 클레임의 감지·판정 주체를 새로 만들지 않는다. 기본값도 기존
+  15분 그대로다. 워커 사망이 이벤트를 낳지 않는 구조(`crates/loop-store/src/sqlite.rs`
+  `WorkerStarted` 분기)와 recovery 가드의 판정 없는 반환
+  (`packages/orchestrator/src/coordinator.ts` 115–127행 부근)은 착지 커밋 어디에도 변경이 없다.
+  감시 예산의 설정화는 좀비가 `running`으로 머무는 상한(침묵 예산)을 운영자가 조일 수 있게 하는
+  완화책일 뿐이다.
+- **D2 — open 유지.** attempts UNIQUE 경로의 어느 지점도 변경되지 않았다:
+  `crates/loop-core/src/event/reducer.rs`의 `TaskExecutionReconciled`(attempt 미증가),
+  `crates/loop-store/src/sqlite.rs`의 attempts 삽입, coordinator catch 블록 모두 이번 WIP
+  범위 밖이다. `aaedc4b`는 events 타임스탬프만 다룬다.
+- **D3 — open 유지.** `packages/cli/src/dispatcher.ts` `spawnOwner`와 resume 경로
+  (`packages/cli/src/main.ts` — 이번 착지는 promote-steer 분기만 추가),
+  coordinator recovery 가드 모두 변경 없음. `99656c5`(병렬 런 허용)는 loop_run의
+  디렉터리 단일 활성 런 가드를 제거했을 뿐 resume의 무디스패치와 무관하다.
+
+결론: 이번 착지는 세 결함을 해소하지 않는다. 문서 상태는 open으로 유지하며, 결함 수정은
+별도 과제로 진행한다.
