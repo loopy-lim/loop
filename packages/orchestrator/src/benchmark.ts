@@ -17,7 +17,9 @@ import type { OrchestrationControl } from "./control";
 /**
  * Workflow profile names, matching loop-core's `WorkflowProfile` kebab-case
  * serialization. The profile-to-DAG mapping lives here, in the orchestrator
- * fixture layer, so loop-core never sees prompt text or task shapes.
+ * fixture layer, so loop-core never sees prompt text or task shapes. Mirror-
+ * pinned to the Rust enum by test/lockstep.test.ts (serde kebab-case and the
+ * core `as_str` mapping must both agree with this union).
  */
 export type WorkflowProfileName = "plan-first" | "spike-first" | "tdd-first";
 

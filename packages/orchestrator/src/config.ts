@@ -126,8 +126,10 @@ export type WorkerVisibility = "off" | "watch" | "panes";
  * Stored history cap for per-task worker activity — the Rust core keeps at
  * most this many lines per task (loop-core ACTIVITY_HISTORY_LIMIT). The
  * presentation budget is clamped to it because showing more is impossible.
+ * Exported for the mirror lockstep test (test/lockstep.test.ts), which pins
+ * this constant to the loop-core reducer's value.
  */
-const ACTIVITY_HISTORY_LIMIT = 8;
+export const ACTIVITY_HISTORY_LIMIT = 8;
 
 export class ConfigError extends Error {
   constructor(
