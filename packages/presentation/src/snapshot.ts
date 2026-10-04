@@ -1,6 +1,7 @@
 import type { RunListOutput, SnapshotOutput, TaskContextOutput } from "@loop/protocol";
 
 import { compactLines, compactItems, singleLine, type OutputLimits } from "./compact";
+import { renderAttention } from "./attention";
 import { emptyState, moreItems, separator } from "./tokens";
 import { workingLine, formatElapsed } from "./working";
 
@@ -131,44 +132,6 @@ function renderWorkers(snapshot: SnapshotOutput, limits: OutputLimits): string {
       overflow: (omitted) => moreItems(omitted, "workers"),
     },
   ).join("\n");
-}
-
-function renderAttention(
-  snapshot: SnapshotOutput,
-  limits: OutputLimits,
-  options: SnapshotRenderOptions = {},
-): string {
-  const openIds = snapshot.openAttentionIds;
-  if (openIds.length === 0) return emptyState.attentionOk;
-  const attentionById = new Map(snapshot.attention.map((item) => [item.id, item]));
-  const nowMs = options.nowMs ?? Date.now();
-  const items = openIds.map((id) => {
-    const item = attentionById.get(id);
-    if (!item) return id;
-    const waitedAge = ageMs(item.openedAtMs, nowMs);
-    return [`${item.kind} ${item.id}`, waitedAge === undefined ? null : `waited ${formatElapsed(waitedAge)}`, item.taskId, item.summary]
-      .filter(Boolean)
-      .join(` ${separator.list} `);
-  });
-  const next = `Next: /loop resolve ${snapshot.runId} ${openIds[0]} <resolution>`;
-  if (limits.attentionLineLimit <= 1) {
-    return compactLines([next], {
-      lineLimit: 1,
-      lineTextLimit: limits.lineTextLimit,
-      overflow: () => "",
-    }).join("\n");
-  }
-  const availableItems = Math.max(0, limits.attentionLineLimit - 2);
-  const compacted = compactLines(items, {
-    lineLimit: availableItems,
-    lineTextLimit: limits.lineTextLimit,
-    overflow: (omitted) => moreItems(omitted, "attention items"),
-  });
-  return compactLines([`Attention: ${openIds.length} open`, ...compacted, next], {
-    lineLimit: limits.attentionLineLimit,
-    lineTextLimit: limits.lineTextLimit,
-    overflow: (omitted) => moreItems(omitted, "attention lines"),
-  }).join("\n");
 }
 
 function renderStatus(
