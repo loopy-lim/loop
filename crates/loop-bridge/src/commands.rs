@@ -267,6 +267,8 @@ pub struct TaskSnapshotOutput {
     pub blocked_by: Vec<String>,
     pub last_failure: Option<String>,
     pub activities: Vec<String>,
+    /// Epoch milliseconds of the latest durable worker start or task activity.
+    /// Includes sub-second precision for newly recorded events.
     pub last_progress_ms: Option<i64>,
     pub result_summary: Option<String>,
 }

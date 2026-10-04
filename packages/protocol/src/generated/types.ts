@@ -131,6 +131,7 @@ export type TaskSnapshotOutput = {
   blockedBy: string[];
   lastFailure?: string | null;
   activities: string[];
+  /** Epoch milliseconds of the latest durable worker start or task activity. Includes sub-second precision for newly recorded events. */
   lastProgressMs?: number | bigint | null;
   resultSummary?: string | null;
 };

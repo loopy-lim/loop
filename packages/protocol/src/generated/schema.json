@@ -1294,6 +1294,7 @@
               }
             },
             "lastProgressMs": {
+              "description": "Epoch milliseconds of the latest durable worker start or task activity. Includes sub-second precision for newly recorded events.",
               "type": [
                 "integer",
                 "null"
@@ -2073,6 +2074,7 @@
               }
             },
             "lastProgressMs": {
+              "description": "Epoch milliseconds of the latest durable worker start or task activity. Includes sub-second precision for newly recorded events.",
               "type": [
                 "integer",
                 "null"
@@ -2854,6 +2856,7 @@
               }
             },
             "lastProgressMs": {
+              "description": "Epoch milliseconds of the latest durable worker start or task activity. Includes sub-second precision for newly recorded events.",
               "type": [
                 "integer",
                 "null"

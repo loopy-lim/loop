@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS events (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
     payload_json TEXT NOT NULL,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    created_at_ms INTEGER
 );
 CREATE INDEX IF NOT EXISTS events_run_seq ON events(run_id, seq);
 

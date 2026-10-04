@@ -18,6 +18,14 @@ pub enum MigrationError {
 
 pub fn migrate(connection: &Connection) -> Result<(), MigrationError> {
     connection.execute_batch(SCHEMA)?;
+    let has_event_millis: i64 = connection.query_row(
+        "SELECT count(*) FROM pragma_table_info('events') WHERE name = 'created_at_ms'",
+        [],
+        |row| row.get(0),
+    )?;
+    if has_event_millis == 0 {
+        connection.execute_batch("ALTER TABLE events ADD COLUMN created_at_ms INTEGER")?;
+    }
     // These tables have no incoming foreign keys. Preserve their rows while
     // moving legacy global identifiers into the same run scope as tasks.
     for table in ["workers", "attention", "decisions", "artifacts"] {

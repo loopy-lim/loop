@@ -137,8 +137,8 @@ impl SqliteStore {
             apply_indexes(&transaction, event)?;
             let payload = serde_json::to_string(event)?;
             transaction.execute(
-                "INSERT INTO events (run_id, payload_json) VALUES (?1, ?2)",
-                params![event.run_id, payload],
+                "INSERT INTO events (run_id, payload_json, created_at_ms) VALUES (?1, ?2, ?3)",
+                params![event.run_id, payload, database_now_ms(&transaction)?],
             )?;
             sequence = transaction.last_insert_rowid();
         }
@@ -194,7 +194,7 @@ impl SqliteStore {
     /// Timestamp of the latest durable worker start or task activity, in milliseconds.
     pub fn last_progress_ms(&self, run_id: &str, task_id: &str) -> Result<Option<i64>, StoreError> {
         Ok(self.connection.query_row(
-            "SELECT max(created_at) * 1000 FROM events WHERE run_id = ?1 AND ((json_extract(payload_json, '$.kind.type') = 'worker_started' OR json_extract(payload_json, '$.kind.type') = 'task_activity_recorded') AND json_extract(payload_json, '$.kind.data.task_id') = ?2)",
+            "SELECT max(coalesce(created_at_ms, created_at * 1000)) FROM events WHERE run_id = ?1 AND ((json_extract(payload_json, '$.kind.type') = 'worker_started' OR json_extract(payload_json, '$.kind.type') = 'task_activity_recorded') AND json_extract(payload_json, '$.kind.data.task_id') = ?2)",
             params![run_id, task_id], |row| row.get(0),
         )?)
     }
@@ -429,7 +429,7 @@ impl SqliteStore {
 
 fn database_now_ms(connection: &Connection) -> Result<i64, StoreError> {
     Ok(connection.query_row(
-        "SELECT CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)",
+        "SELECT unixepoch() * 1000 + CAST(substr(strftime('%f', 'now'), 4, 3) AS INTEGER)",
         [],
         |row| row.get(0),
     )?)
