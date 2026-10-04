@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 
 import {
   HerdrLifecycleReporter,
+  HerdrNotificationReporter,
   registerHerdrLifecycle,
   type HerdrLifecycleState,
 } from "../src/herdr-lifecycle";
@@ -124,5 +125,76 @@ describe("HerdrLifecycleReporter", () => {
     await handlers.get("session_shutdown")?.();
 
     expect(states).toEqual(["idle", "working", "idle", "release"]);
+  });
+});
+
+describe("HerdrNotificationReporter", () => {
+  test("builds argv-only notification show commands with body and sound", async () => {
+    const calls: string[][] = [];
+    const notifier = new HerdrNotificationReporter({
+      environment: insideHerdr(),
+      runner: async (args) => {
+        calls.push(args);
+      },
+    });
+    expect(notifier.active).toBe(true);
+    await notifier.notify({
+      title: "Loop run completed",
+      body: "run-1 · intent",
+      sound: "done",
+    });
+    await notifier.notify({ title: "Loop attention x", body: "needs decision", sound: "request" });
+    expect(calls).toEqual([
+      ["/usr/local/bin/herdr", "notification", "show", "Loop run completed", "--body", "run-1 · intent", "--sound", "done"],
+      ["/usr/local/bin/herdr", "notification", "show", "Loop attention x", "--body", "needs decision", "--sound", "request"],
+    ]);
+  });
+
+  test("omits sound flag when sound is none and makes no calls outside Herdr", async () => {
+    const calls: string[][] = [];
+    const outside = new HerdrNotificationReporter({
+      environment: {},
+      runner: async (args) => {
+        calls.push(args);
+      },
+    });
+    expect(outside.active).toBe(false);
+    await outside.notify({ title: "ignored", sound: "none" });
+    expect(calls).toEqual([]);
+
+    const inside = new HerdrNotificationReporter({
+      environment: insideHerdr(),
+      runner: async (args) => {
+        calls.push(args);
+      },
+    });
+    await inside.notify({ title: "Loop run cancelled", sound: "none" });
+    expect(calls).toEqual([[
+      "/usr/local/bin/herdr",
+      "notification",
+      "show",
+      "Loop run cancelled",
+    ]]);
+  });
+
+  test("a stalled notification cannot block the run observer", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "loop-herdr-notify-"));
+    const command = join(directory, "herdr-fixture");
+    const lateReply = join(directory, "late-reply");
+    writeFileSync(
+      command,
+      `#!/usr/bin/env bun\nsetTimeout(() => { require('node:fs').writeFileSync(${JSON.stringify(lateReply)}, 'late'); }, 400);\n`,
+    );
+    chmodSync(command, 0o755);
+    try {
+      const notifier = new HerdrNotificationReporter({
+        environment: insideHerdr({ HERDR_BIN_PATH: command }),
+        timeoutMs: 60,
+      });
+      await notifier.notify({ title: "Loop run completed", sound: "done" });
+      expect(existsSync(lateReply)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

@@ -50,22 +50,33 @@ export interface LeadSettings {
   limits: OutputLimits;
   vocabulary: PersonaVocabulary;
   herdrVisible?: boolean;
+  /**
+   * Main-orchestration milestone surfacing through herdr (desktop toast +
+   * done/request sound). On by default inside a Herdr pane; set
+   * LOOP_HERDR_NOTIFY=0 (or off/false) to mute. Worker pane transitions are
+   * unaffected — they stay under herdr's own [ui.sound.agents] policy.
+   */
+  herdrNotify?: boolean;
   defaultComputeClass?: ComputeClass;
 }
 
 function loadLeadSettings(): LeadSettings {
   const config = loadLoopConfig();
+  const notifyFlag = process.env.LOOP_HERDR_NOTIFY?.toLowerCase();
   return {
     limits: config.output,
     vocabulary: derivePersonaVocabulary(config.personas, config.personaKindDefaults),
     herdrVisible: process.env.HERDR_ENV === "1",
+    herdrNotify: !(notifyFlag === "0" || notifyFlag === "off" || notifyFlag === "false"),
     defaultComputeClass: config.routing.defaultComputeClass,
   };
 }
 import {
   HerdrLifecycleReporter,
+  HerdrNotificationReporter,
   registerHerdrLifecycle,
   type HerdrLifecycleSink,
+  type HerdrNotification,
   type PiLifecycleEvent,
 } from "./herdr-lifecycle";
 import { renderModels } from "./ui/models";
@@ -253,8 +264,26 @@ export function registerLoopExtension(
   backend: LoopLeadBackend = new DefaultLoopLeadBackend(),
   lifecycle: HerdrLifecycleSink = new HerdrLifecycleReporter(),
   settings: LeadSettings = loadLeadSettings(),
+  notifier: HerdrNotificationReporter = new HerdrNotificationReporter(),
 ): void {
   const { limits, vocabulary } = settings;
+
+  /** Main-orchestration milestone surfacing (desktop toast + done/request
+   * sound) through herdr. Disabled by LOOP_HERDR_NOTIFY or when not inside
+   * a herdr pane; failures never reach the run observer. */
+  const milestones: {
+    notify(notification: HerdrNotification): Promise<void>;
+  } = notifier.active && settings.herdrNotify !== false ? notifier : { notify: async () => {} };
+
+  const notifyRunMilestone = (snapshot: SnapshotOutput): void => {
+    const sound =
+      snapshot.state === "completed" ? "done" : snapshot.state === "failed" ? "request" : "none";
+    void milestones.notify({
+      title: `Loop run ${snapshot.state}`,
+      body: singleLine(`${snapshot.runId} · ${snapshot.intent}`, limits.lineTextLimit),
+      sound,
+    }).catch(() => {});
+  };
   let currentRunId: string | undefined;
   let lastUserPrompt = "";
   let observer: ReturnType<typeof setInterval> | undefined;
@@ -401,6 +430,12 @@ export function registerLoopExtension(
       announcedAttention.add(`${snapshot.runId}:${id}`);
       pi.appendEntry?.("loop-run-attention", { runId: snapshot.runId, attentionId: id });
       const detail = snapshot.attention.find((item) => item.id === id);
+      const attentionSummary = singleLine(detail?.summary ?? "Decision needed", limits.lineTextLimit);
+      void milestones.notify({
+        title: `Loop attention ${id}`,
+        body: attentionSummary,
+        sound: "request",
+      }).catch(() => {});
       pi.sendMessage?.(
         {
           customType: "loop-attention",
@@ -426,6 +461,7 @@ export function registerLoopExtension(
       if (!announcedFinal.has(snapshot.runId)) {
         announcedFinal.add(snapshot.runId);
         pi.appendEntry?.("loop-run-final", { runId: snapshot.runId, lastSequence: sequence });
+        notifyRunMilestone(snapshot);
         void reportFinal(snapshot, context);
       }
       stopObserver();
