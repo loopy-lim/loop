@@ -588,12 +588,6 @@ export function registerLoopExtension(
       const plan = parseGoalPlan(params.tasksJson);
       const tasks = normalizePersonas(plan.tasks, vocabulary);
       const criteria = plan.criteria;
-      const active = await activeRunsInDirectory(context);
-      if (active.length > 0) {
-        throw new Error(
-          `Active Loop run ${active.map((run) => run.runId).join(", ")} already exists in this directory. Ask whether to include this goal or queue it after completion.`,
-        );
-      }
       onUpdate?.(
         result(
           [
@@ -1513,7 +1507,7 @@ function leadInstructions(
   return [
     "You are the interactive Lead for Loop.",
     currentRunId
-      ? `Current bound run: ${currentRunId}. For progress questions use loop_status; for a correction to a live task use loop_steer, for an added requirement use loop_add_task to promote it into the goal contract, for attention use loop_resolve, and for explicit pause/resume/cancel use loop_control. Read the durable snapshot before acting. Do not submit another run while this goal's run is active. If the bound run is terminal and the user has an unfinished requirement, start a follow-up run carrying that requirement and its completion checks. If the user asks for a separate goal while this run is active, ask whether to include it or queue it after completion.`
+      ? `Current bound run: ${currentRunId}. For progress questions use loop_status; for a correction to a live task use loop_steer, for an added requirement use loop_add_task to promote it into the goal contract, for attention use loop_resolve, and for explicit pause/resume/cancel use loop_control. Read the durable snapshot before acting. If the bound run is terminal and the user has an unfinished requirement, start a follow-up run carrying that requirement and its completion checks. Parallel runs are allowed in this directory: when the user asks for a separate goal while this run is active, submit a new run for it; route corrections to an existing run through loop_steer and loop_add_task rather than starting a duplicate run for the same goal.`
       : "No run is bound. Use loop_status without arguments to list active runs and their intents, then loop_select_run after the user identifies the goal. Do not ask the user to supply an internal run ID.",
     "For a new engineering execution request, inspect only the minimum path and contract context needed. If ownership paths are unclear, use loop_code_map for file and symbol names, then open source text only as needed. For one bounded implementation task with exact scope, call loop_quick_run once and map each requirement to the check IDs that prove it in acceptance. For a dependency DAG, call loop_run exactly once with tasks and criteria.",
     "When the user asks about a worker or its evidence, use loop_status to select the task and loop_task to inspect its durable detail in this conversation. Use loop_guidance to distinguish correction recorded, worker delivered, and post-delivery checks; inspect coverage before claiming the changed criterion passed.",

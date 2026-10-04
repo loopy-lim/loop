@@ -1169,13 +1169,13 @@ test("a slow old branch restore cannot replace a newer branch binding", async ()
   expect(status.details.runId).toBe("new");
 });
 
-test("new run refuses another active goal in the same directory even without a binding", async () => {
+test("two runs can be accepted consecutively in the same directory", async () => {
   const host = fakePi();
   registerLoopExtension(
     host.api,
     fakeBackend({
       async runs() {
-        return [{ runId: "other", state: "active" }];
+        return [{ runId: "first", state: "active" }];
       },
       async snapshot(runId) {
         return snapshot(runId);
@@ -1184,47 +1184,30 @@ test("new run refuses another active goal in the same directory even without a b
     undefined,
     settings,
   );
-  await expect(
-    host.tools.get("loop_run")!.execute(
-      "new",
-      {
-        intent: "Another goal",
-        tasksJson: planJson([task("impl", "implementation", [], ["src/**"])]),
-      },
-      new AbortController().signal,
-      undefined,
-      context(),
-    ),
-  ).rejects.toThrow("other");
-});
-
-test("new run waits while an earlier run is still cancelling", async () => {
-  const host = fakePi();
-  registerLoopExtension(
-    host.api,
-    fakeBackend({
-      async runs() {
-        return [{ runId: "draining", state: "cancelling" }];
-      },
-      async snapshot(runId) {
-        return { ...snapshot(runId), state: "cancelling" };
-      },
-    }),
+  const first = await host.tools.get("loop_run")!.execute(
+    "first",
+    {
+      intent: "First goal",
+      runId: "first",
+      tasksJson: planJson([task("impl", "implementation", [], ["src/**"])]),
+    },
+    new AbortController().signal,
     undefined,
-    settings,
+    context(),
   );
-  await expect(
-    host.tools.get("loop_run")!.execute(
-      "new",
-      {
-        intent: "Next goal",
-        tasksJson: planJson([task("impl", "implementation", [], ["src/**"])]),
-      },
-      new AbortController().signal,
-      undefined,
-      context(),
-    ),
-  ).rejects.toThrow("draining");
+  expect(first.details).toMatchObject({ runId: "first", status: expect.any(String) });
+  const second = await host.tools.get("loop_run")!.execute(
+    "second",
+    {
+      intent: "Second goal",
+      runId: "second",
+      tasksJson: planJson([task("impl", "implementation", [], ["src/**"])]),
+    },
+    new AbortController().signal,
+    undefined,
+    context(),
+  );
+  expect(second.details).toMatchObject({ runId: "second", status: expect.any(String) });
 });
 
 test("ambiguous runs can be listed and a status read does not switch the control target", async () => {
