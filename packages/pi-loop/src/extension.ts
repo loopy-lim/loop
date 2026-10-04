@@ -51,10 +51,10 @@ export interface LeadSettings {
   vocabulary: PersonaVocabulary;
   herdrVisible?: boolean;
   /**
-   * Main-orchestration milestone surfacing through herdr (desktop toast +
-   * done/request sound). On by default inside a Herdr pane; set
-   * LOOP_HERDR_NOTIFY=0 (or off/false) to mute. Worker pane transitions are
-   * unaffected — they stay under herdr's own [ui.sound.agents] policy.
+   * Main-orchestration milestone surfacing through herdr (desktop toast;
+   * done sound only on goal completion). On by default inside a Herdr pane;
+   * set LOOP_HERDR_NOTIFY=0 (or off/false) to mute. Worker pane transitions
+   * are unaffected — they stay under herdr's own [ui.sound.agents] policy.
    */
   herdrNotify?: boolean;
   defaultComputeClass?: ComputeClass;
@@ -276,8 +276,9 @@ export function registerLoopExtension(
   } = notifier.active && settings.herdrNotify !== false ? notifier : { notify: async () => {} };
 
   const notifyRunMilestone = (snapshot: SnapshotOutput): void => {
-    const sound =
-      snapshot.state === "completed" ? "done" : snapshot.state === "failed" ? "request" : "none";
+    // Sound only on actual goal completion — attention/failed/cancelled stay
+    // silent (desktop toast only) so the chime always means "done".
+    const sound = snapshot.state === "completed" ? "done" : "none";
     void milestones.notify({
       title: `Loop run ${snapshot.state}`,
       body: singleLine(`${snapshot.runId} · ${snapshot.intent}`, limits.lineTextLimit),
@@ -434,7 +435,7 @@ export function registerLoopExtension(
       void milestones.notify({
         title: `Loop attention ${id}`,
         body: attentionSummary,
-        sound: "request",
+        sound: "none",
       }).catch(() => {});
       pi.sendMessage?.(
         {
