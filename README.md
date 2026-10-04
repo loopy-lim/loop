@@ -70,6 +70,28 @@ For run control — observing runs, pausing and resuming, steering tasks, and co
 
 Configuration never contains secret values. Put credentials in environment variables, the OS keychain, or provider-native authentication; `config/providers.example.toml` stores only the environment variable name.
 
+## Gateway pairing (`loop pair`)
+
+After a successful bind, the gateway records the actually bound host and port to the well-known runtime file `gateway.json` in the Loop config directory (`LOOP_CONFIG_DIR` / `XDG_CONFIG_HOME/loop` / `~/.config/loop`; override the path with `LOOP_GATEWAY_RUNTIME_FILE`). The record carries only the connection pair — never tokens or other secrets — and is written atomically (temporary file + rename), so readers never observe a partial write.
+
+`loop pair` is one command end to end. Before printing the QR it ensures a gateway is running:
+
+- **No live gateway** (no runtime record, or a record whose port no longer accepts connections): the gateway composition root (`packages/gateway/src/main.ts`) is spawned as a detached background daemon — bound to this machine's Tailscale CGNAT address (`tailscale status --json`), an OS-assigned free port, and the default database `~/.config/loop/loop.sqlite` (override with `--database`). `loop pair` waits until the port accepts, so the QR is always live. If Tailscale is not running, the command fails with `tailscale-unavailable` — the gateway binds tailnet interfaces only, by design.
+- **A live gateway** (recorded port accepting connections, or a recorded daemon pid still alive): it is reused untouched — never double-started.
+- **`LOOP_GATEWAY_PORT` set:** the gateway lifecycle is operator-managed; `loop pair` never spawns anything on that path.
+
+The daemon's pid is recorded next to the runtime record (`gateway.json.pid`) so `loop gateway status` can report liveness and `loop gateway stop` can terminate the daemon gracefully (SIGTERM, escalating to SIGKILL) and clean up stale pid records. A gateway started outside `loop pair` has no pid record; `gateway stop` reports that instead of guessing.
+
+`loop pair` then prints the `loop://connect?host=…&port=…` payload and a QR code for iPhone pairing. It resolves the gateway port in this order:
+
+1. `LOOP_GATEWAY_PORT` — when set, it wins. A set but invalid value fails closed rather than silently falling back to the runtime file.
+2. The gateway runtime record (`gateway.json`, see above) — so the gateway and `loop pair` no longer need the same env copied between shells.
+3. If neither source yields a port, `loop pair` fails with an error naming both sources.
+
+Host resolution is unchanged: explicit `--host`, then this machine's Tailscale MagicDNS name, then `LOOP_GATEWAY_HOST` as-is. The QR payload never carries secrets, matching the gateway's security posture.
+
+The resulting flow is: `loop pair` → QR output → scan with the iPhone camera → the `loop://` deep link opens LoopMobile and pairs. Inspect or stop the daemon afterwards with `loop gateway status [--json]` and `loop gateway stop`.
+
 ## Invariants
 
 - A task becomes `Done` only after every completion check passes.
