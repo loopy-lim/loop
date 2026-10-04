@@ -6,7 +6,7 @@
 // DO NOT EDIT — changes will be overwritten and fail codegen --check.
 // ────────────────────────────────────────────────────────────
 
-import { addGoalTaskCodec, addTaskCodec, appendGoalCriteriaCodec, cancelRunCodec, claimExecutionCodec, claimRunnableTasksCodec, cleanupRunCodec, compareTracesCodec, configureRunCodec, confirmPausedCodec, createRunCodec, evaluateCleanupDispositionComplexCodec, evaluateFailurePolicyComplexCodec, evaluateSurfaceRemovalCodec, evaluateWorktreeRemovalCodec, getRunCodec, getRunGraphCodec, getRunPlanCodec, getSnapshotCodec, getTaskContextCodec, getTraceCodec, listRunsCodec, pauseRunCodec, prepareGoalRunCodec, prepareRunCodec, prepareRunPreflightCodec, reconcileTaskCodec, recordActivityCodec, recordCheckReceiptsCodec, recordDecisionCodec, recordGuidanceDeliveredCodec, recordTaskOutputCodec, recordVerificationCodec, recordWorkerResultComplexCodec, recordWorkerStartedComplexCodec, recordWorkerStoppedComplexCodec, releaseExecutionCodec, renewExecutionCodec, requestAttentionCodec, resolveAttentionCodec, resumeRunCodec, selectCandidateCodec, steerRunCodec, stopVerificationCodec, submitPlanCodec, subscribeEventsCodec, updateTaskCodec } from './frame-codecs.js';
+import { addGoalTaskCodec, addTaskCodec, appendGoalCriteriaCodec, cancelRunCodec, claimExecutionCodec, claimRunnableTasksCodec, cleanupRunCodec, compareTracesCodec, configureRunCodec, confirmPausedCodec, createRunCodec, evaluateCleanupDispositionComplexCodec, evaluateFailurePolicyComplexCodec, evaluateSurfaceRemovalCodec, evaluateWorktreeRemovalCodec, getRunCodec, getRunGraphCodec, getRunPlanCodec, getSnapshotCodec, getTaskContextCodec, getTraceCodec, listRunsCodec, pauseRunCodec, prepareGoalRunCodec, prepareRunCodec, prepareRunPreflightCodec, promoteSteerCodec, reconcileTaskCodec, recordActivityCodec, recordCheckReceiptsCodec, recordDecisionCodec, recordGuidanceDeliveredCodec, recordTaskOutputCodec, recordVerificationCodec, recordWorkerResultComplexCodec, recordWorkerStartedComplexCodec, recordWorkerStoppedComplexCodec, releaseExecutionCodec, renewExecutionCodec, requestAttentionCodec, resolveAttentionCodec, resumeRunCodec, selectCandidateCodec, steerRunCodec, stopVerificationCodec, submitPlanCodec, subscribeEventsCodec, updateTaskCodec } from './frame-codecs.js';
 
 export const frameRegistry = new Map<string, import('@rustra/types').FrameCodec<any, any>>([
   // route: postcard
@@ -61,6 +61,8 @@ export const frameRegistry = new Map<string, import('@rustra/types').FrameCodec<
   ['prepareRun', prepareRunCodec],
   // route: postcard
   ['prepareRunPreflight', prepareRunPreflightCodec],
+  // route: postcard
+  ['promoteSteer', promoteSteerCodec],
   // route: postcard
   ['reconcileTask', reconcileTaskCodec],
   // route: postcard

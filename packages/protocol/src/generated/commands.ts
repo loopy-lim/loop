@@ -6,7 +6,7 @@
 // DO NOT EDIT — changes will be overwritten and fail codegen --check.
 // ────────────────────────────────────────────────────────────
 
-import type { AddGoalTaskInput, AddTaskInput, AppendGoalCriteriaInput, Array_of_EventOutput, Array_of_RunListOutput, ClaimRunnableTasksInput, CleanupDispositionOutput, CleanupRunInput, CleanupRunOutput, CompareTracesInput, CompareTracesOutput, ConfigureRunInput, CreateRunInput, DecisionInput, EvaluateCleanupDispositionInput, EvaluateFailurePolicyInput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, ExecutionLeaseInput, FailurePolicyOutput, GetTraceInput, GetTraceOutput, ListRunsInput, OperationOutput, PolicyEvaluationOutput, PrepareGoalRunInput, PrepareRunInput, PrepareRunPreflightInput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, RecordGuidanceDeliveredInput, RecordTaskOutputInput, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RunGraphInput, RunGraphOutput, RunInput, RunPlanOutput, SelectCandidateInput, SelectCandidateOutput, SnapshotOutput, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
+import type { AddGoalTaskInput, AddTaskInput, AppendGoalCriteriaInput, Array_of_EventOutput, Array_of_RunListOutput, ClaimRunnableTasksInput, CleanupDispositionOutput, CleanupRunInput, CleanupRunOutput, CompareTracesInput, CompareTracesOutput, ConfigureRunInput, CreateRunInput, DecisionInput, EvaluateCleanupDispositionInput, EvaluateFailurePolicyInput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, ExecutionLeaseInput, FailurePolicyOutput, GetTraceInput, GetTraceOutput, ListRunsInput, OperationOutput, PolicyEvaluationOutput, PrepareGoalRunInput, PrepareRunInput, PrepareRunPreflightInput, PromoteSteerInput, PromoteSteerOutput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, RecordGuidanceDeliveredInput, RecordTaskOutputInput, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RunGraphInput, RunGraphOutput, RunInput, RunPlanOutput, SelectCandidateInput, SelectCandidateOutput, SnapshotOutput, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput } from './types.js';
 import { createGeneratedFields2, invokeGenerated, invokeGeneratedFields1, invokeGeneratedFields3 } from '@rustra/types';
 import type { InvokeOptions } from '@rustra/types';
 
@@ -28,7 +28,7 @@ appendGoalCriteria.commandId = 'appendGoalCriteria';
 export const cancelRun = createGeneratedFields2<RunInput, OperationOutput>(13, 'cancelRun', "databasePath", "runId", 'cancelRun');
 
 export function claimExecution(input: ExecutionLeaseInput, options?: InvokeOptions): Promise<OperationOutput> {
-  return invokeGenerated<OperationOutput>(38, 'claimExecution', input, options);
+  return invokeGenerated<OperationOutput>(39, 'claimExecution', input, options);
 }
 claimExecution.commandId = 'claimExecution';
 
@@ -57,12 +57,12 @@ export const confirmPaused = createGeneratedFields2<RunInput, OperationOutput>(1
 export const createRun = createGeneratedFields2<CreateRunInput, SnapshotOutput>(1, 'createRun', "databasePath", "runId", 'createRun');
 
 export function evaluateCleanupDisposition(input: EvaluateCleanupDispositionInput, options?: InvokeOptions): Promise<CleanupDispositionOutput> {
-  return invokeGeneratedFields1<CleanupDispositionOutput>(45, 'evaluateCleanupDisposition', input, input["refusalCode"], options);
+  return invokeGeneratedFields1<CleanupDispositionOutput>(46, 'evaluateCleanupDisposition', input, input["refusalCode"], options);
 }
 evaluateCleanupDisposition.commandId = 'evaluateCleanupDisposition';
 
 export function evaluateFailurePolicy(input: EvaluateFailurePolicyInput, options?: InvokeOptions): Promise<FailurePolicyOutput> {
-  return invokeGenerated<FailurePolicyOutput>(44, 'evaluateFailurePolicy', input, options);
+  return invokeGenerated<FailurePolicyOutput>(45, 'evaluateFailurePolicy', input, options);
 }
 evaluateFailurePolicy.commandId = 'evaluateFailurePolicy';
 
@@ -92,7 +92,7 @@ getTaskContext.commandId = 'getTaskContext';
 export const getTrace = createGeneratedFields2<GetTraceInput, GetTraceOutput>(24, 'getTrace', "databasePath", "runId", 'getTrace');
 
 export function listRuns(input: ListRunsInput, options?: InvokeOptions): Promise<Array_of_RunListOutput> {
-  return invokeGeneratedFields1<Array_of_RunListOutput>(42, 'listRuns', input, input["databasePath"], options);
+  return invokeGeneratedFields1<Array_of_RunListOutput>(43, 'listRuns', input, input["databasePath"], options);
 }
 listRuns.commandId = 'listRuns';
 
@@ -109,12 +109,24 @@ export function prepareRun(input: PrepareRunInput, options?: InvokeOptions): Pro
 prepareRun.commandId = 'prepareRun';
 
 export function prepareRunPreflight(input: PrepareRunPreflightInput, options?: InvokeOptions): Promise<OperationOutput> {
-  return invokeGenerated<OperationOutput>(46, 'prepareRunPreflight', input, options);
+  return invokeGenerated<OperationOutput>(47, 'prepareRunPreflight', input, options);
 }
 prepareRunPreflight.commandId = 'prepareRunPreflight';
 
+/**
+ * Promote a mid-run user steer into the goal graph: the correction becomes
+ * a new dependent task and a new goal criterion in one atomic append, so
+ * the existing `RunCompleted` gate keeps the run open until the promoted
+ * criterion verifies. Plain guidance without a criterion is still served
+ * by `steer_run`; this command is for requirements that must be enforced.
+ */
+export function promoteSteer(input: PromoteSteerInput, options?: InvokeOptions): Promise<PromoteSteerOutput> {
+  return invokeGenerated<PromoteSteerOutput>(38, 'promoteSteer', input, options);
+}
+promoteSteer.commandId = 'promoteSteer';
+
 export function reconcileTask(input: ReconcileTaskInput, options?: InvokeOptions): Promise<OperationOutput> {
-  return invokeGenerated<OperationOutput>(41, 'reconcileTask', input, options);
+  return invokeGenerated<OperationOutput>(42, 'reconcileTask', input, options);
 }
 reconcileTask.commandId = 'reconcileTask';
 
@@ -140,7 +152,7 @@ recordDecision.commandId = 'recordDecision';
  * delivery record fails here instead of regressing the projection.
  */
 export function recordGuidanceDelivered(input: RecordGuidanceDeliveredInput, options?: InvokeOptions): Promise<OperationOutput> {
-  return invokeGenerated<OperationOutput>(47, 'recordGuidanceDelivered', input, options);
+  return invokeGenerated<OperationOutput>(48, 'recordGuidanceDelivered', input, options);
 }
 recordGuidanceDelivered.commandId = 'recordGuidanceDelivered';
 
@@ -170,12 +182,12 @@ export function recordWorkerStopped(input: WorkerInput, options?: InvokeOptions)
 recordWorkerStopped.commandId = 'recordWorkerStopped';
 
 export function releaseExecution(input: ReleaseExecutionInput, options?: InvokeOptions): Promise<OperationOutput> {
-  return invokeGeneratedFields3<OperationOutput>(40, 'releaseExecution', input, input["databasePath"], input["runId"], input["owner"], options);
+  return invokeGeneratedFields3<OperationOutput>(41, 'releaseExecution', input, input["databasePath"], input["runId"], input["owner"], options);
 }
 releaseExecution.commandId = 'releaseExecution';
 
 export function renewExecution(input: ExecutionLeaseInput, options?: InvokeOptions): Promise<OperationOutput> {
-  return invokeGenerated<OperationOutput>(39, 'renewExecution', input, options);
+  return invokeGenerated<OperationOutput>(40, 'renewExecution', input, options);
 }
 renewExecution.commandId = 'renewExecution';
 
@@ -192,7 +204,7 @@ resolveAttention.commandId = 'resolveAttention';
 export const resumeRun = createGeneratedFields2<RunInput, OperationOutput>(17, 'resumeRun', "databasePath", "runId", 'resumeRun');
 
 export function selectCandidate(input: SelectCandidateInput, options?: InvokeOptions): Promise<SelectCandidateOutput> {
-  return invokeGenerated<SelectCandidateOutput>(43, 'selectCandidate', input, options);
+  return invokeGenerated<SelectCandidateOutput>(44, 'selectCandidate', input, options);
 }
 selectCandidate.commandId = 'selectCandidate';
 

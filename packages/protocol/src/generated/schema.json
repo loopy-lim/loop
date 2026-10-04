@@ -635,7 +635,7 @@
     },
     {
       "name": "claimExecution",
-      "commandId": 38,
+      "commandId": 39,
       "inputType": "ExecutionLeaseInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -1428,7 +1428,7 @@
     },
     {
       "name": "evaluateCleanupDisposition",
-      "commandId": 45,
+      "commandId": 46,
       "inputType": "EvaluateCleanupDispositionInput",
       "outputType": "CleanupDispositionOutput",
       "inputSchema": {
@@ -1503,7 +1503,7 @@
     },
     {
       "name": "evaluateFailurePolicy",
-      "commandId": 44,
+      "commandId": 45,
       "inputType": "EvaluateFailurePolicyInput",
       "outputType": "FailurePolicyOutput",
       "inputSchema": {
@@ -3822,7 +3822,7 @@
     },
     {
       "name": "listRuns",
-      "commandId": 42,
+      "commandId": 43,
       "inputType": "ListRunsInput",
       "outputType": "Array_of_RunListOutput",
       "inputSchema": {
@@ -4460,7 +4460,7 @@
     },
     {
       "name": "prepareRunPreflight",
-      "commandId": 46,
+      "commandId": 47,
       "inputType": "PrepareRunPreflightInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -5013,8 +5013,318 @@
       }
     },
     {
+      "name": "promoteSteer",
+      "commandId": 38,
+      "inputType": "PromoteSteerInput",
+      "outputType": "PromoteSteerOutput",
+      "inputSchema": {
+        "title": "PromoteSteerInput",
+        "type": "object",
+        "required": [
+          "criteria",
+          "databasePath",
+          "message",
+          "runId",
+          "task"
+        ],
+        "properties": {
+          "databasePath": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "task": {
+            "$ref": "#/definitions/TaskSpecInput"
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/GoalCriterionInput"
+            }
+          }
+        }
+      },
+      "outputSchema": {
+        "title": "PromoteSteerOutput",
+        "type": "object",
+        "required": [
+          "accepted",
+          "criterionIds",
+          "evidenceTests",
+          "runId",
+          "summary",
+          "taskId"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "criterionIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "summary": {
+            "type": "string"
+          },
+          "evidenceTests": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "execution": "sync",
+      "description": "Promote a mid-run user steer into the goal graph: the correction becomes\na new dependent task and a new goal criterion in one atomic append, so\nthe existing `RunCompleted` gate keeps the run open until the promoted\ncriterion verifies. Plain guidance without a criterion is still served\nby `steer_run`; this command is for requirements that must be enforced.",
+      "definitions": {
+        "TaskSpecInput": {
+          "type": "object",
+          "required": [
+            "completionChecks",
+            "dependencies",
+            "id",
+            "kind",
+            "maxAttempts",
+            "maximumCompute",
+            "minimumCompute",
+            "preferredCompute",
+            "readScope",
+            "requirements",
+            "title",
+            "writeScope"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/definitions/TaskKind"
+            },
+            "dependencies": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "readScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "writeScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "requirements": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "persona": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "completionChecks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/CompletionCheckInput"
+              }
+            },
+            "preferredCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "minimumCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "maximumCompute": {
+              "$ref": "#/definitions/ComputeClass"
+            },
+            "routing": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TaskRouting"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "maxAttempts": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            }
+          }
+        },
+        "TaskKind": {
+          "type": "string",
+          "enum": [
+            "research",
+            "decision",
+            "implementation",
+            "verification",
+            "integration"
+          ]
+        },
+        "CompletionCheckInput": {
+          "type": "object",
+          "required": [
+            "args",
+            "command",
+            "id",
+            "timeoutMs"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "workingDirectory": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        },
+        "ComputeClass": {
+          "type": "string",
+          "enum": [
+            "deterministic",
+            "typed_decision",
+            "tiny",
+            "fast",
+            "balanced",
+            "strong",
+            "frontier"
+          ]
+        },
+        "TaskRouting": {
+          "type": "object",
+          "required": [
+            "required",
+            "risk"
+          ],
+          "properties": {
+            "risk": {
+              "$ref": "#/definitions/Risk"
+            },
+            "required": {
+              "$ref": "#/definitions/ComputeCapabilities"
+            }
+          }
+        },
+        "Risk": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "ComputeCapabilities": {
+          "type": "object",
+          "required": [
+            "coding",
+            "long_context",
+            "reasoning",
+            "tools",
+            "vision"
+          ],
+          "properties": {
+            "coding": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "reasoning": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "tools": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "vision": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "long_context": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            }
+          }
+        },
+        "GoalCriterionInput": {
+          "type": "object",
+          "required": [
+            "checkIds",
+            "description",
+            "id",
+            "taskId"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "checkIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "name": "reconcileTask",
-      "commandId": 41,
+      "commandId": 42,
       "inputType": "ReconcileTaskInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -5307,7 +5617,7 @@
     },
     {
       "name": "recordGuidanceDelivered",
-      "commandId": 47,
+      "commandId": 48,
       "inputType": "RecordGuidanceDeliveredInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -5726,7 +6036,7 @@
     },
     {
       "name": "releaseExecution",
-      "commandId": 40,
+      "commandId": 41,
       "inputType": "ReleaseExecutionInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -5765,7 +6075,7 @@
     },
     {
       "name": "renewExecution",
-      "commandId": 39,
+      "commandId": 40,
       "inputType": "ExecutionLeaseInput",
       "outputType": "OperationOutput",
       "inputSchema": {
@@ -5963,7 +6273,7 @@
     },
     {
       "name": "selectCandidate",
-      "commandId": 43,
+      "commandId": 44,
       "inputType": "SelectCandidateInput",
       "outputType": "SelectCandidateOutput",
       "inputSchema": {

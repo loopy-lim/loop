@@ -624,6 +624,23 @@ export type PrepareRunPreflightInput = {
   tasks: PreflightTaskSpecInput[];
 };
 
+export type PromoteSteerInput = {
+  databasePath: string;
+  runId: string;
+  message: string;
+  task: TaskSpecInput;
+  criteria: GoalCriterionInput[];
+};
+
+export type PromoteSteerOutput = {
+  accepted: boolean;
+  runId: string;
+  taskId: string;
+  criterionIds: string[];
+  summary: string;
+  evidenceTests: string[];
+};
+
 export type ReconcileTaskInput = {
   databasePath: string;
   runId: string;

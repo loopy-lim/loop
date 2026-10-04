@@ -162,7 +162,7 @@ function _pcDecodeF32(buf: Uint8Array, offset: number): { value: number; bytesRe
 
 import { createComplexCodec, createSchemaPostcardCodec } from '@rustra/types';
 import type { FrameCodec, RustraError, ComplexSchema } from '@rustra/types';
-import type { ActiveWorkerOutput, AddGoalTaskInput, AddTaskInput, AppendGoalCriteriaInput, Array_of_EventOutput, Array_of_RunListOutput, AssumptionInput, AttentionKind, AttentionSnapshotOutput, BackoffPolicy, CapabilityRequirementsInput, CheckReceipt, CheckResultInput, ClaimRunnableTasksInput, CleanupDisposition, CleanupDispositionOutput, CleanupRunInput, CleanupRunOutput, CompareTracesInput, CompareTracesOutput, CompletionCheckInput, CompletionCoverageInput, ComputeCandidateInput, ComputeCapabilities, ComputeCapabilitiesInput, ComputeClass, ConfigureRunInput, CreateRunInput, DecisionInput, DecompositionContractOutput, DependencyConsumptionInput, DependencyResultOutput, DependencyTerminalization, EvaluateCleanupDispositionInput, EvaluateFailurePolicyInput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, EventOutput, EvidenceLevel, ExecutionLeaseInput, FailureClass, FailurePolicy, FailurePolicyAction, FailurePolicyOutput, GetTraceInput, GetTraceOutput, GoalCriterionInput, GoalCriterionState, GoalCriterionStatusOutput, GraphNodeOutput, GraphOwnerHealth, GuidanceDeliveredEvent, IndependentBranchAction, ListRunsInput, OnExhaustion, OperationOutput, PolicyEvaluationOutput, PreflightTaskSpecInput, PrepareGoalRunInput, PrepareRunInput, PrepareRunPreflightInput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, RecordGuidanceDeliveredInput, RecordTaskOutputInput, RefusalCode, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RetryBudget, RetryScope, Risk, RoutingRisk, RunFailureAction, RunGraphInput, RunGraphOutput, RunInput, RunListOutput, RunPlanOutput, RunState, SelectCandidateInput, SelectCandidateOutput, SemanticAccess, SemanticConflictResolution, SemanticTouchpointInput, SkippedArtifactOutput, SnapshotOutput, SourceReceipt, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, TaskKind, TaskRouting, TaskSnapshotOutput, TaskSpecInput, TaskState, TerminalizationPolicy, TraceComparison, TraceRanking, TraceReportEntry, TraceScore, TraceSummary, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput, WorkerState } from './types.js';
+import type { ActiveWorkerOutput, AddGoalTaskInput, AddTaskInput, AppendGoalCriteriaInput, Array_of_EventOutput, Array_of_RunListOutput, AssumptionInput, AttentionKind, AttentionSnapshotOutput, BackoffPolicy, CapabilityRequirementsInput, CheckReceipt, CheckResultInput, ClaimRunnableTasksInput, CleanupDisposition, CleanupDispositionOutput, CleanupRunInput, CleanupRunOutput, CompareTracesInput, CompareTracesOutput, CompletionCheckInput, CompletionCoverageInput, ComputeCandidateInput, ComputeCapabilities, ComputeCapabilitiesInput, ComputeClass, ConfigureRunInput, CreateRunInput, DecisionInput, DecompositionContractOutput, DependencyConsumptionInput, DependencyResultOutput, DependencyTerminalization, EvaluateCleanupDispositionInput, EvaluateFailurePolicyInput, EvaluateSurfaceRemovalInput, EvaluateWorktreeRemovalInput, EventOutput, EvidenceLevel, ExecutionLeaseInput, FailureClass, FailurePolicy, FailurePolicyAction, FailurePolicyOutput, GetTraceInput, GetTraceOutput, GoalCriterionInput, GoalCriterionState, GoalCriterionStatusOutput, GraphNodeOutput, GraphOwnerHealth, GuidanceDeliveredEvent, IndependentBranchAction, ListRunsInput, OnExhaustion, OperationOutput, PolicyEvaluationOutput, PreflightTaskSpecInput, PrepareGoalRunInput, PrepareRunInput, PrepareRunPreflightInput, PromoteSteerInput, PromoteSteerOutput, ReconcileTaskInput, RecordActivityInput, RecordCheckReceiptsInput, RecordGuidanceDeliveredInput, RecordTaskOutputInput, RefusalCode, ReleaseExecutionInput, RequestAttentionInput, ResolveAttentionInput, RetryBudget, RetryScope, Risk, RoutingRisk, RunFailureAction, RunGraphInput, RunGraphOutput, RunInput, RunListOutput, RunPlanOutput, RunState, SelectCandidateInput, SelectCandidateOutput, SemanticAccess, SemanticConflictResolution, SemanticTouchpointInput, SkippedArtifactOutput, SnapshotOutput, SourceReceipt, SteerRunInput, StopVerificationInput, SubmitPlanInput, SubmitPlanOutput, SubscribeEventsInput, TaskContextInput, TaskContextOutput, TaskIdsOutput, TaskKind, TaskRouting, TaskSnapshotOutput, TaskSpecInput, TaskState, TerminalizationPolicy, TraceComparison, TraceRanking, TraceReportEntry, TraceScore, TraceSummary, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput, WorkerState } from './types.js';
 
 export const addGoalTaskCodec: FrameCodec<AddGoalTaskInput, OperationOutput> = {
   commandId: 29,
@@ -642,14 +642,14 @@ export const cancelRunCodec: FrameCodec<RunInput, OperationOutput> = {
 };
 
 export const claimExecutionCodec: FrameCodec<ExecutionLeaseInput, OperationOutput> = {
-  commandId: 38,
+  commandId: 39,
   execution: "sync",
 
   encode(args: ExecutionLeaseInput): ArrayBuffer {
     // [cmd_id: u16 LE][postcard(ExecutionLeaseInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 38, true);
+    new DataView(cmdId.buffer).setUint16(0, 39, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -669,7 +669,7 @@ export const claimExecutionCodec: FrameCodec<ExecutionLeaseInput, OperationOutpu
       out = grown;
     };
     ensure(2);
-    out[w++] = 38; out[w++] = 0;
+    out[w++] = 39; out[w++] = 0;
     { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] = out[w - 1]! & 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] = out[w - 1]! & 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.owner; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] = out[w - 1]! & 0x7f; out.set(_u, w); w += _u.length; }
@@ -1598,7 +1598,7 @@ export const createRunCodec: FrameCodec<CreateRunInput, SnapshotOutput> = {
 
 /** route: complex-binary; RN uses native C++ when the schema is native-safe, otherwise JS. */
 export const evaluateCleanupDispositionComplexCodec: FrameCodec<EvaluateCleanupDispositionInput, CleanupDispositionOutput> = createComplexCodec<EvaluateCleanupDispositionInput, CleanupDispositionOutput>({
-  commandId: 45,
+  commandId: 46,
   execution: "sync",
   inputSchema: {"title":"EvaluateCleanupDispositionInput","type":"object","required":["refusalCode"],"properties":{"refusalCode":{"$ref":"#/definitions/RefusalCode"}}} as ComplexSchema,
   outputSchema: {"title":"CleanupDispositionOutput","type":"object","required":["disposition"],"properties":{"disposition":{"$ref":"#/definitions/CleanupDisposition"}}} as ComplexSchema,
@@ -1609,7 +1609,7 @@ export const evaluateCleanupDispositionCodec = evaluateCleanupDispositionComplex
 
 /** route: complex-binary; RN uses native C++ when the schema is native-safe, otherwise JS. */
 export const evaluateFailurePolicyComplexCodec: FrameCodec<EvaluateFailurePolicyInput, FailurePolicyOutput> = createComplexCodec<EvaluateFailurePolicyInput, FailurePolicyOutput>({
-  commandId: 44,
+  commandId: 45,
   execution: "sync",
   inputSchema: {"title":"EvaluateFailurePolicyInput","type":"object","required":["failureClass","failurePolicy","retriesUsed","taskKind","terminalizationPolicy"],"properties":{"failureClass":{"$ref":"#/definitions/FailureClass"},"retriesUsed":{"type":"integer","format":"uint16","minimum":0},"taskKind":{"$ref":"#/definitions/TaskKind"},"failurePolicy":{"$ref":"#/definitions/FailurePolicy"},"terminalizationPolicy":{"$ref":"#/definitions/TerminalizationPolicy"}}} as ComplexSchema,
   outputSchema: {"title":"FailurePolicyOutput","type":"object","required":["action"],"properties":{"action":{"$ref":"#/definitions/FailurePolicyAction"},"retryScope":{"anyOf":[{"$ref":"#/definitions/RetryScope"},{"type":"null"}]},"delayMs":{"type":["integer","null"],"format":"uint64","minimum":0},"dependents":{"anyOf":[{"$ref":"#/definitions/DependencyTerminalization"},{"type":"null"}]},"independentBranches":{"anyOf":[{"$ref":"#/definitions/IndependentBranchAction"},{"type":"null"}]},"run":{"anyOf":[{"$ref":"#/definitions/RunFailureAction"},{"type":"null"}]}}} as ComplexSchema,
@@ -3904,7 +3904,7 @@ export const getTraceCodec: FrameCodec<GetTraceInput, GetTraceOutput> = {
   },
 };
 
-export const listRunsCodec = createSchemaPostcardCodec(42, {"title":"ListRunsInput","type":"object","required":["databasePath"],"properties":{"databasePath":{"type":"string"}}} as ComplexSchema, {"title":"Array_of_RunListOutput","type":"array","items":{"$ref":"#/definitions/RunListOutput"}} as ComplexSchema, {"TaskSpecInput":{"type":"object","required":["completionChecks","dependencies","id","kind","maxAttempts","maximumCompute","minimumCompute","preferredCompute","readScope","requirements","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"requirements":{"type":"array","items":{"type":"string"}},"persona":{"type":["string","null"]},"completionChecks":{"type":"array","items":{"$ref":"#/definitions/CompletionCheckInput"}},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"routing":{"anyOf":[{"$ref":"#/definitions/TaskRouting"},{"type":"null"}]},"maxAttempts":{"type":"integer","format":"uint16","minimum":0}}},"TaskKind":{"type":"string","enum":["research","decision","implementation","verification","integration"]},"CompletionCheckInput":{"type":"object","required":["args","command","id","timeoutMs"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":["string","null"]},"timeoutMs":{"type":"integer","format":"uint64","minimum":0}}},"ComputeClass":{"type":"string","enum":["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"]},"TaskRouting":{"type":"object","required":["required","risk"],"properties":{"risk":{"$ref":"#/definitions/Risk"},"required":{"$ref":"#/definitions/ComputeCapabilities"}}},"Risk":{"type":"string","enum":["low","medium","high","critical"]},"ComputeCapabilities":{"type":"object","required":["coding","long_context","reasoning","tools","vision"],"properties":{"coding":{"type":"integer","format":"uint8","minimum":0},"reasoning":{"type":"integer","format":"uint8","minimum":0},"tools":{"type":"integer","format":"uint8","minimum":0},"vision":{"type":"integer","format":"uint8","minimum":0},"long_context":{"type":"integer","format":"uint8","minimum":0}}},"GoalCriterionInput":{"type":"object","required":["checkIds","description","id","taskId"],"properties":{"id":{"type":"string"},"description":{"type":"string"},"taskId":{"type":"string"},"checkIds":{"type":"array","items":{"type":"string"}}}},"SkippedArtifactOutput":{"type":"object","required":["artifact","reason"],"properties":{"artifact":{"type":"string"},"reason":{"type":"string"}}},"TraceReportEntry":{"description":"Per-run row of a benchmark report: aggregated metrics plus derived score.","type":"object","required":["runId","score","summary"],"properties":{"runId":{"type":"string"},"summary":{"$ref":"#/definitions/TraceSummary"},"score":{"$ref":"#/definitions/TraceScore"}}},"TraceSummary":{"description":"Aggregate, deterministic metrics for one run's ordered event sequence.\n\nEvery counter is derived purely from event kinds; `elapsed_ms` is the only wall-clock field and is never invented here — a caller with a clock (such as a store query joining recorded timings) may fill it in.","type":"object","properties":{"total_events":{"default":0,"type":"integer","format":"uint32","minimum":0},"tasks_created":{"default":0,"type":"integer","format":"uint32","minimum":0},"tasks_completed":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_starts":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_finishes":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_failures":{"default":0,"type":"integer","format":"uint32","minimum":0},"verification_passes":{"default":0,"type":"integer","format":"uint32","minimum":0},"verification_failures":{"default":0,"type":"integer","format":"uint32","minimum":0},"attention_created":{"default":0,"type":"integer","format":"uint32","minimum":0},"attention_resolved":{"default":0,"type":"integer","format":"uint32","minimum":0},"elapsed_ms":{"default":null,"type":["integer","null"],"format":"uint64","minimum":0}}},"TraceScore":{"description":"Deterministic comparison score for a [`TraceSummary`].\n\nEach component is per-mille (0..=1000); `total` is therefore 0..=3000.","type":"object","required":["autonomy","first_pass","reliability"],"properties":{"reliability":{"description":"Completed tasks out of created tasks.","type":"integer","format":"uint16","minimum":0},"autonomy":{"description":"Resolved attention out of created attention; a run that never needed attention scores full marks.","type":"integer","format":"uint16","minimum":0},"first_pass":{"description":"Verification passes out of verification attempts.","type":"integer","format":"uint16","minimum":0}}},"TraceComparison":{"type":"object","required":["rankings"],"properties":{"rankings":{"type":"array","items":{"$ref":"#/definitions/TraceRanking"}}}},"TraceRanking":{"type":"object","required":["label","score"],"properties":{"label":{"type":"string"},"score":{"$ref":"#/definitions/TraceScore"}}},"RunState":{"type":"string","enum":["active","pausing","paused","cancelling","attention","completed","failed","cancelled"]},"TaskSnapshotOutput":{"type":"object","required":["activities","attempt","blockedBy","dependencies","id","kind","preferredCompute","readScope","state","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"state":{"$ref":"#/definitions/TaskState"},"attempt":{"type":"integer","format":"uint16","minimum":0},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"blockedBy":{"type":"array","items":{"type":"string"}},"lastFailure":{"type":["string","null"]},"activities":{"type":"array","items":{"type":"string"}},"resultSummary":{"type":["string","null"]}}},"TaskState":{"type":"string","enum":["pending","ready","running","verifying","attention","blocked","done","failed","cancelled"]},"ActiveWorkerOutput":{"type":"object","required":["id","taskId"],"properties":{"id":{"type":"string"},"taskId":{"type":"string"}}},"AttentionSnapshotOutput":{"type":"object","required":["id","kind","summary"],"properties":{"id":{"type":"string"},"kind":{"$ref":"#/definitions/AttentionKind"},"summary":{"type":"string"},"taskId":{"type":["string","null"]}}},"AttentionKind":{"type":"string","enum":["question","decision","approval","conflict","failure"]},"GoalCriterionStatusOutput":{"type":"object","required":["checkIds","description","id","state","taskId"],"properties":{"id":{"type":"string"},"description":{"type":"string"},"taskId":{"type":"string"},"checkIds":{"type":"array","items":{"type":"string"}},"state":{"$ref":"#/definitions/GoalCriterionState"}}},"GoalCriterionState":{"type":"string","enum":["pending","verified"]},"RefusalCode":{"type":"string","enum":["run_not_terminal","worktree_unmerged","worktree_dirty","path_is_project_root","path_outside_project","surface_not_owned","external_session"]},"CleanupDisposition":{"oneOf":[{"description":"Retry cleanup only after the run reaches a terminal state.","type":"string","enum":["defer"]},{"description":"Preserve the artifact and record why Loop did not remove it.","type":"string","enum":["skip"]},{"description":"A lossy cleanup choice requires an explicit human decision.","type":"string","enum":["require_decision"]}],"x-rustra-variant-order":["defer","skip","require_decision"]},"FailureClass":{"description":"Infrastructure-neutral classification of an execution or verification failure.","type":"string","enum":["assertion","timeout","process_start","invalid_contract","interrupted","environment"]},"FailurePolicy":{"description":"Deterministic retry decision table. Missing classes fail closed, and deterministic failure classes fail closed even when a budget exists: retry is only ever granted for nondeterministic verification failures ([`FailureClass::is_nondeterministic`]). The deterministic terminal policy — first assertion (or invalid-contract, process-start) failure is terminal — holds regardless of configuration.","type":"object","required":["onUnbudgetedFailure","retryBudgets"],"properties":{"retryBudgets":{"type":"array","items":{"$ref":"#/definitions/RetryBudget"}},"onUnbudgetedFailure":{"$ref":"#/definitions/OnExhaustion"}}},"RetryBudget":{"description":"Retry budget for one failure class. `max_retries` excludes the initial try.","type":"object","required":["backoff","failureClass","maxRetries","onExhaustion","scope"],"properties":{"failureClass":{"$ref":"#/definitions/FailureClass"},"scope":{"$ref":"#/definitions/RetryScope"},"maxRetries":{"type":"integer","format":"uint16","minimum":0},"backoff":{"$ref":"#/definitions/BackoffPolicy"},"onExhaustion":{"$ref":"#/definitions/OnExhaustion"}}},"RetryScope":{"description":"The smallest operation a retry budget permits the executor to repeat.","type":"string","enum":["check","candidate","worker","compute"]},"BackoffPolicy":{"description":"Bounded exponential backoff. A multiplier of one represents fixed backoff.","type":"object","required":["initialDelayMs","maxDelayMs","multiplier"],"properties":{"initialDelayMs":{"type":"integer","format":"uint64","minimum":0},"multiplier":{"type":"integer","format":"uint16","minimum":0},"maxDelayMs":{"type":"integer","format":"uint64","minimum":0}}},"OnExhaustion":{"description":"What the executor must do when no retry remains.","type":"string","enum":["fail_task","require_attention"]},"TerminalizationPolicy":{"description":"Failure propagation rules owned by core rather than an executor adapter.","type":"object","required":["dependents","failRunForSerialTask","independentBranches"],"properties":{"dependents":{"$ref":"#/definitions/DependencyTerminalization"},"independentBranches":{"$ref":"#/definitions/IndependentBranchAction"},"failRunForSerialTask":{"type":"boolean"}}},"DependencyTerminalization":{"description":"Terminal state assigned to descendants that require a failed task.","type":"string","enum":["block_terminal","cancel"]},"IndependentBranchAction":{"type":"string","enum":["continue"]},"FailurePolicyAction":{"type":"string","enum":["retry","failTask","requireAttention"]},"RunFailureAction":{"type":"string","enum":["continue","fail"]},"GraphOwnerHealth":{"type":"string","enum":["live","missing","expired","inactive"]},"GraphNodeOutput":{"type":"object","required":["attempt","blockedBy","dependencies","id","kind","readScope","state","title","workers","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"state":{"$ref":"#/definitions/TaskState"},"dependencies":{"type":"array","items":{"type":"string"}},"blockedBy":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"workers":{"type":"array","items":{"type":"string"}},"attempt":{"type":"integer","format":"uint16","minimum":0},"resultSummary":{"type":["string","null"]},"lastFailure":{"type":["string","null"]}}},"DecompositionContractOutput":{"type":"object","required":["assumptions","completionCoverage","consumes","defaults","failurePolicy","semanticTouchpoints"],"properties":{"defaults":{"type":"array","items":{"type":"string"}},"assumptions":{"type":"array","items":{"$ref":"#/definitions/AssumptionInput"}},"semanticTouchpoints":{"type":"array","items":{"$ref":"#/definitions/SemanticTouchpointInput"}},"consumes":{"type":"array","items":{"$ref":"#/definitions/DependencyConsumptionInput"}},"completionCoverage":{"type":"array","items":{"$ref":"#/definitions/CompletionCoverageInput"}},"failurePolicy":{"$ref":"#/definitions/FailurePolicy"}}},"AssumptionInput":{"type":"object","required":["assumption","evidence","ifFalse","revisit"],"properties":{"assumption":{"type":"string"},"evidence":{"type":"string"},"ifFalse":{"type":"string"},"revisit":{"type":"string"}}},"SemanticTouchpointInput":{"type":"object","required":["access","conflictResolution","id"],"properties":{"id":{"type":"string"},"access":{"$ref":"#/definitions/SemanticAccess"},"conflictResolution":{"$ref":"#/definitions/SemanticConflictResolution"}}},"SemanticAccess":{"type":"string","enum":["consume","modify"]},"SemanticConflictResolution":{"type":"string","enum":["unresolved","serialize","dependency_order"]},"DependencyConsumptionInput":{"type":"object","required":["artifacts","checks","decisions","dependency","risks"],"properties":{"dependency":{"type":"string"},"decisions":{"type":"array","items":{"type":"string"}},"artifacts":{"type":"array","items":{"type":"string"}},"checks":{"type":"array","items":{"type":"string"}},"risks":{"type":"array","items":{"type":"string"}}}},"CompletionCoverageInput":{"type":"object","required":["artifacts","checkId","evidenceLevel","requirements","semantics"],"properties":{"checkId":{"type":"string"},"requirements":{"type":"array","items":{"type":"string"}},"artifacts":{"type":"array","items":{"type":"string"}},"semantics":{"type":"array","items":{"type":"string"}},"evidenceLevel":{"$ref":"#/definitions/EvidenceLevel"}}},"EvidenceLevel":{"type":"string","enum":["static","unit","fake","integration","live"]},"DependencyResultOutput":{"type":"object","required":["summary","taskId","title"],"properties":{"taskId":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"}}},"CheckReceipt":{"type":"object","required":["args","command","durationMs","exitCode","id","stderr","stdout","timedOut","workingDirectory"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":"string"},"exitCode":{"type":"integer","format":"int32"},"stdout":{"type":"string"},"stderr":{"type":"string"},"timedOut":{"type":"boolean"},"durationMs":{"type":"integer","format":"uint64","minimum":0},"outputArtifact":{"default":null,"type":["string","null"]},"source":{"default":null,"anyOf":[{"$ref":"#/definitions/SourceReceipt"},{"type":"null"}]}}},"SourceReceipt":{"type":"object","required":["afterFingerprint","beforeFingerprint","observedChangedPaths","observedOutsideWriteScope"],"properties":{"beforeFingerprint":{"description":"Digest of the declared read/write scope around the completion check batch.","type":"string"},"afterFingerprint":{"type":"string"},"observedChangedPaths":{"description":"Repository paths observed to change while a worker ran. Shared-tree observations cannot establish which actor wrote them.","type":"array","items":{"type":"string"}},"observedOutsideWriteScope":{"type":"array","items":{"type":"string"}}}},"RunListOutput":{"type":"object","required":["runId","state"],"properties":{"runId":{"type":"string"},"state":{"$ref":"#/definitions/RunState"}}},"PreflightTaskSpecInput":{"type":"object","required":["assumptions","completionCoverage","consumes","defaults","failurePolicy","semanticTouchpoints","task"],"properties":{"task":{"$ref":"#/definitions/TaskSpecInput"},"defaults":{"type":"array","items":{"type":"string"}},"assumptions":{"type":"array","items":{"$ref":"#/definitions/AssumptionInput"}},"semanticTouchpoints":{"type":"array","items":{"$ref":"#/definitions/SemanticTouchpointInput"}},"consumes":{"type":"array","items":{"$ref":"#/definitions/DependencyConsumptionInput"}},"completionCoverage":{"type":"array","items":{"$ref":"#/definitions/CompletionCoverageInput"}},"failurePolicy":{"$ref":"#/definitions/FailurePolicy"}}},"GuidanceDeliveredEvent":{"description":"Wire shape of a steer-mailbox delivery record (ADR M-TL2): the mailbox appends one of these per live worker after a successful `provider.steer`, marking every `GuidanceAdded` at or below `through_sequence` as received by that worker's task. The delivery watermark projection lives in loop-core; this type is only the transport form (see `record_guidance_delivered`).","type":"object","required":["taskId","throughSequence","workerId"],"properties":{"taskId":{"type":"string"},"workerId":{"type":"string"},"throughSequence":{"type":"integer","format":"int64"}}},"CheckResultInput":{"type":"object","required":["id","passed"],"properties":{"id":{"type":"string"},"passed":{"type":"boolean"}}},"WorkerState":{"description":"Lifecycle vocabulary for a worker as observed at the adapter boundary.\n\nThis enum is the domain source of the worker-status vocabulary. The bridge carries this type through the optional `state` fields on `WorkerInput` and `WorkerResultInput`, generating the protocol `WorkerState`. These observations do not change the existing worker result policy; absent state remains valid for callers that only report success and summary. Adapters should consume the generated type rather than maintain a copy.\n\nVocabulary correspondence (decided here, once):\n\n- `starting` / `running` / `completed` / `cancelled` map one-to-one to the adapter session lifecycle. - `lost` is the only terminal-without-result state. An adapter session that ends without a usable result (process exit, API failure, blocked or unobservable agent) reports `lost`; the failure taxonomy and retryability stay adapter-side in the worker result. Recovery uses the same term for a worker that can no longer be observed after a restart.\n\nThere is deliberately no `failed` variant: the graph does not distinguish \"worker failed\" from \"worker lost\" as a state — both reconcile through the recorded worker result, and the run-level failure vocabulary already lives in [`crate::run::RunState`] and task events.","type":"string","enum":["starting","running","completed","lost","cancelled"]},"ComputeCandidateInput":{"type":"object","required":["available","capabilities","computeClass","costWeight","id","latency"],"properties":{"id":{"type":"string"},"computeClass":{"$ref":"#/definitions/ComputeClass"},"capabilities":{"$ref":"#/definitions/ComputeCapabilitiesInput"},"latency":{"type":"integer","format":"uint16","minimum":0},"costWeight":{"type":"integer","format":"uint16","minimum":0},"available":{"type":"boolean"}}},"ComputeCapabilitiesInput":{"description":"Capability scores advertised for a compute candidate (loop-core `ComputeCapabilities` mirror; the core type lacks a JSON schema derive, so the bridge carries its own wire form and converts on entry).","type":"object","required":["coding","longContext","reasoning","tools","vision"],"properties":{"coding":{"type":"integer","format":"uint8","minimum":0},"reasoning":{"type":"integer","format":"uint8","minimum":0},"tools":{"type":"integer","format":"uint8","minimum":0},"vision":{"type":"integer","format":"uint8","minimum":0},"longContext":{"type":"integer","format":"uint8","minimum":0}}},"CapabilityRequirementsInput":{"type":"object","required":["capabilities","criticalRiskFloor","highRiskFloor","maximumCompute","minimumCompute","risk"],"properties":{"capabilities":{"$ref":"#/definitions/ComputeCapabilitiesInput"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"risk":{"$ref":"#/definitions/RoutingRisk"},"highRiskFloor":{"$ref":"#/definitions/ComputeClass"},"criticalRiskFloor":{"$ref":"#/definitions/ComputeClass"}}},"RoutingRisk":{"description":"Task risk driving the compute-class floor (loop-core `Risk` mirror).","type":"string","enum":["low","medium","high","critical"]},"EventOutput":{"type":"object","required":["payloadJson","sequence"],"properties":{"sequence":{"type":"integer","format":"int64"},"payloadJson":{"type":"string"}}}} as Record<string, ComplexSchema>, true)! as FrameCodec<ListRunsInput, Array_of_RunListOutput>;
+export const listRunsCodec = createSchemaPostcardCodec(43, {"title":"ListRunsInput","type":"object","required":["databasePath"],"properties":{"databasePath":{"type":"string"}}} as ComplexSchema, {"title":"Array_of_RunListOutput","type":"array","items":{"$ref":"#/definitions/RunListOutput"}} as ComplexSchema, {"TaskSpecInput":{"type":"object","required":["completionChecks","dependencies","id","kind","maxAttempts","maximumCompute","minimumCompute","preferredCompute","readScope","requirements","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"requirements":{"type":"array","items":{"type":"string"}},"persona":{"type":["string","null"]},"completionChecks":{"type":"array","items":{"$ref":"#/definitions/CompletionCheckInput"}},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"routing":{"anyOf":[{"$ref":"#/definitions/TaskRouting"},{"type":"null"}]},"maxAttempts":{"type":"integer","format":"uint16","minimum":0}}},"TaskKind":{"type":"string","enum":["research","decision","implementation","verification","integration"]},"CompletionCheckInput":{"type":"object","required":["args","command","id","timeoutMs"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":["string","null"]},"timeoutMs":{"type":"integer","format":"uint64","minimum":0}}},"ComputeClass":{"type":"string","enum":["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"]},"TaskRouting":{"type":"object","required":["required","risk"],"properties":{"risk":{"$ref":"#/definitions/Risk"},"required":{"$ref":"#/definitions/ComputeCapabilities"}}},"Risk":{"type":"string","enum":["low","medium","high","critical"]},"ComputeCapabilities":{"type":"object","required":["coding","long_context","reasoning","tools","vision"],"properties":{"coding":{"type":"integer","format":"uint8","minimum":0},"reasoning":{"type":"integer","format":"uint8","minimum":0},"tools":{"type":"integer","format":"uint8","minimum":0},"vision":{"type":"integer","format":"uint8","minimum":0},"long_context":{"type":"integer","format":"uint8","minimum":0}}},"GoalCriterionInput":{"type":"object","required":["checkIds","description","id","taskId"],"properties":{"id":{"type":"string"},"description":{"type":"string"},"taskId":{"type":"string"},"checkIds":{"type":"array","items":{"type":"string"}}}},"SkippedArtifactOutput":{"type":"object","required":["artifact","reason"],"properties":{"artifact":{"type":"string"},"reason":{"type":"string"}}},"TraceReportEntry":{"description":"Per-run row of a benchmark report: aggregated metrics plus derived score.","type":"object","required":["runId","score","summary"],"properties":{"runId":{"type":"string"},"summary":{"$ref":"#/definitions/TraceSummary"},"score":{"$ref":"#/definitions/TraceScore"}}},"TraceSummary":{"description":"Aggregate, deterministic metrics for one run's ordered event sequence.\n\nEvery counter is derived purely from event kinds; `elapsed_ms` is the only wall-clock field and is never invented here — a caller with a clock (such as a store query joining recorded timings) may fill it in.","type":"object","properties":{"total_events":{"default":0,"type":"integer","format":"uint32","minimum":0},"tasks_created":{"default":0,"type":"integer","format":"uint32","minimum":0},"tasks_completed":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_starts":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_finishes":{"default":0,"type":"integer","format":"uint32","minimum":0},"worker_failures":{"default":0,"type":"integer","format":"uint32","minimum":0},"verification_passes":{"default":0,"type":"integer","format":"uint32","minimum":0},"verification_failures":{"default":0,"type":"integer","format":"uint32","minimum":0},"attention_created":{"default":0,"type":"integer","format":"uint32","minimum":0},"attention_resolved":{"default":0,"type":"integer","format":"uint32","minimum":0},"elapsed_ms":{"default":null,"type":["integer","null"],"format":"uint64","minimum":0}}},"TraceScore":{"description":"Deterministic comparison score for a [`TraceSummary`].\n\nEach component is per-mille (0..=1000); `total` is therefore 0..=3000.","type":"object","required":["autonomy","first_pass","reliability"],"properties":{"reliability":{"description":"Completed tasks out of created tasks.","type":"integer","format":"uint16","minimum":0},"autonomy":{"description":"Resolved attention out of created attention; a run that never needed attention scores full marks.","type":"integer","format":"uint16","minimum":0},"first_pass":{"description":"Verification passes out of verification attempts.","type":"integer","format":"uint16","minimum":0}}},"TraceComparison":{"type":"object","required":["rankings"],"properties":{"rankings":{"type":"array","items":{"$ref":"#/definitions/TraceRanking"}}}},"TraceRanking":{"type":"object","required":["label","score"],"properties":{"label":{"type":"string"},"score":{"$ref":"#/definitions/TraceScore"}}},"RunState":{"type":"string","enum":["active","pausing","paused","cancelling","attention","completed","failed","cancelled"]},"TaskSnapshotOutput":{"type":"object","required":["activities","attempt","blockedBy","dependencies","id","kind","preferredCompute","readScope","state","title","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"state":{"$ref":"#/definitions/TaskState"},"attempt":{"type":"integer","format":"uint16","minimum":0},"preferredCompute":{"$ref":"#/definitions/ComputeClass"},"dependencies":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"blockedBy":{"type":"array","items":{"type":"string"}},"lastFailure":{"type":["string","null"]},"activities":{"type":"array","items":{"type":"string"}},"resultSummary":{"type":["string","null"]}}},"TaskState":{"type":"string","enum":["pending","ready","running","verifying","attention","blocked","done","failed","cancelled"]},"ActiveWorkerOutput":{"type":"object","required":["id","taskId"],"properties":{"id":{"type":"string"},"taskId":{"type":"string"}}},"AttentionSnapshotOutput":{"type":"object","required":["id","kind","summary"],"properties":{"id":{"type":"string"},"kind":{"$ref":"#/definitions/AttentionKind"},"summary":{"type":"string"},"taskId":{"type":["string","null"]}}},"AttentionKind":{"type":"string","enum":["question","decision","approval","conflict","failure"]},"GoalCriterionStatusOutput":{"type":"object","required":["checkIds","description","id","state","taskId"],"properties":{"id":{"type":"string"},"description":{"type":"string"},"taskId":{"type":"string"},"checkIds":{"type":"array","items":{"type":"string"}},"state":{"$ref":"#/definitions/GoalCriterionState"}}},"GoalCriterionState":{"type":"string","enum":["pending","verified"]},"RefusalCode":{"type":"string","enum":["run_not_terminal","worktree_unmerged","worktree_dirty","path_is_project_root","path_outside_project","surface_not_owned","external_session"]},"CleanupDisposition":{"oneOf":[{"description":"Retry cleanup only after the run reaches a terminal state.","type":"string","enum":["defer"]},{"description":"Preserve the artifact and record why Loop did not remove it.","type":"string","enum":["skip"]},{"description":"A lossy cleanup choice requires an explicit human decision.","type":"string","enum":["require_decision"]}],"x-rustra-variant-order":["defer","skip","require_decision"]},"FailureClass":{"description":"Infrastructure-neutral classification of an execution or verification failure.","type":"string","enum":["assertion","timeout","process_start","invalid_contract","interrupted","environment"]},"FailurePolicy":{"description":"Deterministic retry decision table. Missing classes fail closed, and deterministic failure classes fail closed even when a budget exists: retry is only ever granted for nondeterministic verification failures ([`FailureClass::is_nondeterministic`]). The deterministic terminal policy — first assertion (or invalid-contract, process-start) failure is terminal — holds regardless of configuration.","type":"object","required":["onUnbudgetedFailure","retryBudgets"],"properties":{"retryBudgets":{"type":"array","items":{"$ref":"#/definitions/RetryBudget"}},"onUnbudgetedFailure":{"$ref":"#/definitions/OnExhaustion"}}},"RetryBudget":{"description":"Retry budget for one failure class. `max_retries` excludes the initial try.","type":"object","required":["backoff","failureClass","maxRetries","onExhaustion","scope"],"properties":{"failureClass":{"$ref":"#/definitions/FailureClass"},"scope":{"$ref":"#/definitions/RetryScope"},"maxRetries":{"type":"integer","format":"uint16","minimum":0},"backoff":{"$ref":"#/definitions/BackoffPolicy"},"onExhaustion":{"$ref":"#/definitions/OnExhaustion"}}},"RetryScope":{"description":"The smallest operation a retry budget permits the executor to repeat.","type":"string","enum":["check","candidate","worker","compute"]},"BackoffPolicy":{"description":"Bounded exponential backoff. A multiplier of one represents fixed backoff.","type":"object","required":["initialDelayMs","maxDelayMs","multiplier"],"properties":{"initialDelayMs":{"type":"integer","format":"uint64","minimum":0},"multiplier":{"type":"integer","format":"uint16","minimum":0},"maxDelayMs":{"type":"integer","format":"uint64","minimum":0}}},"OnExhaustion":{"description":"What the executor must do when no retry remains.","type":"string","enum":["fail_task","require_attention"]},"TerminalizationPolicy":{"description":"Failure propagation rules owned by core rather than an executor adapter.","type":"object","required":["dependents","failRunForSerialTask","independentBranches"],"properties":{"dependents":{"$ref":"#/definitions/DependencyTerminalization"},"independentBranches":{"$ref":"#/definitions/IndependentBranchAction"},"failRunForSerialTask":{"type":"boolean"}}},"DependencyTerminalization":{"description":"Terminal state assigned to descendants that require a failed task.","type":"string","enum":["block_terminal","cancel"]},"IndependentBranchAction":{"type":"string","enum":["continue"]},"FailurePolicyAction":{"type":"string","enum":["retry","failTask","requireAttention"]},"RunFailureAction":{"type":"string","enum":["continue","fail"]},"GraphOwnerHealth":{"type":"string","enum":["live","missing","expired","inactive"]},"GraphNodeOutput":{"type":"object","required":["attempt","blockedBy","dependencies","id","kind","readScope","state","title","workers","writeScope"],"properties":{"id":{"type":"string"},"title":{"type":"string"},"kind":{"$ref":"#/definitions/TaskKind"},"state":{"$ref":"#/definitions/TaskState"},"dependencies":{"type":"array","items":{"type":"string"}},"blockedBy":{"type":"array","items":{"type":"string"}},"readScope":{"type":"array","items":{"type":"string"}},"writeScope":{"type":"array","items":{"type":"string"}},"workers":{"type":"array","items":{"type":"string"}},"attempt":{"type":"integer","format":"uint16","minimum":0},"resultSummary":{"type":["string","null"]},"lastFailure":{"type":["string","null"]}}},"DecompositionContractOutput":{"type":"object","required":["assumptions","completionCoverage","consumes","defaults","failurePolicy","semanticTouchpoints"],"properties":{"defaults":{"type":"array","items":{"type":"string"}},"assumptions":{"type":"array","items":{"$ref":"#/definitions/AssumptionInput"}},"semanticTouchpoints":{"type":"array","items":{"$ref":"#/definitions/SemanticTouchpointInput"}},"consumes":{"type":"array","items":{"$ref":"#/definitions/DependencyConsumptionInput"}},"completionCoverage":{"type":"array","items":{"$ref":"#/definitions/CompletionCoverageInput"}},"failurePolicy":{"$ref":"#/definitions/FailurePolicy"}}},"AssumptionInput":{"type":"object","required":["assumption","evidence","ifFalse","revisit"],"properties":{"assumption":{"type":"string"},"evidence":{"type":"string"},"ifFalse":{"type":"string"},"revisit":{"type":"string"}}},"SemanticTouchpointInput":{"type":"object","required":["access","conflictResolution","id"],"properties":{"id":{"type":"string"},"access":{"$ref":"#/definitions/SemanticAccess"},"conflictResolution":{"$ref":"#/definitions/SemanticConflictResolution"}}},"SemanticAccess":{"type":"string","enum":["consume","modify"]},"SemanticConflictResolution":{"type":"string","enum":["unresolved","serialize","dependency_order"]},"DependencyConsumptionInput":{"type":"object","required":["artifacts","checks","decisions","dependency","risks"],"properties":{"dependency":{"type":"string"},"decisions":{"type":"array","items":{"type":"string"}},"artifacts":{"type":"array","items":{"type":"string"}},"checks":{"type":"array","items":{"type":"string"}},"risks":{"type":"array","items":{"type":"string"}}}},"CompletionCoverageInput":{"type":"object","required":["artifacts","checkId","evidenceLevel","requirements","semantics"],"properties":{"checkId":{"type":"string"},"requirements":{"type":"array","items":{"type":"string"}},"artifacts":{"type":"array","items":{"type":"string"}},"semantics":{"type":"array","items":{"type":"string"}},"evidenceLevel":{"$ref":"#/definitions/EvidenceLevel"}}},"EvidenceLevel":{"type":"string","enum":["static","unit","fake","integration","live"]},"DependencyResultOutput":{"type":"object","required":["summary","taskId","title"],"properties":{"taskId":{"type":"string"},"title":{"type":"string"},"summary":{"type":"string"}}},"CheckReceipt":{"type":"object","required":["args","command","durationMs","exitCode","id","stderr","stdout","timedOut","workingDirectory"],"properties":{"id":{"type":"string"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":"string"},"exitCode":{"type":"integer","format":"int32"},"stdout":{"type":"string"},"stderr":{"type":"string"},"timedOut":{"type":"boolean"},"durationMs":{"type":"integer","format":"uint64","minimum":0},"outputArtifact":{"default":null,"type":["string","null"]},"source":{"default":null,"anyOf":[{"$ref":"#/definitions/SourceReceipt"},{"type":"null"}]}}},"SourceReceipt":{"type":"object","required":["afterFingerprint","beforeFingerprint","observedChangedPaths","observedOutsideWriteScope"],"properties":{"beforeFingerprint":{"description":"Digest of the declared read/write scope around the completion check batch.","type":"string"},"afterFingerprint":{"type":"string"},"observedChangedPaths":{"description":"Repository paths observed to change while a worker ran. Shared-tree observations cannot establish which actor wrote them.","type":"array","items":{"type":"string"}},"observedOutsideWriteScope":{"type":"array","items":{"type":"string"}}}},"RunListOutput":{"type":"object","required":["runId","state"],"properties":{"runId":{"type":"string"},"state":{"$ref":"#/definitions/RunState"}}},"PreflightTaskSpecInput":{"type":"object","required":["assumptions","completionCoverage","consumes","defaults","failurePolicy","semanticTouchpoints","task"],"properties":{"task":{"$ref":"#/definitions/TaskSpecInput"},"defaults":{"type":"array","items":{"type":"string"}},"assumptions":{"type":"array","items":{"$ref":"#/definitions/AssumptionInput"}},"semanticTouchpoints":{"type":"array","items":{"$ref":"#/definitions/SemanticTouchpointInput"}},"consumes":{"type":"array","items":{"$ref":"#/definitions/DependencyConsumptionInput"}},"completionCoverage":{"type":"array","items":{"$ref":"#/definitions/CompletionCoverageInput"}},"failurePolicy":{"$ref":"#/definitions/FailurePolicy"}}},"GuidanceDeliveredEvent":{"description":"Wire shape of a steer-mailbox delivery record (ADR M-TL2): the mailbox appends one of these per live worker after a successful `provider.steer`, marking every `GuidanceAdded` at or below `through_sequence` as received by that worker's task. The delivery watermark projection lives in loop-core; this type is only the transport form (see `record_guidance_delivered`).","type":"object","required":["taskId","throughSequence","workerId"],"properties":{"taskId":{"type":"string"},"workerId":{"type":"string"},"throughSequence":{"type":"integer","format":"int64"}}},"CheckResultInput":{"type":"object","required":["id","passed"],"properties":{"id":{"type":"string"},"passed":{"type":"boolean"}}},"WorkerState":{"description":"Lifecycle vocabulary for a worker as observed at the adapter boundary.\n\nThis enum is the domain source of the worker-status vocabulary. The bridge carries this type through the optional `state` fields on `WorkerInput` and `WorkerResultInput`, generating the protocol `WorkerState`. These observations do not change the existing worker result policy; absent state remains valid for callers that only report success and summary. Adapters should consume the generated type rather than maintain a copy.\n\nVocabulary correspondence (decided here, once):\n\n- `starting` / `running` / `completed` / `cancelled` map one-to-one to the adapter session lifecycle. - `lost` is the only terminal-without-result state. An adapter session that ends without a usable result (process exit, API failure, blocked or unobservable agent) reports `lost`; the failure taxonomy and retryability stay adapter-side in the worker result. Recovery uses the same term for a worker that can no longer be observed after a restart.\n\nThere is deliberately no `failed` variant: the graph does not distinguish \"worker failed\" from \"worker lost\" as a state — both reconcile through the recorded worker result, and the run-level failure vocabulary already lives in [`crate::run::RunState`] and task events.","type":"string","enum":["starting","running","completed","lost","cancelled"]},"ComputeCandidateInput":{"type":"object","required":["available","capabilities","computeClass","costWeight","id","latency"],"properties":{"id":{"type":"string"},"computeClass":{"$ref":"#/definitions/ComputeClass"},"capabilities":{"$ref":"#/definitions/ComputeCapabilitiesInput"},"latency":{"type":"integer","format":"uint16","minimum":0},"costWeight":{"type":"integer","format":"uint16","minimum":0},"available":{"type":"boolean"}}},"ComputeCapabilitiesInput":{"description":"Capability scores advertised for a compute candidate (loop-core `ComputeCapabilities` mirror; the core type lacks a JSON schema derive, so the bridge carries its own wire form and converts on entry).","type":"object","required":["coding","longContext","reasoning","tools","vision"],"properties":{"coding":{"type":"integer","format":"uint8","minimum":0},"reasoning":{"type":"integer","format":"uint8","minimum":0},"tools":{"type":"integer","format":"uint8","minimum":0},"vision":{"type":"integer","format":"uint8","minimum":0},"longContext":{"type":"integer","format":"uint8","minimum":0}}},"CapabilityRequirementsInput":{"type":"object","required":["capabilities","criticalRiskFloor","highRiskFloor","maximumCompute","minimumCompute","risk"],"properties":{"capabilities":{"$ref":"#/definitions/ComputeCapabilitiesInput"},"minimumCompute":{"$ref":"#/definitions/ComputeClass"},"maximumCompute":{"$ref":"#/definitions/ComputeClass"},"risk":{"$ref":"#/definitions/RoutingRisk"},"highRiskFloor":{"$ref":"#/definitions/ComputeClass"},"criticalRiskFloor":{"$ref":"#/definitions/ComputeClass"}}},"RoutingRisk":{"description":"Task risk driving the compute-class floor (loop-core `Risk` mirror).","type":"string","enum":["low","medium","high","critical"]},"EventOutput":{"type":"object","required":["payloadJson","sequence"],"properties":{"sequence":{"type":"integer","format":"int64"},"payloadJson":{"type":"string"}}}} as Record<string, ComplexSchema>, true)! as FrameCodec<ListRunsInput, Array_of_RunListOutput>;
 
 export const pauseRunCodec: FrameCodec<RunInput, OperationOutput> = {
   commandId: 14,
@@ -4331,14 +4331,14 @@ export const prepareRunCodec: FrameCodec<PrepareRunInput, OperationOutput> = {
 };
 
 export const prepareRunPreflightCodec: FrameCodec<PrepareRunPreflightInput, OperationOutput> = {
-  commandId: 46,
+  commandId: 47,
   execution: "sync",
 
   encode(args: PrepareRunPreflightInput): ArrayBuffer {
     // [cmd_id: u16 LE][postcard(PrepareRunPreflightInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 46, true);
+    new DataView(cmdId.buffer).setUint16(0, 47, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -4638,15 +4638,230 @@ export const prepareRunPreflightCodec: FrameCodec<PrepareRunPreflightInput, Oper
   },
 };
 
+export const promoteSteerCodec: FrameCodec<PromoteSteerInput, PromoteSteerOutput> = {
+  commandId: 38,
+  execution: "sync",
+
+  encode(args: PromoteSteerInput): ArrayBuffer {
+    // [cmd_id: u16 LE][postcard(PromoteSteerInput)]
+    const parts: Uint8Array[] = [];
+    const cmdId = new Uint8Array(2);
+    new DataView(cmdId.buffer).setUint16(0, 38, true);
+    parts.push(cmdId);
+    parts.push(_pcEncodeString(args.databasePath));
+    parts.push(_pcEncodeString(args.runId));
+    parts.push(_pcEncodeString(args.message));
+    parts.push(_pcEncodeString(args.task.id));
+    parts.push(_pcEncodeString(args.task.title));
+    {
+      const _variants = ["research","decision","implementation","verification","integration"] as const;
+      const _idx = _variants.indexOf(args.task.kind);
+      if (_idx < 0) throw new Error('invalid enum value for kind: ' + args.task.kind);
+      parts.push(_pcEncodeVarint(_idx));
+    }
+    {
+      const _arr = args.task.dependencies;
+      parts.push(_pcEncodeVarint(_arr.length));
+      for (let _i = 0; _i < _arr.length; _i++) {
+        parts.push(_pcEncodeString(_arr[_i]!));
+      }
+    }
+    {
+      const _arr = args.task.readScope;
+      parts.push(_pcEncodeVarint(_arr.length));
+      for (let _i = 0; _i < _arr.length; _i++) {
+        parts.push(_pcEncodeString(_arr[_i]!));
+      }
+    }
+    {
+      const _arr = args.task.writeScope;
+      parts.push(_pcEncodeVarint(_arr.length));
+      for (let _i = 0; _i < _arr.length; _i++) {
+        parts.push(_pcEncodeString(_arr[_i]!));
+      }
+    }
+    {
+      const _arr = args.task.requirements;
+      parts.push(_pcEncodeVarint(_arr.length));
+      for (let _i = 0; _i < _arr.length; _i++) {
+        parts.push(_pcEncodeString(_arr[_i]!));
+      }
+    }
+    {
+      const _opt = args.task.persona;
+      if (_opt === null || _opt === undefined) {
+        parts.push(new Uint8Array([0]));
+      } else {
+        parts.push(new Uint8Array([1]));
+        parts.push(_pcEncodeString(_opt));
+      }
+    }
+    {
+      const _arr = args.task.completionChecks;
+      parts.push(_pcEncodeVarint(_arr.length));
+      for (let _i = 0; _i < _arr.length; _i++) {
+        parts.push(_pcEncodeString(_arr[_i]!.id));
+        parts.push(_pcEncodeString(_arr[_i]!.command));
+        {
+          const _arri = _arr[_i]!.args;
+          parts.push(_pcEncodeVarint(_arri.length));
+          for (let _ii = 0; _ii < _arri.length; _ii++) {
+            parts.push(_pcEncodeString(_arri[_ii]!));
+          }
+        }
+        {
+          const _opt = _arr[_i]!.workingDirectory;
+          if (_opt === null || _opt === undefined) {
+            parts.push(new Uint8Array([0]));
+          } else {
+            parts.push(new Uint8Array([1]));
+            parts.push(_pcEncodeString(_opt));
+          }
+        }
+        parts.push(_pcEncodeVarint64(_arr[_i]!.timeoutMs));
+      }
+    }
+    {
+      const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+      const _idx = _variants.indexOf(args.task.preferredCompute);
+      if (_idx < 0) throw new Error('invalid enum value for preferredCompute: ' + args.task.preferredCompute);
+      parts.push(_pcEncodeVarint(_idx));
+    }
+    {
+      const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+      const _idx = _variants.indexOf(args.task.minimumCompute);
+      if (_idx < 0) throw new Error('invalid enum value for minimumCompute: ' + args.task.minimumCompute);
+      parts.push(_pcEncodeVarint(_idx));
+    }
+    {
+      const _variants = ["deterministic","typed_decision","tiny","fast","balanced","strong","frontier"] as const;
+      const _idx = _variants.indexOf(args.task.maximumCompute);
+      if (_idx < 0) throw new Error('invalid enum value for maximumCompute: ' + args.task.maximumCompute);
+      parts.push(_pcEncodeVarint(_idx));
+    }
+    {
+      const _opt = args.task.routing;
+      if (_opt === null || _opt === undefined) {
+        parts.push(new Uint8Array([0]));
+      } else {
+        parts.push(new Uint8Array([1]));
+        {
+          const _variants = ["low","medium","high","critical"] as const;
+          const _idx = _variants.indexOf(_opt.risk);
+          if (_idx < 0) throw new Error('invalid enum value for risk: ' + _opt.risk);
+          parts.push(_pcEncodeVarint(_idx));
+        }
+        parts.push(_pcEncodeVarint(_opt.required.coding));
+        parts.push(_pcEncodeVarint(_opt.required.reasoning));
+        parts.push(_pcEncodeVarint(_opt.required.tools));
+        parts.push(_pcEncodeVarint(_opt.required.vision));
+        parts.push(_pcEncodeVarint(_opt.required.long_context));
+      }
+    }
+    parts.push(_pcEncodeVarint(args.task.maxAttempts));
+    {
+      const _arr = args.criteria;
+      parts.push(_pcEncodeVarint(_arr.length));
+      for (let _i = 0; _i < _arr.length; _i++) {
+        parts.push(_pcEncodeString(_arr[_i]!.id));
+        parts.push(_pcEncodeString(_arr[_i]!.description));
+        parts.push(_pcEncodeString(_arr[_i]!.taskId));
+        {
+          const _arri = _arr[_i]!.checkIds;
+          parts.push(_pcEncodeVarint(_arri.length));
+          for (let _ii = 0; _ii < _arri.length; _ii++) {
+            parts.push(_pcEncodeString(_arri[_ii]!));
+          }
+        }
+      }
+    }
+    return _pcConcatUint8Arrays(parts).buffer as ArrayBuffer;
+  },
+
+  decode(buf: ArrayBuffer | ArrayBufferView): { ok: boolean; result?: PromoteSteerOutput; error?: RustraError } {
+    // caller-buffer 뷰(Uint8Array subarray 등)도 받는다 — node-loop 가 왕복당
+    // 사본 없이 프레임 뷰를 그대로 넘긴다. DataView 는 ArrayBuffer 만 받으므로
+    // (buf.buffer, byteOffset) 로 정규화한다.
+    const isView = ArrayBuffer.isView(buf);
+    const u8 = isView
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+    const view = isView
+      ? new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new DataView(buf);
+    if (view.byteLength < 8) return { ok: false, error: { code: 'invoke.too_short', message: 'response too short' } };
+    if (u8[0] !== 1) {
+      let err: RustraError = { code: 'invoke.failed', message: 'invoke failed' };
+      try {
+        const errLen = view.getUint16(8, true);
+        if (errLen > 0) {
+          // postcard({ code: String, message: String })
+          const c = _pcDecodeString(u8, 10);
+          const m = _pcDecodeString(u8, 10 + c.bytesRead);
+          err = { code: c.value, message: m.value };
+        }
+      } catch {
+        // 잘린/뒤틀린 에러 프레임 — 기본 err 를 유지한다.
+      }
+      return { ok: false, error: err };
+    }
+    // Decode postcard from offset 8
+    let offset = 8;
+    const result: Partial<PromoteSteerOutput> = {};
+    {
+      result.accepted = u8[offset] === 1;
+      offset += 1;
+    }
+    {
+      const _v = _pcDecodeString(u8, offset);
+      result.runId = _v.value;
+      offset += _v.bytesRead;
+    }
+    {
+      const _v = _pcDecodeString(u8, offset);
+      result.taskId = _v.value;
+      offset += _v.bytesRead;
+    }
+    {
+      const _len = _pcDecodeVarint(u8, offset);
+      offset += _len.bytesRead;
+      const _arr: string[] = new Array(_len.value);
+      for (let _i = 0; _i < _len.value; _i++) {
+        const _v = _pcDecodeString(u8, offset);
+        _arr[_i] = _v.value;
+        offset += _v.bytesRead;
+      }
+      result.criterionIds = _arr;
+    }
+    {
+      const _v = _pcDecodeString(u8, offset);
+      result.summary = _v.value;
+      offset += _v.bytesRead;
+    }
+    {
+      const _len = _pcDecodeVarint(u8, offset);
+      offset += _len.bytesRead;
+      const _arr: string[] = new Array(_len.value);
+      for (let _i = 0; _i < _len.value; _i++) {
+        const _v = _pcDecodeString(u8, offset);
+        _arr[_i] = _v.value;
+        offset += _v.bytesRead;
+      }
+      result.evidenceTests = _arr;
+    }
+    return { ok: true, result: result as PromoteSteerOutput };
+  },
+};
+
 export const reconcileTaskCodec: FrameCodec<ReconcileTaskInput, OperationOutput> = {
-  commandId: 41,
+  commandId: 42,
   execution: "sync",
 
   encode(args: ReconcileTaskInput): ArrayBuffer {
     // [cmd_id: u16 LE][postcard(ReconcileTaskInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 41, true);
+    new DataView(cmdId.buffer).setUint16(0, 42, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -4665,7 +4880,7 @@ export const reconcileTaskCodec: FrameCodec<ReconcileTaskInput, OperationOutput>
       out = grown;
     };
     ensure(2);
-    out[w++] = 41; out[w++] = 0;
+    out[w++] = 42; out[w++] = 0;
     { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] = out[w - 1]! & 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] = out[w - 1]! & 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.taskId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] = out[w - 1]! & 0x7f; out.set(_u, w); w += _u.length; }
@@ -4957,14 +5172,14 @@ export const recordDecisionCodec: FrameCodec<DecisionInput, OperationOutput> = {
 };
 
 export const recordGuidanceDeliveredCodec: FrameCodec<RecordGuidanceDeliveredInput, OperationOutput> = {
-  commandId: 47,
+  commandId: 48,
   execution: "sync",
 
   encode(args: RecordGuidanceDeliveredInput): ArrayBuffer {
     // [cmd_id: u16 LE][postcard(RecordGuidanceDeliveredInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 47, true);
+    new DataView(cmdId.buffer).setUint16(0, 48, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -5192,7 +5407,7 @@ export const recordWorkerStoppedComplexCodec: FrameCodec<WorkerInput, OperationO
 export const recordWorkerStoppedCodec = recordWorkerStoppedComplexCodec;
 
 export const releaseExecutionCodec: FrameCodec<ReleaseExecutionInput, OperationOutput> = {
-  commandId: 40,
+  commandId: 41,
   execution: "sync",
   syncFields: ["databasePath","runId","owner"],
 
@@ -5200,7 +5415,7 @@ export const releaseExecutionCodec: FrameCodec<ReleaseExecutionInput, OperationO
     // [cmd_id: u16 LE][postcard(ReleaseExecutionInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 40, true);
+    new DataView(cmdId.buffer).setUint16(0, 41, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -5218,7 +5433,7 @@ export const releaseExecutionCodec: FrameCodec<ReleaseExecutionInput, OperationO
       out = grown;
     };
     ensure(2);
-    out[w++] = 40; out[w++] = 0;
+    out[w++] = 41; out[w++] = 0;
     { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] = out[w - 1]! & 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] = out[w - 1]! & 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.owner; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] = out[w - 1]! & 0x7f; out.set(_u, w); w += _u.length; }
@@ -5264,14 +5479,14 @@ export const releaseExecutionCodec: FrameCodec<ReleaseExecutionInput, OperationO
 };
 
 export const renewExecutionCodec: FrameCodec<ExecutionLeaseInput, OperationOutput> = {
-  commandId: 39,
+  commandId: 40,
   execution: "sync",
 
   encode(args: ExecutionLeaseInput): ArrayBuffer {
     // [cmd_id: u16 LE][postcard(ExecutionLeaseInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 39, true);
+    new DataView(cmdId.buffer).setUint16(0, 40, true);
     parts.push(cmdId);
     parts.push(_pcEncodeString(args.databasePath));
     parts.push(_pcEncodeString(args.runId));
@@ -5291,7 +5506,7 @@ export const renewExecutionCodec: FrameCodec<ExecutionLeaseInput, OperationOutpu
       out = grown;
     };
     ensure(2);
-    out[w++] = 39; out[w++] = 0;
+    out[w++] = 40; out[w++] = 0;
     { const _s = args.databasePath; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] = out[w - 1]! & 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.runId; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] = out[w - 1]! & 0x7f; out.set(_u, w); w += _u.length; }
     { const _s = args.owner; const _u = _utf8Encode(_s); ensure(5 + _u.length); let _v = _u.length; do { out[w++] = (_v % 128) | 0x80; _v = Math.floor(_v / 128); } while (_v > 0); out[w - 1] = out[w - 1]! & 0x7f; out.set(_u, w); w += _u.length; }
@@ -5561,14 +5776,14 @@ export const resumeRunCodec: FrameCodec<RunInput, OperationOutput> = {
 };
 
 export const selectCandidateCodec: FrameCodec<SelectCandidateInput, SelectCandidateOutput> = {
-  commandId: 43,
+  commandId: 44,
   execution: "sync",
 
   encode(args: SelectCandidateInput): ArrayBuffer {
     // [cmd_id: u16 LE][postcard(SelectCandidateInput)]
     const parts: Uint8Array[] = [];
     const cmdId = new Uint8Array(2);
-    new DataView(cmdId.buffer).setUint16(0, 43, true);
+    new DataView(cmdId.buffer).setUint16(0, 44, true);
     parts.push(cmdId);
     {
       const _arr = args.candidates;

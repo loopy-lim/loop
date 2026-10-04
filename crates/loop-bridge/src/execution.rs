@@ -8,7 +8,9 @@ use crate::{
     SemanticTouchpointInput, TaskSpecInput,
 };
 use loop_core::attention::{AttentionKind, AttentionResolution, AttentionState};
-use loop_core::event::GoalCriterion;
+use loop_core::event::{
+    steer_promotion_events, GoalCriterion, SteerPromotionError,
+};
 use loop_core::event::{CheckReceipt, Event, EventKind};
 use loop_core::task::{Task, TaskId, TaskState};
 use rustra::prelude::*;
@@ -427,6 +429,106 @@ pub fn steer_run(input: SteerRunInput) -> Result<OperationOutput> {
     )
 }
 
+/// Focused tests that prove the steer-promotion contract end to end. The
+/// command reports them verbatim as evidence so a reviewer can re-run the
+/// exact suite; renaming one of these tests must update this list in the
+/// same commit.
+const STEER_PROMOTION_EVIDENCE_TESTS: &[&str] = &[
+    "loop_core::event::steer::tests::steer_promotion_binds_message_task_and_criterion",
+    "loop_core::event::steer::tests::steer_promotion_requires_dependency_and_bound_checks",
+    "loop_core::event::steer::tests::steer_criterion_blocks_run_completion_until_verified",
+    "loop_bridge::execution::steer_promotion_bridge_tests::steer_promotion_binds_criterion_to_new_dependent_task",
+    "loop_bridge::execution::steer_promotion_bridge_tests::unverified_steer_criterion_blocks_run_completion",
+];
+
+#[bridge_type]
+pub struct PromoteSteerInput {
+    pub database_path: String,
+    pub run_id: String,
+    pub message: String,
+    pub task: TaskSpecInput,
+    pub criteria: Vec<GoalCriterionInput>,
+}
+
+#[bridge_type]
+pub struct PromoteSteerOutput {
+    pub accepted: bool,
+    pub run_id: String,
+    pub task_id: String,
+    pub criterion_ids: Vec<String>,
+    pub summary: String,
+    pub evidence_tests: Vec<String>,
+}
+
+/// Promote a mid-run user steer into the goal graph: the correction becomes
+/// a new dependent task and a new goal criterion in one atomic append, so
+/// the existing `RunCompleted` gate keeps the run open until the promoted
+/// criterion verifies. Plain guidance without a criterion is still served
+/// by `steer_run`; this command is for requirements that must be enforced.
+#[command]
+pub fn promote_steer(input: PromoteSteerInput) -> Result<PromoteSteerOutput> {
+    let criterion_ids: Vec<String> = input.criteria.iter().map(|c| c.id.clone()).collect();
+    let task = task_from_input(input.task)?;
+    let events = steer_promotion_events(
+        &input.run_id,
+        &input.message,
+        task.clone(),
+        goal_criteria(input.criteria),
+    )
+    .map_err(|error: SteerPromotionError| bridge_error("invalid_steer_promotion", error))?;
+    let mut store = store(&input.database_path)?;
+    let projection = store
+        .projection(&input.run_id)
+        .map_err(|error| bridge_error("run_not_found", error))?;
+    if projection.run_id.is_none() {
+        return Err(bridge_error("run_not_found", &input.run_id));
+    }
+    if projection
+        .run_state
+        .is_some_and(loop_core::run::RunState::is_terminal)
+    {
+        return Err(bridge_error(
+            "run_not_active",
+            "a terminal run cannot accept steer promotions",
+        ));
+    }
+    if projection.tasks.contains_key(&task.id) {
+        return Err(bridge_error("task_already_created", &task.id));
+    }
+    for dependency in &task.dependencies {
+        if !projection.tasks.contains_key(dependency) {
+            return Err(bridge_error(
+                "unknown_dependency",
+                format!(
+                    "steer task {} depends on unknown task {}",
+                    task.id, dependency
+                ),
+            ));
+        }
+    }
+    let task_id = task.id.to_string();
+    let mut merged: Vec<Task> = projection.tasks.values().cloned().collect();
+    merged.push(task);
+    loop_core::graph::TaskGraph::new(merged)
+        .map_err(|error| bridge_error("invalid_graph", error))?;
+    append_batch_and_notify(&mut store, &events, "promote_steer_failed")?;
+    Ok(PromoteSteerOutput {
+        accepted: true,
+        summary: format!(
+            "steer promoted to criteria [{}] on dependent task {}; the run stays open until they verify",
+            criterion_ids.join(", "),
+            task_id
+        ),
+        task_id,
+        run_id: input.run_id,
+        criterion_ids,
+        evidence_tests: STEER_PROMOTION_EVIDENCE_TESTS
+            .iter()
+            .map(|test| (*test).to_string())
+            .collect(),
+    })
+}
+
 #[command]
 pub fn get_run_plan(input: RunInput) -> Result<RunPlanOutput> {
     let projection = store(&input.database_path)?
@@ -760,6 +862,7 @@ pub(crate) fn register_execution(builder: rustra::PackageBuilder) -> rustra::Pac
         record_activity,
         record_task_output,
         steer_run,
+        promote_steer,
         claim_execution,
         renew_execution,
         release_execution,
@@ -1005,5 +1108,265 @@ mod preflight_bridge_tests {
             contract.failure_policy.on_unbudgeted_failure,
             OnExhaustion::FailTask
         );
+    }
+}
+
+#[cfg(test)]
+mod steer_promotion_bridge_tests {
+    use super::*;
+    use crate::{
+        CheckResultInput, CompletionCheckInput, RecordCheckReceiptsInput, RunInput, UpdateTaskInput,
+        VerificationInput, WorkerInput, WorkerResultInput,
+    };
+    use loop_core::event::{CheckReceipt, SourceReceipt};
+    use loop_core::policy::ComputeClass;
+    use loop_core::run::RunState;
+    use loop_core::task::{TaskKind, TaskState};
+    use loop_store::SqliteStore;
+
+    const RUN_ID: &str = "steer-run";
+
+    fn task(id: &str, dependencies: &[&str]) -> TaskSpecInput {
+        TaskSpecInput {
+            id: id.into(),
+            title: id.into(),
+            kind: TaskKind::Implementation,
+            dependencies: dependencies.iter().map(|id| (*id).to_string()).collect(),
+            read_scope: vec![],
+            write_scope: vec![format!("src/{id}.rs")],
+            requirements: vec!["behavior".into()],
+            persona: None,
+            completion_checks: vec![CompletionCheckInput {
+                id: "unit".into(),
+                command: "cargo".into(),
+                args: vec!["test".into()],
+                working_directory: None,
+                timeout_ms: 1_000,
+            }],
+            preferred_compute: ComputeClass::Fast,
+            minimum_compute: ComputeClass::Tiny,
+            maximum_compute: ComputeClass::Strong,
+            routing: None,
+            max_attempts: 2,
+        }
+    }
+
+    fn criterion(id: &str) -> GoalCriterionInput {
+        GoalCriterionInput {
+            id: id.into(),
+            description: "behavior".into(),
+            task_id: id.into(),
+            check_ids: vec!["unit".into()],
+        }
+    }
+
+    fn promotion_input(database_path: &str, id: &str) -> PromoteSteerInput {
+        PromoteSteerInput {
+            database_path: database_path.into(),
+            run_id: RUN_ID.into(),
+            message: "user correction: also cover the corrected behavior".into(),
+            task: task(id, &["original"]),
+            criteria: vec![criterion(id)],
+        }
+    }
+
+    fn prepared_run(database_path: &str) {
+        prepare_goal_run(PrepareGoalRunInput {
+            database_path: database_path.into(),
+            run_id: RUN_ID.into(),
+            intent: "behavior".into(),
+            working_directory: "/project".into(),
+            tasks: vec![task("original", &[])],
+            criteria: vec![criterion("original")],
+        })
+        .unwrap();
+    }
+
+    fn receipt(check_id: &str) -> CheckReceipt {
+        CheckReceipt {
+            id: check_id.into(),
+            command: "cargo".into(),
+            args: vec!["test".into()],
+            working_directory: "/project".into(),
+            exit_code: 0,
+            stdout: String::new(),
+            stderr: String::new(),
+            timed_out: false,
+            duration_ms: 1,
+            output_artifact: None,
+            source: Some(SourceReceipt {
+                before_fingerprint: "abc".into(),
+                after_fingerprint: "abc".into(),
+                observed_changed_paths: vec![],
+                observed_outside_write_scope: vec![],
+            }),
+        }
+    }
+
+    fn start_task(database_path: &str, task_id: &str) {
+        crate::update_task(UpdateTaskInput {
+            database_path: database_path.into(),
+            run_id: RUN_ID.into(),
+            task_id: task_id.into(),
+            state: TaskState::Ready,
+        })
+        .unwrap();
+        crate::record_worker_started(WorkerInput {
+            database_path: database_path.into(),
+            run_id: RUN_ID.into(),
+            task_id: task_id.into(),
+            worker_id: format!("worker-{task_id}"),
+            execution_owner: None,
+            state: None,
+        })
+        .unwrap();
+    }
+
+    fn verify_task(database_path: &str, task_id: &str, with_receipts: bool) {
+        crate::record_worker_result(WorkerResultInput {
+            database_path: database_path.into(),
+            run_id: RUN_ID.into(),
+            task_id: task_id.into(),
+            worker_id: format!("worker-{task_id}"),
+            success: true,
+            summary: "done".into(),
+            execution_owner: None,
+            state: None,
+        })
+        .unwrap();
+        if with_receipts {
+            crate::record_check_receipts(RecordCheckReceiptsInput {
+                database_path: database_path.into(),
+                run_id: RUN_ID.into(),
+                task_id: task_id.into(),
+                checks: vec![receipt("unit")],
+                execution_owner: None,
+            })
+            .unwrap();
+        }
+        crate::record_verification(VerificationInput {
+            database_path: database_path.into(),
+            run_id: RUN_ID.into(),
+            task_id: task_id.into(),
+            passed: true,
+            checks: vec![CheckResultInput {
+                id: "unit".into(),
+                passed: true,
+            }],
+            reason: "focused suite passed".into(),
+            execution_owner: None,
+        })
+        .unwrap();
+    }
+
+    fn snapshot(database_path: &str) -> crate::SnapshotOutput {
+        crate::get_snapshot(RunInput {
+            database_path: database_path.into(),
+            run_id: RUN_ID.into(),
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn steer_promotion_binds_criterion_to_new_dependent_task() {
+        let dir = tempfile::tempdir().unwrap();
+        let database_path = dir.path().join("steer-bind.db").display().to_string();
+        prepared_run(&database_path);
+
+        // A steer task referencing a task outside the run must not be
+        // partially written: no task, no criterion, no guidance.
+        let unknown = promote_steer(PromoteSteerInput {
+            task: task("correction", &["ghost"]),
+            ..promotion_input(&database_path, "correction")
+        });
+        assert_eq!(unknown.unwrap_err().code(), "unknown_dependency");
+        let before = snapshot(&database_path);
+        assert_eq!(before.tasks.len(), 1);
+        assert_eq!(before.goal_criteria.len(), 1);
+        assert!(before.guidance.is_empty());
+
+        let output = promote_steer(promotion_input(&database_path, "correction")).unwrap();
+        assert!(output.accepted);
+        assert_eq!(output.task_id, "correction");
+        assert_eq!(output.criterion_ids, vec!["correction"]);
+        assert!(output.summary.contains("correction"));
+        assert!(!output.evidence_tests.is_empty());
+
+        let after = snapshot(&database_path);
+        assert_eq!(after.tasks.len(), 2);
+        let correction = after
+            .tasks
+            .iter()
+            .find(|task| task.id == "correction")
+            .unwrap();
+        assert_eq!(correction.dependencies, vec!["original".to_string()]);
+        assert_eq!(correction.blocked_by, vec!["original".to_string()]);
+        assert_eq!(after.goal_criteria.len(), 2);
+        assert!(after
+            .goal_criteria
+            .iter()
+            .all(|item| item.state == loop_core::event::GoalCriterionState::Pending));
+        assert_eq!(after.guidance.len(), 1);
+        assert!(after.guidance[0].contains("corrected behavior"));
+    }
+
+    #[test]
+    fn unverified_steer_criterion_blocks_run_completion() {
+        let dir = tempfile::tempdir().unwrap();
+        let database_path = dir.path().join("steer-gate.db").display().to_string();
+        prepared_run(&database_path);
+        start_task(&database_path, "original");
+        promote_steer(promotion_input(&database_path, "correction")).unwrap();
+
+        // The original work verifies with stable receipts, but the promoted
+        // criterion is still pending: the run must stay open.
+        verify_task(&database_path, "original", true);
+        let store = SqliteStore::open(&database_path).unwrap();
+        assert_eq!(
+            store.projection(RUN_ID).unwrap().run_state,
+            Some(RunState::Active)
+        );
+
+        // The promoted task finishing without recorded check receipts
+        // isolates the goal gate from the task-completeness gate: every task
+        // is done, yet the unverified steer criterion must still refuse
+        // completion with the existing IncompleteGoal policy.
+        start_task(&database_path, "correction");
+        verify_task(&database_path, "correction", false);
+        let mut store = SqliteStore::open(&database_path).unwrap();
+        assert_eq!(store.projection(RUN_ID).unwrap().run_state, Some(RunState::Active));
+        assert!(matches!(
+            store.append(&loop_core::event::Event::new(
+                RUN_ID,
+                loop_core::event::EventKind::RunCompleted
+            )),
+            Err(loop_store::StoreError::Projection(
+                loop_core::event::ProjectionError::IncompleteGoal
+            ))
+        ));
+
+        // Once the steer-added criterion verifies against its declared
+        // check, the same gate accepts completion.
+        crate::record_check_receipts(RecordCheckReceiptsInput {
+            database_path: database_path.clone(),
+            run_id: RUN_ID.into(),
+            task_id: "correction".into(),
+            checks: vec![receipt("unit")],
+            execution_owner: None,
+        })
+        .unwrap();
+        let mut store = SqliteStore::open(&database_path).unwrap();
+        store
+            .append(&loop_core::event::Event::new(
+                RUN_ID,
+                loop_core::event::EventKind::RunCompleted,
+            ))
+            .unwrap();
+        let after = snapshot(&database_path);
+        assert_eq!(after.state, RunState::Completed);
+        assert!(after
+            .goal_criteria
+            .iter()
+            .all(|item| item.state == loop_core::event::GoalCriterionState::Verified));
     }
 }
