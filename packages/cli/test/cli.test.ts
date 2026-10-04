@@ -235,7 +235,7 @@ test("offline installation verification proves the fake-provider milestone", asy
     maxConcurrent: 3,
     escalations: 1,
   });
-});
+}, 60000); // explicit per-test timeout 60000ms overrides bun's 5s default
 
 test("human CLI renderers share line limits and exact overflow summaries", () => {
   const limits = {

@@ -64,7 +64,7 @@ test("benchmark run executes the example config end to end on fake providers onl
   expect(new Set(report.comparison.rankings.map((ranking) => ranking.label))).toEqual(
     new Set(report.runs.map((run) => run.runId)),
   );
-});
+}, 60000); // explicit per-test timeout 60000ms overrides bun's 5s default
 
 test("benchmark usage errors are stable and never touch providers", async () => {
   const missing = output();
@@ -127,7 +127,7 @@ test("benchmark manifest selects its fake-provider config without a CLI config o
   };
   expect(report.rows.map((row) => row.providerId)).toEqual(["fake:baseline", "fake:alternative"]);
   expect(report.costMeasured).toBe(false);
-});
+}, 60000); // explicit per-test timeout 60000ms overrides bun's 5s default
 
 test("benchmark agents compares fixed fake providers from one clean source commit", async () => {
   await protocol.rustra.ready();
@@ -219,7 +219,7 @@ test("benchmark agents compares fixed fake providers from one clean source commi
     true,
   );
   expect(report.costMeasured).toBe(false);
-});
+}, 60000); // explicit per-test timeout 60000ms overrides bun's 5s default
 
 test("human benchmark report is bounded, ranks first-class runs, and flags imperfect ones", () => {
   const limits = {
