@@ -6,7 +6,13 @@ pub fn write_scopes_overlap(left: &[String], right: &[String]) -> bool {
     })
 }
 
+/// Path-prefix approximation of glob scope overlap. A blank scope element
+/// asserts nothing and overlaps nothing; a glob-leading element (`**`,
+/// `*.ts`) has no provable prefix and conservatively overlaps everything.
 fn normalized_prefix(parent: &str, child: &str) -> bool {
+    if parent.trim().is_empty() || child.trim().is_empty() {
+        return false;
+    }
     let prefix = |scope: &str| -> String {
         let parts: Vec<_> = scope
             .split('/')

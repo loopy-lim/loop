@@ -7,10 +7,12 @@ use loop_core::policy::{
     next_compute_class, select_candidate, CapabilityRequirements, ComputeCandidate,
     ComputeCapabilities, ComputeClass, Risk,
 };
-use loop_core::scheduler::{Capacity, Scheduler};
+use loop_core::scheduler::{
+    Capacity, ClaimSkip, ClaimSkipReason, Scheduler,
+};
 use loop_core::task::{
-    CompletionCheck, CompletionContract, Task, TaskId, TaskKind, TaskState, VerificationEvidence,
-    WorkOwnership,
+    CompletionCheck, CompletionContract, Task, TaskBuildError, TaskId, TaskKind, TaskState,
+    VerificationEvidence, WorkOwnership,
 };
 
 fn task(id: &str, kind: TaskKind, dependencies: &[&str], writes: &[&str]) -> Task {
@@ -21,6 +23,22 @@ fn task(id: &str, kind: TaskKind, dependencies: &[&str], writes: &[&str]) -> Tas
             writes.iter().copied(),
         ))
         .compute(ComputeClass::Fast, ComputeClass::Tiny, ComputeClass::Strong)
+        .completion_contract(CompletionContract::new([CompletionCheck::new("tests")]))
+        .build()
+        .unwrap()
+}
+
+fn frontier_task(id: &str, writes: &[&str]) -> Task {
+    Task::builder(TaskId::from(id), id, TaskKind::Implementation)
+        .ownership(WorkOwnership::new(
+            std::iter::empty::<&str>(),
+            writes.iter().copied(),
+        ))
+        .compute(
+            ComputeClass::Frontier,
+            ComputeClass::Tiny,
+            ComputeClass::Frontier,
+        )
         .completion_contract(CompletionContract::new([CompletionCheck::new("tests")]))
         .build()
         .unwrap()
@@ -85,6 +103,154 @@ fn decision_and_integration_tasks_are_serialized() {
     .unwrap();
     let claimed = Scheduler::new(Capacity::new(4, 1)).claim_runnable(&graph, &[]);
     assert_eq!(claimed, vec![TaskId::from("decision")]);
+}
+
+#[test]
+fn non_conflicting_sibling_is_claimed_while_a_serial_task_runs() {
+    let mut graph = TaskGraph::new([
+        task("decision", TaskKind::Decision, &[], &["decisions/**"]),
+        task(
+            "impl-overlap",
+            TaskKind::Implementation,
+            &[],
+            &["decisions/approval.md"],
+        ),
+        task("research", TaskKind::Research, &[], &[]),
+    ])
+    .unwrap();
+    graph
+        .task_mut(&TaskId::from("decision"))
+        .unwrap()
+        .state = TaskState::Running;
+
+    let plan = Scheduler::new(Capacity::new(4, 1)).claim_plan(&graph, &[TaskId::from("decision")]);
+    assert_eq!(plan.claimed, vec![TaskId::from("research")]);
+    assert_eq!(
+        plan.skipped,
+        vec![ClaimSkip::new(
+            TaskId::from("impl-overlap"),
+            ClaimSkipReason::ScopeOverlap {
+                with: TaskId::from("decision"),
+            },
+        )]
+    );
+    assert_eq!(plan.skipped[0].activity(), "scope-overlap-with decision");
+}
+
+#[test]
+fn a_second_serial_task_waits_while_one_holds_the_world() {
+    let mut graph = TaskGraph::new([
+        task("decision-a", TaskKind::Decision, &[], &["decisions/a.md"]),
+        task("decision-b", TaskKind::Decision, &[], &["decisions/b.md"]),
+    ])
+    .unwrap();
+    graph
+        .task_mut(&TaskId::from("decision-a"))
+        .unwrap()
+        .state = TaskState::Running;
+
+    let plan = Scheduler::new(Capacity::new(4, 1)).claim_plan(&graph, &[TaskId::from("decision-a")]);
+    assert!(plan.claimed.is_empty());
+    assert_eq!(
+        plan.skipped,
+        vec![ClaimSkip::new(
+            TaskId::from("decision-b"),
+            ClaimSkipReason::SerialHeld,
+        )]
+    );
+    assert_eq!(plan.skipped[0].activity(), "serial-held");
+}
+
+#[test]
+fn empty_write_scope_is_not_a_universal_conflict() {
+    let mut graph = TaskGraph::new([
+        task("impl-b", TaskKind::Implementation, &[], &["b/**"]),
+        task("research-a", TaskKind::Research, &[], &["a/**"]),
+    ])
+    .unwrap();
+    // Runtime drift: a scope-requiring task whose write scope became empty
+    // after submission. Submission-time validation rejects this at the
+    // builder and graph gates; the scheduler must not additionally turn it
+    // into a conflict with everything.
+    graph
+        .task_mut(&TaskId::from("impl-b"))
+        .unwrap()
+        .ownership
+        .write_scope
+        .clear();
+
+    let plan = Scheduler::new(Capacity::new(4, 1)).claim_plan(&graph, &[]);
+    assert_eq!(
+        plan.claimed,
+        vec![TaskId::from("impl-b"), TaskId::from("research-a")]
+    );
+}
+
+#[test]
+fn submission_rejects_scope_requiring_task_with_empty_write_scope() {
+    let built = Task::builder(TaskId::from("impl"), "impl", TaskKind::Implementation)
+        .ownership(WorkOwnership::new(
+            std::iter::empty::<&str>(),
+            std::iter::empty::<&str>(),
+        ))
+        .completion_contract(CompletionContract::new([CompletionCheck::new("tests")]))
+        .build();
+    assert!(matches!(built, Err(TaskBuildError::MissingWriteScope)));
+}
+
+#[test]
+fn capacity_and_frontier_exhaustion_are_recorded_as_skip_reasons() {
+    let mut graph = TaskGraph::new([
+        task("fast-c", TaskKind::Research, &[], &["c/**"]),
+        frontier_task("frontier-a", &["a/**"]),
+        frontier_task("frontier-b", &["b/**"]),
+        task("waiter-d", TaskKind::Research, &[], &["d/**"]),
+    ])
+    .unwrap();
+    graph
+        .task_mut(&TaskId::from("frontier-a"))
+        .unwrap()
+        .state = TaskState::Running;
+
+    let plan = Scheduler::new(Capacity::new(3, 1))
+        .claim_plan(&graph, &[TaskId::from("frontier-a")]);
+    assert_eq!(
+        plan.claimed,
+        vec![TaskId::from("fast-c"), TaskId::from("waiter-d")]
+    );
+    assert_eq!(
+        plan.skipped,
+        vec![ClaimSkip::new(
+            TaskId::from("frontier-b"),
+            ClaimSkipReason::FrontierFull,
+        )]
+    );
+    assert_eq!(plan.skipped[0].activity(), "frontier-full");
+}
+
+#[test]
+fn worker_cap_exhaustion_is_recorded_per_task() {
+    let mut graph = TaskGraph::new([
+        task("running-a", TaskKind::Research, &[], &["a/**"]),
+        task("waiter-b", TaskKind::Research, &[], &["b/**"]),
+    ])
+    .unwrap();
+    graph
+        .task_mut(&TaskId::from("running-a"))
+        .unwrap()
+        .state = TaskState::Running;
+
+    let plan = Scheduler::new(Capacity::new(1, 1))
+        .claim_plan(&graph, &[TaskId::from("running-a")]);
+    assert!(plan.claimed.is_empty());
+    assert_eq!(
+        plan.skipped,
+        vec![ClaimSkip::new(
+            TaskId::from("waiter-b"),
+            ClaimSkipReason::CapacityFull,
+        )]
+    );
+    assert_eq!(plan.skipped[0].activity(), "capacity-full");
 }
 
 #[test]
