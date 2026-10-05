@@ -195,9 +195,116 @@ export class Orchestrator {
     const usage = this.usage(request.runId);
     return usage ? { ...summary, usage } : summary;
   }
+  /**
+   * Owner startup: read the plan and claim the lease. The detached spawn is
+   * structurally silent (detached, stdio "ignore"), so a rejection inside
+   * this window would leave the run looking `active` with nobody dispatching
+   * it — the observability half of defect D3 (death pattern 1). Both halves
+   * of the spawn outcome therefore land in saved state: a durable failure
+   * attention when startup dies (immediately, before the process exits), a
+   * durable takeover record when it succeeds. The dispatch loop keeps its
+   * own durable hand-off below; the bystander wait is never reported as a
+   * takeover because another owner may be healthy.
+   */
   async #execute(request: ExistingRunRequest): Promise<RunSummary> {
     const input = runInput(request);
-    const plan = await this.#control.getRunPlan(input);
+    const owner = `${process.pid}:${randomUUID()}`;
+    const lease = () =>
+      this.#control.claimExecution({ ...input, owner, nowMs: Date.now(), ttlMs: 5000 });
+    let plan: Awaited<ReturnType<OrchestrationControl["getRunPlan"]>>;
+    let claimed = false;
+    try {
+      plan = await this.#control.getRunPlan(input);
+      claimed = (await lease()).accepted;
+    } catch (error) {
+      await this.#reportSpawnFailure(input, owner, request.runId, error);
+      throw error;
+    }
+    if (!claimed) {
+      const waited = await this.#awaitLease(input, owner, lease, plan.tasks.length);
+      if (waited) return waited;
+    }
+    // Success half of the spawn report: the lease row alone expires and is
+    // replaced by the next owner, so also leave a durable, greppable record
+    // tying this process to the run. Best-effort — a store too broken for
+    // this line fails the dispatch loop into its own attention below.
+    const firstTask = plan.tasks[0]?.id;
+    if (firstTask !== undefined)
+      await this.#control
+        .recordActivity({
+          ...input,
+          executionOwner: owner,
+          taskId: firstTask,
+          activity: `Execution owner ${owner} took over dispatch of run ${request.runId}`,
+        })
+        .catch(() => {});
+    return this.#dispatch(request, input, owner, plan);
+  }
+
+  /** Spawn-failure half of the report: raise the run-level failure attention
+   * before the owner process exits, then let the original error propagate to
+   * the caller unchanged. Best-effort: a store that rejects the attention
+   * (e.g. missing run) must not mask the startup failure itself. */
+  async #reportSpawnFailure(
+    input: { databasePath: string; runId: string },
+    owner: string,
+    runId: string,
+    error: unknown,
+  ): Promise<void> {
+    await this.#control
+      .requestAttention({
+        ...input,
+        attentionId: `owner-spawn-${owner}`,
+        kind: "failure",
+        taskId: null,
+        summary: redact(
+          `Execution owner ${owner} failed to start dispatch of run ${runId}: ${error}`,
+        ),
+      })
+      .catch(() => {});
+  }
+
+  /** Another owner holds the lease: wait out its expiry unless renewal proves
+   * that owner is still making progress. Returns the summary to report, or
+   * null when the lease was acquired and this process is the owner. */
+  async #awaitLease(
+    input: { databasePath: string; runId: string },
+    owner: string,
+    lease: () => Promise<{ accepted: boolean }>,
+    tasks: number,
+  ): Promise<RunSummary | null> {
+    const summary: RunSummary = {
+      status: "running",
+      tasks,
+      escalations: [],
+      providersByTask: {},
+      startedAt: {},
+      finishedAt: {},
+    };
+    const initial = await this.#control.getSnapshot(input);
+    const expires = Number(initial.executionExpiresAt ?? Date.now());
+    // A lease can outlive a crashed process. Wait for expiry unless renewal
+    // proves that another owner is still making progress.
+    while (Date.now() <= expires + 250) {
+      await delay(100);
+      const current = await this.#control.getSnapshot(input);
+      if (["completed", "failed", "cancelled", "paused", "attention"].includes(current.state)) {
+        summary.status = current.state as RunSummary["status"];
+        return summary;
+      }
+      if (Number(current.executionExpiresAt ?? 0) > expires) return summary;
+      if ((await lease()).accepted) return null;
+    }
+    if (!(await lease()).accepted) return summary;
+    return null;
+  }
+
+  async #dispatch(
+    request: ExistingRunRequest,
+    input: { databasePath: string; runId: string },
+    owner: string,
+    plan: Awaited<ReturnType<OrchestrationControl["getRunPlan"]>>,
+  ): Promise<RunSummary> {
     const summary: RunSummary = {
       status: "running",
       tasks: plan.tasks.length,
@@ -206,26 +313,6 @@ export class Orchestrator {
       startedAt: {},
       finishedAt: {},
     };
-    const owner = `${process.pid}:${randomUUID()}`;
-    const lease = () =>
-      this.#control.claimExecution({ ...input, owner, nowMs: Date.now(), ttlMs: 5000 });
-    if (!(await lease()).accepted) {
-      const initial = await this.#control.getSnapshot(input);
-      const expires = Number(initial.executionExpiresAt ?? Date.now());
-      // A lease can outlive a crashed process. Wait for expiry unless renewal
-      // proves that another owner is still making progress.
-      while (Date.now() <= expires + 250) {
-        await delay(100);
-        const current = await this.#control.getSnapshot(input);
-        if (["completed", "failed", "cancelled", "paused", "attention"].includes(current.state)) {
-          summary.status = current.state as RunSummary["status"];
-          return summary;
-        }
-        if (Number(current.executionExpiresAt ?? 0) > expires) return summary;
-        if ((await lease()).accepted) break;
-      }
-      if (!(await lease()).accepted) return summary;
-    }
     const executionInput = { ...input, executionOwner: owner };
     // Options that never vary across scheduled tasks, assembled once.
     const taskExecutionOptions = {
