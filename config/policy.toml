@@ -6,9 +6,18 @@ max_parallel = 6
 # Only overlapping write scopes and serial decision/integration kinds still
 # serialize tasks (loop-core scheduler conflict rules).
 max_frontier_workers = 6
-decision_parallelism = 1
-integration_parallelism = 1
-unknown_write_scope_is_exclusive = true
+# Dead keys removed (2026-xx proposal-approval cycle, 제안 4). Per-key verdicts:
+# - decision_parallelism / integration_parallelism: DELETED, not implemented.
+#   Serial×serial mutual exclusion of decision/integration tasks is a scheduler
+#   invariant (loop-core claim_plan), not a tuning knob — a >1 value would
+#   reopen an approved safety boundary without benchmark-trace evidence
+#   (ADR R4), a =1 value would re-create the same dead key.
+# - unknown_write_scope_is_exclusive: DELETED, obsolete. Empty write scopes are
+#   rejected at submission (TaskBuilder::build / validate_preflight) and scope
+#   conflicts are computed from normalized scope overlap, so no "unknown
+#   scope" state is left for the key to toggle.
+# The only parsed [scheduler] keys are max_parallel and max_frontier_workers
+# (packages/orchestrator/src/config.ts → loop-core Capacity).
 
 [routing]
 default_compute_class = "balanced"
