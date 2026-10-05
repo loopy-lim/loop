@@ -45,6 +45,8 @@ export interface PromptPlannerPort {
     input: { runId: string; prompt: string; clientContext: ClientContext | null },
     handle: PlanningHandle,
   ): void;
+  /** Reclaim an active run whose durable execution lease has expired. */
+  recover?(runId: string): Promise<void>;
 }
 
 export type GatewayServiceOptions = {
@@ -96,6 +98,7 @@ export class GatewayService {
   readonly #planningLimit: number;
   readonly #runs = new Map<string, RunRecord>();
   readonly #durable = new Map<string, DurableEntry>();
+  readonly #recovering = new Set<string>();
 
   constructor(options: GatewayServiceOptions) {
     this.#runtime = options.runtime;
@@ -104,6 +107,26 @@ export class GatewayService {
     this.#nowMs = options.nowMs ?? Date.now;
     this.#runIdFactory = options.runIdFactory ?? defaultRunId;
     this.#planningLimit = options.planningLimit;
+    if (this.#planner.recover) {
+      const timer = setInterval(() => void this.reapExpiredLeases(), 1000);
+      timer.unref();
+    }
+  }
+
+  /** Scan durable state, not the projection cache: a crashed owner has no pump. */
+  async reapExpiredLeases(): Promise<void> {
+    if (!this.#planner.recover) return;
+    try {
+      for (const row of await this.#runtime.listRuns()) {
+        if (row.state !== "active" || this.#recovering.has(row.runId)) continue;
+        const snapshot = await this.#runtime.snapshot(row.runId);
+        if (snapshot.state !== "active" || Number(snapshot.executionExpiresAt ?? 0) > this.#nowMs()) continue;
+        this.#recovering.add(row.runId);
+        void this.#planner.recover(row.runId).catch(() => {}).finally(() => this.#recovering.delete(row.runId));
+      }
+    } catch {
+      // Transient store failure: the next scan retries.
+    }
   }
 
   get log(): RunEventLog {

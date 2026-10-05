@@ -168,6 +168,9 @@ export type OrchestratorPlannerOptions = {
 export function orchestratorPlanner(options: OrchestratorPlannerOptions): PromptPlannerPort {
   const template = options.template ?? templatePlan;
   return {
+    async recover(runId) {
+      if (!options.signal?.aborted) await options.execution.execute(runId, options.signal);
+    },
     begin(input, handle) {
       handle.markPlanning(input.runId);
       void (async () => {
@@ -182,9 +185,15 @@ export function orchestratorPlanner(options: OrchestratorPlannerOptions): Prompt
           handle.planningFailed(input.runId);
           return;
         }
-        options.execution.execute(input.runId, options.signal).catch(() => {
-          // Contained on purpose: the orchestrator has already recorded the
-          // failure/attention in the store; the snapshot pump reports it.
+        options.execution.execute(input.runId, options.signal).catch(async () => {
+          // A failed hand-off may leave an active run with an expired lease.
+          // Retry once after the coordinator's five-second lease expires;
+          // the lease CAS protects a concurrently restarted owner. A second
+          // failure remains observable through the snapshot pump.
+          if (options.signal?.aborted) return;
+          await new Promise((resolve) => setTimeout(resolve, 5_250));
+          if (options.signal?.aborted) return;
+          await options.execution.execute(input.runId, options.signal).catch(() => {});
         });
       })();
     },
