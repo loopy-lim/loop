@@ -513,22 +513,42 @@ export class Orchestrator {
     } catch (error) {
       for (const task of active.values()) task.abort();
       await Promise.allSettled([...active.values()].map((task) => task.done));
-      const snapshot = await this.#control.getSnapshot(input);
-      if (
-        !leaseLost &&
-        snapshot.executionOwner === owner &&
-        Number(snapshot.executionExpiresAt ?? 0) > Date.now() &&
-        !["completed", "failed", "cancelled"].includes(snapshot.state)
-      ) {
-        await this.#control.requestAttention({
-          ...executionInput,
-          attentionId: `dispatcher-${owner}`,
-          kind: "failure",
-          taskId: null,
-          summary: redact(error),
-        });
+      // A lost lease cannot authorize an owned append. Use the control-plane
+      // attention path to leave a resumable hand-off unless a replacement
+      // owner already holds a live lease (its dispatch must not be parked).
+      // Retry transient store failures locally; persistent failures reject so
+      // the caller's recovery path can observe them instead of a false summary.
+      let snapshot: Awaited<ReturnType<OrchestrationControl["getSnapshot"]>> | undefined;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          snapshot = await this.#control.getSnapshot(input);
+          if (
+            !["completed", "failed", "cancelled"].includes(snapshot.state) &&
+            (leaseLost
+              ? snapshot.executionOwner === owner ||
+                !snapshot.executionOwner ||
+                Number(snapshot.executionExpiresAt ?? 0) <= Date.now()
+              : snapshot.executionOwner === owner &&
+                Number(snapshot.executionExpiresAt ?? 0) > Date.now())
+          ) {
+            const attention = {
+              ...input,
+              attentionId: `dispatcher-${owner}`,
+              kind: "failure" as const,
+              taskId: null,
+              summary: redact(error),
+            };
+            await this.#control.requestAttention(
+              leaseLost ? attention : { ...attention, executionOwner: owner },
+            );
+          }
+          break;
+        } catch (storeError) {
+          if (attempt === 2) throw storeError;
+          await delay(100);
+        }
       }
-      summary.status = snapshot.state === "failed" ? "failed" : "attention";
+      summary.status = snapshot?.state === "failed" ? "failed" : "attention";
       return summary;
     } finally {
       clearInterval(heartbeat);
