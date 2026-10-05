@@ -290,6 +290,8 @@ export function registerLoopExtension(
   let observer: ReturnType<typeof setInterval> | undefined;
   let observedSequence = -1;
   let observedAttention = new Set<string>();
+  let observedDone = new Set<string>();
+  let recoveryAttempted = false;
   let observerBusy = false;
   let observerVersion = 0;
   let restoreVersion = 0;
@@ -312,6 +314,8 @@ export function registerLoopExtension(
     widgetContext = undefined;
     observedSequence = -1;
     observedAttention = new Set();
+    observedDone = new Set();
+    recoveryAttempted = false;
   };
   const reportFinal = async (snapshot: SnapshotOutput, context: PiContext) => {
     const prioritized = [...snapshot.tasks].sort((left, right) => {
@@ -418,6 +422,22 @@ export function registerLoopExtension(
     );
     if (sequence <= observedSequence) return;
     observedSequence = sequence;
+    for (const task of snapshot.tasks) {
+      if (task.state !== "done" || observedDone.has(task.id)) continue;
+      observedDone.add(task.id);
+      pi.appendEntry?.("loop-task-done", { runId: snapshot.runId, taskId: task.id });
+      void milestones.notify({
+        title: `Loop task done · ${task.id}`,
+        body: singleLine(task.title, limits.lineTextLimit),
+        sound: "none",
+      }).catch(() => {});
+      const announce = () => pi.sendMessage?.(
+        { customType: "loop-task-done", content: `Loop task done · ${task.id}: ${task.title}`, display: true },
+        { triggerTurn: false },
+      );
+      if (["completed", "failed", "cancelled"].includes(snapshot.state)) setTimeout(announce, 0);
+      else void announce();
+    }
     if (!["completed", "failed", "cancelled"].includes(snapshot.state)) {
       context.ui.setWidget?.(
         "loop-run",
@@ -477,8 +497,21 @@ export function registerLoopExtension(
       observerBusy = true;
       try {
         const snapshot = await backend.snapshot(runId, context.cwd);
-        if (version === observerVersion && currentRunId === runId)
+        if (version === observerVersion && currentRunId === runId) {
           acceptSnapshot(snapshot, context);
+          if (
+            !recoveryAttempted && snapshot.state === "active" &&
+            snapshot.executionExpiresAt != null &&
+            Number(snapshot.executionExpiresAt) <= Date.now()
+          ) {
+            recoveryAttempted = true;
+            try {
+              acceptSnapshot(await backend.resume(runId, context.cwd), context);
+            } catch {
+              context.ui.notify("Loop owner restart failed; ask to resume this run.", "warning");
+            }
+          }
+        }
       } catch {
         if (version === observerVersion) {
           context.ui.setStatus?.("loop", `Loop ${runId} · observation unavailable`);
@@ -1189,16 +1222,30 @@ export function registerLoopExtension(
     resolution: string,
     context: PiContext,
   ) => {
-    const resolved = await backend.resolve(runId, attentionId, resolution, context.cwd);
+    let resolved: SnapshotOutput;
+    try {
+      resolved = await backend.resolve(runId, attentionId, resolution, context.cwd);
+    } catch (error) {
+      // A post-commit status read may fail; only recover if a fresh snapshot
+      // proves that this attention has already been consumed.
+      let latest: SnapshotOutput | undefined;
+      try {
+        latest = await backend.snapshot(runId, context.cwd);
+      } catch { /* Preserve the original error when observation is unavailable. */ }
+      if (!latest || latest.openAttentionIds.includes(attentionId) || latest.state !== "active") throw error;
+      resolved = latest;
+    }
     const leaseAlive =
       resolved.executionOwner &&
       resolved.executionExpiresAt != null &&
       Number(resolved.executionExpiresAt) > Date.now();
-    if (resolved.state !== "active" || resolved.activeWorkers.length > 0 || leaseAlive)
+    if (resolved.state !== "active" || leaseAlive)
       return { snapshot: resolved, restarted: false };
     try {
       return { snapshot: await backend.resume(runId, context.cwd), restarted: true };
     } catch {
+      // Resolve has already committed. The observer gets one bounded retry.
+      if (currentRunId === runId) recoveryAttempted = false;
       throw new Error(
         `Attention was resolved for ${runId}, but the owner could not restart. Ask to resume this run.`,
       );
