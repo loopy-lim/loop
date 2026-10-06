@@ -67,7 +67,7 @@ describe("runtime record writer", () => {
   test("writes exactly { host, port } and creates missing parent directories", () => {
     writeGatewayRuntimeRecord(path(), record);
     const parsed = JSON.parse(readFileSync(path(), "utf8"));
-    expect(Object.keys(parsed).sort()).toEqual(["host", "port"]);
+    expect(Object.keys(parsed).toSorted()).toEqual(["host", "port"]);
     expect(parsed).toEqual(record);
   });
 

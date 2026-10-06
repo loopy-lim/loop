@@ -15,6 +15,10 @@ import {
   SseCollector,
   submitPrompt,
 } from "./helpers";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 describe("POST /v1/runs → SSE happy path", () => {
   test("submit returns 202 with an accepted summary, then status/output/terminal stream", async () => {
@@ -35,8 +39,8 @@ describe("POST /v1/runs → SSE happy path", () => {
         taskCounts: { pending: 0, running: 0, attention: 0, done: 0, failed: 0, cancelled: 0 },
       });
       expect(gateway.planner.calls).toHaveLength(1);
-      expect(gateway.planner.calls[0]!.prompt).toBe("Implement the remote gateway and verify it");
-      expect(gateway.planner.calls[0]!.clientContext).toEqual({ displayName: "Loopy's phone" });
+      expect(gateway.planner.calls[0]?.prompt).toBe("Implement the remote gateway and verify it");
+      expect(gateway.planner.calls[0]?.clientContext).toEqual({ displayName: "Loopy's phone" });
 
       // App client connects and receives the current status first (ADR §4.5).
       const stream = new SseCollector(
@@ -45,11 +49,11 @@ describe("POST /v1/runs → SSE happy path", () => {
         }),
       );
       const initial = await stream.until((parsed) => parsed.length >= 1);
-      expect(initial[0]!.event).toBe("status");
-      expect(initial[0]!.id).toBeString();
-      expect((initial[0]!.data as { run: { status: string } }).run.status).toBe("accepted");
+      expect(initial[0]?.event).toBe("status");
+      expect(initial[0]?.id).toBeString();
+      expect((initial[0]?.data as { run: { status: string } } | undefined)?.run.status).toBe("accepted");
 
-      gateway.planner.calls[0]!.handle.markPlanning(runId);
+      gateway.planner.calls[0]?.handle.markPlanning(runId);
       gateway.runtime.emit(
         makeSnapshot({
           runId,
@@ -85,9 +89,9 @@ describe("POST /v1/runs → SSE happy path", () => {
         (frame) => (frame.data as { run: { status: string } }).run.status === "running",
       );
       expect(runningFrame).toBeDefined();
-      const runningRun = (runningFrame!.data as { run: Record<string, unknown> }).run;
-      expect(runningRun.lastSequence).toBe("42"); // u64 as decimal string
-      expect(runningRun.taskCounts).toEqual({
+      const runningRun = (runningFrame?.data as { run: Record<string, unknown> } | undefined)?.run;
+      expect(runningRun?.lastSequence).toBe("42"); // u64 as decimal string
+      expect(runningRun?.taskCounts).toEqual({
         pending: 0,
         running: 1,
         attention: 0,
@@ -95,7 +99,7 @@ describe("POST /v1/runs → SSE happy path", () => {
         failed: 0,
         cancelled: 0,
       });
-      expect(runningRun.attention).toMatchObject({
+      expect(runningRun?.attention).toMatchObject({
         attentionId: "attn_1",
         taskId: "gateway-app",
         kind: "decision",
@@ -103,7 +107,7 @@ describe("POST /v1/runs → SSE happy path", () => {
 
       const outputFrames = events.filter((frame) => frame.event === "output");
       expect(outputFrames).toHaveLength(1);
-      expect(outputFrames[0]!.data).toMatchObject({
+      expect(outputFrames[0]?.data).toMatchObject({
         version: 1,
         runId,
         taskId: "gateway-app",
@@ -121,7 +125,7 @@ describe("POST /v1/runs → SSE happy path", () => {
       );
       expect(stream.closedByServer).toBe(true); // terminal flushes then closes
       expect(final.filter((frame) => frame.event === "terminal")).toHaveLength(1);
-      expect(final.at(-1)!.event).toBe("terminal");
+      expect(final.at(-1)?.event).toBe("terminal");
 
       // A fresh client on the finished run still gets status + terminal closure.
       const fresh = new SseCollector(
@@ -133,7 +137,7 @@ describe("POST /v1/runs → SSE happy path", () => {
         parsed.some((frame) => frame.event === "terminal"),
       );
       expect(fresh.closedByServer).toBe(true);
-      expect(freshFrames.at(-1)!.event).toBe("terminal");
+      expect(freshFrames.at(-1)?.event).toBe("terminal");
     } finally {
       gateway.stop();
     }
@@ -151,7 +155,7 @@ describe("POST /v1/runs → SSE happy path", () => {
       const stream = await fetch(`${gateway.baseUrl}/v1/runs/${runId}/events`, {
         headers: { Accept: "text/event-stream", ...authHeader(gateway.token()) },
       });
-      gateway.planner.calls[0]!.handle.planningFailed(runId);
+      gateway.planner.calls[0]?.handle.planningFailed(runId);
 
       const { frames } = await readSseUntil(stream, (parsed) =>
         parsed.some((frame) => frame.event === "terminal"),
@@ -162,7 +166,7 @@ describe("POST /v1/runs → SSE happy path", () => {
           (frame.data as { run: { status: string } }).run.status === "failed",
       );
       expect(failedStatus).toBeDefined();
-      expect(frames.at(-1)!.event).toBe("terminal");
+      expect(frames.at(-1)?.event).toBe("terminal");
 
       const getResponse = await fetch(`${gateway.baseUrl}/v1/runs/${runId}`, {
         headers: authHeader(gateway.token()),
@@ -202,7 +206,7 @@ describe("GET /v1/runs list contract", () => {
       expect(body1.nextCursor).toBeString();
 
       const page2 = await fetch(
-        `${gateway.baseUrl}/v1/runs?limit=2&cursor=${encodeURIComponent(body1.nextCursor!)}`,
+        `${gateway.baseUrl}/v1/runs?limit=2&cursor=${encodeURIComponent(must(body1.nextCursor))}`,
         { headers: authHeader(gateway.token()) },
       );
       const body2 = (await page2.json()) as {
@@ -324,7 +328,7 @@ describe("client disconnect semantics", () => {
         headers: { Accept: "text/event-stream", ...authHeader(gateway.token()) },
       });
       const firstFrame = await readSseUntil(stream, (parsed) => parsed.length >= 1);
-      expect(firstFrame.frames[0]!.event).toBe("status");
+      expect(firstFrame.frames[0]?.event).toBe("status");
       // readSseUntil already cancels the reader; the server observes the abort.
 
       gateway.runtime.emit(

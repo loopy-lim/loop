@@ -9,6 +9,10 @@ import { describe, expect, test } from "bun:test";
 
 import { decodeStreamCursor, encodeStreamCursor } from "../src/cursor";
 import { authHeader, bootTestGateway, makeSnapshot, SseCollector } from "./helpers";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 async function openStream(
   gateway: ReturnType<typeof bootTestGateway>,
@@ -35,9 +39,9 @@ describe("replay with Last-Event-ID", () => {
       // Connect first, then mutate so the live frames are consumed in order.
       const first = await openStream(gateway, runId);
       const initial = await first.collector.until((parsed) => parsed.length >= 1);
-      expect(initial[0]!.event).toBe("status");
+      expect(initial[0]?.event).toBe("status");
 
-      gateway.planner.calls[0]!.handle.markPlanning(runId);
+      gateway.planner.calls[0]?.handle.markPlanning(runId);
       gateway.runtime.emit(makeSnapshot({ runId, state: "active", lastSequence: 5n }));
       gateway.runtime.emit(
         makeSnapshot({ runId, state: "active", lastSequence: 6n, intent: "later change" }),
@@ -47,14 +51,14 @@ describe("replay with Last-Event-ID", () => {
       await first.collector.close();
 
       // Reconnect from the second frame: everything after it is replayed.
-      const resumeFrom = seen[1]!.id!;
+      const resumeFrom = must(seen[1]?.id);
       const second = await openStream(gateway, runId, resumeFrom);
       const replayed = await second.collector.until((parsed) => parsed.length >= 2);
 
       const seenIds = seen.map((frame) => frame.id);
       expect(replayed.map((frame) => frame.id)).toEqual(seenIds.slice(2));
       // No leading reset on a healthy replay.
-      expect(replayed[0]!.event).not.toBe("reset");
+      expect(replayed[0]?.event).not.toBe("reset");
       await second.collector.close();
     } finally {
       gateway.stop();
@@ -71,14 +75,14 @@ describe("replay with Last-Event-ID", () => {
       for (const cursor of ["garbage", encodeStreamCursor({ generation: 999, runId, seq: 0 })]) {
         const stream = await openStream(gateway, runId, cursor);
         const frames = await stream.collector.until((parsed) => parsed.length >= 1);
-        expect(frames[0]!.event).toBe("reset");
-        expect(frames[0]!.data).toMatchObject({
+        expect(frames[0]?.event).toBe("reset");
+        expect(frames[0]?.data).toMatchObject({
           version: 1,
           runId,
           reason: "cursor_unavailable",
         });
-        const run = (frames[0]!.data as { run: { status: string } }).run;
-        expect(run.status).toBe("running"); // reset carries the authoritative run
+        const run = (frames[0]?.data as { run: { status: string } } | undefined)?.run;
+        expect(run?.status).toBe("running"); // reset carries the authoritative run
         await stream.collector.close();
       }
     } finally {
@@ -94,7 +98,7 @@ describe("replay with Last-Event-ID", () => {
 
       const first = await openStream(gateway, runId);
       const early = await first.collector.until((parsed) => parsed.length >= 1);
-      const staleCursor = early[0]!.id!;
+      const staleCursor = must(early[0]?.id);
       await first.collector.close();
 
       // Push more than `replayBufferFrames` additional frames.
@@ -104,7 +108,7 @@ describe("replay with Last-Event-ID", () => {
 
       const second = await openStream(gateway, runId, staleCursor);
       const frames = await second.collector.until((parsed) => parsed.length >= 1);
-      expect(frames[0]!.event).toBe("reset");
+      expect(frames[0]?.event).toBe("reset");
       await second.collector.close();
     } finally {
       gateway.stop();
@@ -125,8 +129,8 @@ describe("replay with Last-Event-ID", () => {
 
       const stream = await openStream(gateway, b.runId, foreign);
       const frames = await stream.collector.until((parsed) => parsed.length >= 1);
-      expect(frames[0]!.event).toBe("reset");
-      expect((frames[0]!.data as { run: { runId: string } }).run.runId).toBe(b.runId);
+      expect(frames[0]?.event).toBe("reset");
+      expect((frames[0]?.data as { run: { runId: string } } | undefined)?.run.runId).toBe(b.runId);
       await stream.collector.close();
     } finally {
       gateway.stop();
@@ -141,7 +145,7 @@ describe("replay with Last-Event-ID", () => {
 
       const first = await openStream(gateway, runId);
       const early = await first.collector.until((parsed) => parsed.length >= 1);
-      const resumeFrom = early[0]!.id!;
+      const resumeFrom = must(early[0]?.id);
       await first.collector.close();
 
       gateway.runtime.emit(
@@ -154,7 +158,7 @@ describe("replay with Last-Event-ID", () => {
       );
       expect(second.collector.closedByServer).toBe(true);
       expect(frames.some((frame) => frame.event === "status")).toBe(true);
-      expect(frames.at(-1)!.event).toBe("terminal");
+      expect(frames.at(-1)?.event).toBe("terminal");
     } finally {
       gateway.stop();
     }

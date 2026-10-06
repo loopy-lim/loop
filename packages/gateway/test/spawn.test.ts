@@ -333,7 +333,7 @@ describe("TmuxSpawner tmux flow", () => {
     });
     const outcome: SpawnOutcome = await spawner.spawn({ cwd: "/work" }, { listener: "tailscale" });
     expect(calls.map((call) => call.file)).toEqual(["tmux", "tmux"]);
-    expect(calls[1]!.args).toEqual([
+    expect(calls[1]?.args).toEqual([
       "new-window",
       "-P",
       "-F",
@@ -388,7 +388,7 @@ describe("TmuxSpawner tmux flow", () => {
     });
     const outcome = await spawner.spawn({ cwd: "/work" }, { listener: "tailscale" });
     expect(seen).toHaveLength(3);
-    expect(seen[1]!.args).toEqual(["new-session", "-d", "-s", "loop", "-c", "/work"]);
+    expect(seen[1]?.args).toEqual(["new-session", "-d", "-s", "loop", "-c", "/work"]);
     expect(outcome.paneId).toBe("%3");
     expect(outcome.tmuxTarget).toBe("loop:pi-seq00001");
   });
@@ -469,7 +469,7 @@ describe("TmuxSpawner tmux flow", () => {
     // The failed has-session probe is recorded too — only osascript executed.
     const osascriptCalls = calls.filter((call) => call.file === "osascript");
     expect(osascriptCalls).toHaveLength(1);
-    expect(osascriptCalls[0]!.args[0]).toBe("-e");
+    expect(osascriptCalls[0]?.args[0]).toBe("-e");
     expect(outcome).toEqual({
       spawnId: "term0001",
       tmuxTarget: null,

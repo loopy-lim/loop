@@ -22,6 +22,10 @@ import {
   type ParsedFrame,
   type TestGateway,
 } from "./helpers";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 function readStreamRaw(stream: SseClientStream): string {
   let raw = "";
@@ -118,7 +122,7 @@ function scriptSession(gateway: TestGateway, sessionId = "sess-1", runId = "run-
   tap(gateway, conn, { type: "assistant_update", messageId: "m-2", text: "Running" });
   tap(gateway, conn, { type: "assistant_update", messageId: "m-2", text: "Running the suite" });
   gateway.clock.advance(300);
-  gateway.sessions!.tickMerge(gateway.clock.now);
+  gateway.sessions?.tickMerge(gateway.clock.now);
   tap(gateway, conn, {
     type: "assistant_message",
     messageId: "m-2",
@@ -126,7 +130,7 @@ function scriptSession(gateway: TestGateway, sessionId = "sess-1", runId = "run-
   });
   // Steer feedback steps 2+3 (D4 §4): the accepted-steer mirror, then the
   // tap-observed user bubble that the app folds the marker into.
-  gateway.sessions!.mirrorSteerQueued({ runId, steerId: "steer-1", text: "focus on auth" });
+  gateway.sessions?.mirrorSteerQueued({ runId, steerId: "steer-1", text: "focus on auth" });
   tap(gateway, conn, {
     type: "user_message",
     messageId: "m-3",
@@ -170,8 +174,8 @@ describe("scripted session renders as an ordered conversation stream", () => {
 
       // Wire contract: payload carries identity + content only — no
       // discriminator field, no seq field (decision D4 §1).
-      expect(frames[0]!.data).toEqual({ phase: "sessionStarted", occurredAt: expect.any(String) });
-      expect(frames[1]!.data).toEqual({
+      expect(frames[0]?.data).toEqual({ phase: "sessionStarted", occurredAt: expect.any(String) });
+      expect(frames[1]?.data).toEqual({
         messageId: "m-1",
         text: "run the tests",
         source: "interactive",
@@ -179,14 +183,14 @@ describe("scripted session renders as an ordered conversation stream", () => {
         attachments: [], // M2 (D5): reference-shaped; bodies live out-of-band
         occurredAt: expect.any(String),
       });
-      expect(frames[2]!.data).toEqual({
+      expect(frames[2]?.data).toEqual({
         toolCallId: "tc-1",
         toolName: "bash",
         argsJson: JSON.stringify({ command: "bun test" }),
         argsTruncated: false,
         occurredAt: expect.any(String),
       });
-      expect(frames[3]!.data).toEqual({
+      expect(frames[3]?.data).toEqual({
         toolCallId: "tc-1",
         resultText: "42 pass",
         resultTruncated: false,
@@ -195,27 +199,27 @@ describe("scripted session renders as an ordered conversation stream", () => {
       });
       // Delta merge: ONE merged delta carrying the latest snapshot (D4 §2 —
       // never one frame per update; the final below still replaces it all).
-      expect(frames[4]!.data).toEqual({
+      expect(frames[4]?.data).toEqual({
         messageId: "m-2",
         delta: "Running the suite",
         occurredAt: expect.any(String),
       });
       // Authoritative final replaces the delta buffer (D4 §2).
-      expect(frames[5]!.data).toEqual({
+      expect(frames[5]?.data).toEqual({
         messageId: "m-2",
         text: "Running the suite — done",
         truncated: false,
         occurredAt: expect.any(String),
       });
-      expect(frames[6]!.data).toEqual({
+      expect(frames[6]?.data).toEqual({
         steerId: "steer-1",
         text: "focus on auth",
         runId: "run-9",
         occurredAt: expect.any(String),
       });
-      expect(frames[7]!.data).toMatchObject({ messageId: "m-3", source: "steer" });
-      expect(frames[8]!.data).toEqual({ phase: "turnEnded", occurredAt: expect.any(String) });
-      expect(frames[9]!.data).toEqual({ reason: "sessionGone", occurredAt: expect.any(String) });
+      expect(frames[7]?.data).toMatchObject({ messageId: "m-3", source: "steer" });
+      expect(frames[8]?.data).toEqual({ phase: "turnEnded", occurredAt: expect.any(String) });
+      expect(frames[9]?.data).toEqual({ reason: "sessionGone", occurredAt: expect.any(String) });
 
       // Cursor hygiene: opaque unique ids, and the shared reset convention —
       // the gone reset reuses the last buffered cursor so an id-based dedupe
@@ -236,7 +240,7 @@ describe("scripted session renders as an ordered conversation stream", () => {
       const seen = await readSession(first, (frames) =>
         frames.some((frame) => frame.event === "conversation_reset"),
       );
-      const reset = seen.frames[seen.frames.length - 1]!;
+      const reset = must(seen.frames[seen.frames.length - 1]);
 
       for (let reconnect = 0; reconnect < 2; reconnect += 1) {
         const again = await openSessionStream(gateway, "sess-1");
@@ -244,7 +248,7 @@ describe("scripted session renders as an ordered conversation stream", () => {
           frames.some((frame) => frame.event === "conversation_reset"),
         );
         expect(replayed.frames.map((frame) => frame.event)).toEqual(SCRIPTED_ORDER);
-        const againReset = replayed.frames[replayed.frames.length - 1]!;
+        const againReset = must(replayed.frames[replayed.frames.length - 1]);
         expect(againReset.id).toBe(reset.id);
         expect(againReset.data).toEqual(reset.data);
         expect(replayed.closedByServer).toBe(true);
@@ -273,15 +277,15 @@ describe("cursor replay (run/pane parity)", () => {
       tap(gateway, conn, { type: "user_message", messageId: "m-2", text: "second prompt" });
       tap(gateway, conn, { type: "assistant_message", messageId: "a-2", text: "still working" });
 
-      const resumeFrom = initial.frames[1]!.id!; // cursor after the second frame
+      const resumeFrom = must(initial.frames[1]?.id); // cursor after the second frame
       const second = await openSessionStream(gateway, "sess-live", resumeFrom);
       const replayed = await readSession(second, (frames) => frames.length >= 2);
       expect(replayed.frames.map((frame) => frame.event)).toEqual([
         "user_message",
         "assistant_message",
       ]);
-      expect(replayed.frames[0]!.data).toMatchObject({ messageId: "m-2" });
-      expect(replayed.frames[1]!.data).toMatchObject({ messageId: "a-2" });
+      expect(replayed.frames[0]?.data).toMatchObject({ messageId: "m-2" });
+      expect(replayed.frames[1]?.data).toMatchObject({ messageId: "a-2" });
       expect(replayed.frames.some((frame) => frame.event === "conversation_reset")).toBe(false);
       tapDisconnect(gateway, conn);
     } finally {
@@ -295,7 +299,7 @@ describe("cursor replay (run/pane parity)", () => {
       const conn = tapConnect(gateway, { sessionId: "sess-c", lane: "pi" });
       tap(gateway, conn, { type: "user_message", messageId: "m-1", text: "hello" });
 
-      const generation = gateway.sessionLog!.generation;
+      const generation = gateway.sessionLog?.generation;
       const future = encodeStreamCursor({ generation, runId: "sess-c", seq: 999 });
       const foreign = encodeStreamCursor({ generation: generation + 1, runId: "sess-c", seq: 0 });
 
@@ -307,10 +311,10 @@ describe("cursor replay (run/pane parity)", () => {
         await new Promise((resolve) => setTimeout(resolve, 100));
         tap(gateway, conn, { type: "user_message", messageId: `m-${cursor}`, text: "after reset" });
         const { frames } = await readerPromise;
-        expect(frames[0]!.event).toBe("conversation_reset");
-        expect(frames[0]!.data).toMatchObject({ reason: "cursorUnavailable" });
+        expect(frames[0]?.event).toBe("conversation_reset");
+        expect(frames[0]?.data).toMatchObject({ reason: "cursorUnavailable" });
         // After the reset the stream continues live with fresh frames.
-        expect(frames[1]!.event).toBe("user_message");
+        expect(frames[1]?.event).toBe("user_message");
       }
       tapDisconnect(gateway, conn);
     } finally {
@@ -332,8 +336,8 @@ describe("backpressure converges via slowConsumer", () => {
       tap(gateway, conn, { type: "user_message", messageId: "m-0", text: "anchor" });
 
       const stream = new SseClientStream({ maxFrames: 3, maxBytes: 1024 * 1024 });
-      const collector = gateway.sessions!;
-      const log = gateway.sessionLog!;
+      const collector = must(gateway.sessions);
+      const log = must(gateway.sessionLog);
       const unsubscribe = log.subscribe("sess-slow", (frame) => {
         writeSessionFrame(stream, frame, () => collector.slowConsumerReset("sess-slow"));
       });
@@ -358,8 +362,7 @@ describe("backpressure converges via slowConsumer", () => {
         .map((block) =>
           block
             .split("\n")
-            .find((line) => line.startsWith("event: "))!
-            .slice(7),
+            .find((line) => line.startsWith("event: "))?.slice(7),
         );
       const resetIndex = events.indexOf("conversation_reset");
       expect(resetIndex).toBeGreaterThanOrEqual(0);
@@ -380,8 +383,8 @@ describe("backpressure converges via slowConsumer", () => {
     try {
       const conn = tapConnect(gateway, { sessionId: "sess-gone", lane: "pi" });
       const stream = new SseClientStream({ maxFrames: 3, maxBytes: 1024 * 1024 });
-      const collector = gateway.sessions!;
-      const log = gateway.sessionLog!;
+      const collector = must(gateway.sessions);
+      const log = must(gateway.sessionLog);
       const unsubscribe = log.subscribe("sess-gone", (frame) => {
         writeSessionFrame(stream, frame, () => collector.slowConsumerReset("sess-gone"));
       });
@@ -401,20 +404,20 @@ describe("backpressure converges via slowConsumer", () => {
   });
 });
 
-describe("POST /v1/runs/{runId}/steer", () => {
-  function postSteer(
-    gateway: TestGateway,
-    runId: string,
-    body: unknown,
-    contentType = "application/json",
-  ) {
-    return fetch(`${gateway.baseUrl}/v1/runs/${encodeURIComponent(runId)}/steer`, {
-      method: "POST",
-      headers: { "Content-Type": contentType, ...authHeader(gateway.token()) },
-      body: typeof body === "string" ? body : JSON.stringify(body),
-    });
-  }
+function postSteer(
+  gateway: TestGateway,
+  runId: string,
+  body: unknown,
+  contentType = "application/json",
+) {
+  return fetch(`${gateway.baseUrl}/v1/runs/${encodeURIComponent(runId)}/steer`, {
+    method: "POST",
+    headers: { "Content-Type": contentType, ...authHeader(gateway.token()) },
+    body: typeof body === "string" ? body : JSON.stringify(body),
+  });
+}
 
+describe("POST /v1/runs/{runId}/steer", () => {
   test("accepted steer calls the bridge once and mirrors exactly one steer_queued frame (replay-inclusive)", async () => {
     const gateway = sessionGateway();
     try {
@@ -434,7 +437,7 @@ describe("POST /v1/runs/{runId}/steer", () => {
       const full = await openSessionStream(gateway, "sess-1");
       const seen = await readSession(full, (frames) => frames.length >= 2);
       expect(seen.frames.map((frame) => frame.event)).toEqual(["user_message", "steer_queued"]);
-      expect(seen.frames[1]!.data).toEqual({
+      expect(seen.frames[1]?.data).toEqual({
         steerId: body.steerId,
         text: "focus on auth",
         runId: "run-9",
@@ -442,11 +445,11 @@ describe("POST /v1/runs/{runId}/steer", () => {
       });
 
       // …and replay re-delivers the SAME frame (cursor-stable, idempotent).
-      const resume = await openSessionStream(gateway, "sess-1", seen.frames[0]!.id!);
+      const resume = await openSessionStream(gateway, "sess-1", must(seen.frames[0]?.id));
       const replayed = await readSession(resume, (frames) => frames.length >= 1);
       const mirrors = replayed.frames.filter((frame) => frame.event === "steer_queued");
       expect(mirrors).toHaveLength(1);
-      expect(mirrors[0]!.id).toBe(seen.frames[1]!.id);
+      expect(mirrors[0]?.id).toBe(seen.frames[1]?.id);
       expect(gateway.steer.calls).toHaveLength(1); // no re-delivery through the bridge
 
       tapDisconnect(gateway, conn);
@@ -476,7 +479,7 @@ describe("POST /v1/runs/{runId}/steer", () => {
       expect(failed.status).toBe(404);
       expect(((await failed.json()) as { code: string }).code).toBe("run_not_found");
       expect(
-        gateway.sessions!.bufferedFrames("sess-1").some((frame) => frame.event === "steer_queued"),
+        gateway.sessions?.bufferedFrames("sess-1").some((frame) => frame.event === "steer_queued"),
       ).toBe(false);
       expect(gateway.steer.calls).toHaveLength(0);
     } finally {
@@ -502,6 +505,46 @@ describe("POST /v1/runs/{runId}/steer", () => {
     try {
       const response = await postSteer(bare, "run-9", { message: "focus" });
       expect(response.status).toBe(404);
+    } finally {
+      bare.stop();
+    }
+  });
+});
+
+async function postResolve(gateway: TestGateway, body: unknown) {
+  return fetch(`${gateway.baseUrl}/v1/runs/run-9/attention/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeader(gateway.token()) },
+    body: JSON.stringify(body),
+  });
+}
+
+describe("POST /v1/runs/{runId}/attention/resolve", () => {
+
+  test("passes attention id and resolution to the configured seam", async () => {
+    const gateway = sessionGateway();
+    try {
+      const response = await postResolve(gateway, { attentionId: "attn-1", resolution: "approved" });
+      expect(response.status).toBe(200);
+      expect(gateway.attention.calls).toEqual([
+        { runId: "run-9", attentionId: "attn-1", resolution: "approved" },
+      ]);
+    } finally {
+      gateway.stop();
+    }
+  });
+
+  test("validates body and fails closed when no resolve seam exists", async () => {
+    const gateway = sessionGateway();
+    try {
+      expect((await postResolve(gateway, { attentionId: "", resolution: "approved" })).status).toBe(400);
+      expect((await postResolve(gateway, { attentionId: "attn-1", resolution: " " })).status).toBe(400);
+    } finally {
+      gateway.stop();
+    }
+    const bare = sessionGateway({ attention: false });
+    try {
+      expect((await postResolve(bare, { attentionId: "attn-1", resolution: "approved" })).status).toBe(404);
     } finally {
       bare.stop();
     }

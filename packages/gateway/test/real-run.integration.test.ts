@@ -145,7 +145,7 @@ describe("submitted prompt → real durable Loop run", () => {
         databasePath: gateway.databasePath,
         runId,
       });
-      expect(snapshot.tasks.map((task) => task.id).sort()).toEqual([
+      expect(snapshot.tasks.map((task) => task.id).toSorted()).toEqual([
         "decision",
         "implementation",
         "research",
@@ -183,7 +183,7 @@ describe("submitted prompt → real durable Loop run", () => {
           event.taskId === "implementation" && event.text.includes("implementation complete"),
       );
       expect(resultLine).toBeDefined();
-      expect(resultLine!.activityId).toMatch(/^\d+:implementation:\d+$/);
+      expect(resultLine?.activityId).toMatch(/^\d+:implementation:\d+$/);
       const lifecycleLine = outputs.find(
         (event) => event.taskId === "research" && event.text.startsWith("[lifecycle]"),
       );
@@ -202,8 +202,8 @@ describe("submitted prompt → real durable Loop run", () => {
       });
       expect(pageResponse.status).toBe(200);
       const page = (await pageResponse.json()) as { runs: { runId: string }[] };
-      expect(page.runs.map((run) => run.runId).sort()).toEqual(
-        durable.map((entry) => entry.runId).sort(),
+      expect(page.runs.map((run) => run.runId).toSorted()).toEqual(
+        durable.map((entry) => entry.runId).toSorted(),
       );
     } finally {
       gateway.stop();
@@ -269,7 +269,7 @@ describe("submitted prompt → real durable Loop run", () => {
       });
       expect(stream.status).toBe(200);
       const { frames } = await readSseUntil(stream, (parsed) => parsed.length >= 1, 5_000);
-      expect(frames[0]!.event).toBe("status");
+      expect(frames[0]?.event).toBe("status");
     } finally {
       gateway.stop();
     }

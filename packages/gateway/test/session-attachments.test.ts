@@ -20,6 +20,10 @@ import {
   tapDisconnect,
   type TestGateway,
 } from "./helpers";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 const PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
@@ -41,9 +45,14 @@ function register(gateway: TestGateway, sessionId = "s-1"): string {
 }
 
 function userMessageFrame(gateway: TestGateway, sessionId = "s-1"): UserMessagePayload | null {
-  const frames = gateway.sessions!.bufferedFrames(sessionId);
+  const frames = gateway.sessions?.bufferedFrames(sessionId);
   const frame = frames.find((candidate) => candidate.event === "user_message");
   return frame === undefined ? null : (frame.data as UserMessagePayload);
+}
+
+/** Base64 fixture body of the given byte length. */
+function payload(length: number): string {
+  return Buffer.alloc(length).toString("base64");
 }
 
 describe("attachment body ingress (D5)", () => {
@@ -67,9 +76,9 @@ describe("attachment body ingress (D5)", () => {
     });
 
     // Ref metadata: the STORED decoded length wins over the tap's declaration.
-    const payload = userMessageFrame(gateway);
-    expect(payload).not.toBeNull();
-    expect(payload!.attachments).toEqual([
+    const frame = userMessageFrame(gateway);
+    expect(frame).not.toBeNull();
+    expect(frame?.attachments).toEqual([
       {
         attachmentId: "att-1",
         mimeType: "image/png",
@@ -79,10 +88,10 @@ describe("attachment body ingress (D5)", () => {
     // Honesty: the frame buffer never carries the body (replay budget, D5).
     expect(JSON.stringify(userMessageFrame(gateway))).not.toContain("PNG");
 
-    const stored = gateway.sessions!.getAttachment("s-1", "att-1");
+    const stored = gateway.sessions?.getAttachment("s-1", "att-1");
     expect(stored).not.toBeNull();
-    expect(stored!.mimeType).toBe("image/png");
-    expect(Buffer.from(stored!.bytes).toString("base64")).toBe(PNG_BASE64);
+    expect(stored?.mimeType).toBe("image/png");
+    expect(Buffer.from(stored?.bytes).toString("base64")).toBe(PNG_BASE64);
   });
 
   test("bodies survive session end; frames replay references, not bodies", () => {
@@ -102,8 +111,8 @@ describe("attachment body ingress (D5)", () => {
     });
     tap(gateway, conn, { type: "session_shutdown" });
 
-    expect(gateway.sessions!.getAttachment("s-1", "att-1")).not.toBeNull();
-    expect(userMessageFrame(gateway)!.attachments).toHaveLength(1);
+    expect(gateway.sessions?.getAttachment("s-1", "att-1")).not.toBeNull();
+    expect(userMessageFrame(gateway)?.attachments).toHaveLength(1);
   });
 
   test("malformed bodies and refs are dropped (fail-observer)", () => {
@@ -141,8 +150,8 @@ describe("attachment body ingress (D5)", () => {
       ],
     });
 
-    expect(gateway.sessions!.getAttachment("s-1", "att-1")).toBeNull();
-    const refs = userMessageFrame(gateway)!.attachments;
+    expect(gateway.sessions?.getAttachment("s-1", "att-1")).toBeNull();
+    const refs = userMessageFrame(gateway)?.attachments;
     expect(refs).toEqual([{ attachmentId: "att-9", mimeType: "image/png", byteLen: 0 }]);
   });
 
@@ -161,18 +170,17 @@ describe("attachment body ingress (D5)", () => {
       attachments: nine,
     });
 
-    const refs = userMessageFrame(gateway)!.attachments;
+    const refs = userMessageFrame(gateway)?.attachments;
     expect(refs).toHaveLength(8); // MAX_ATTACHMENTS_PER_MESSAGE
     expect(refs.map((ref) => ref.attachmentId)).toEqual(
       Array.from({ length: 8 }, (_, index) => `att-${index + 1}`),
     );
-    expect(userMessageFrame(gateway)!.imageCount).toBe(9); // observed count stays honest
+    expect(userMessageFrame(gateway)?.imageCount).toBe(9); // observed count stays honest
   });
 
   test("store bounds: oversized bodies and over-budget sessions drop or evict oldest-first", () => {
     const gateway = harness({ maxBodyBytes: 100, maxPerSession: 2, maxTotalBytesPerSession: 150 });
     const conn = register(gateway);
-    const payload = (length: number) => Buffer.alloc(length).toString("base64");
 
     tap(gateway, conn, {
       type: "attachment",
@@ -180,7 +188,7 @@ describe("attachment body ingress (D5)", () => {
       mimeType: "application/octet-stream",
       dataBase64: payload(101),
     });
-    expect(gateway.sessions!.getAttachment("s-1", "too-big")).toBeNull(); // > maxBodyBytes
+    expect(gateway.sessions?.getAttachment("s-1", "too-big")).toBeNull(); // > maxBodyBytes
 
     tap(gateway, conn, {
       type: "attachment",
@@ -194,7 +202,7 @@ describe("attachment body ingress (D5)", () => {
       mimeType: "application/octet-stream",
       dataBase64: payload(60),
     });
-    expect(gateway.sessions!.getAttachment("s-1", "a")).not.toBeNull();
+    expect(gateway.sessions?.getAttachment("s-1", "a")).not.toBeNull();
     tap(gateway, conn, {
       type: "attachment",
       attachmentId: "c",
@@ -202,21 +210,21 @@ describe("attachment body ingress (D5)", () => {
       dataBase64: payload(20),
     });
     // Count cap (2): "a" is evicted oldest-first; total would be 140 ≤ 150.
-    expect(gateway.sessions!.getAttachment("s-1", "a")).toBeNull();
-    expect(gateway.sessions!.getAttachment("s-1", "b")).not.toBeNull();
-    expect(gateway.sessions!.getAttachment("s-1", "c")).not.toBeNull();
+    expect(gateway.sessions?.getAttachment("s-1", "a")).toBeNull();
+    expect(gateway.sessions?.getAttachment("s-1", "b")).not.toBeNull();
+    expect(gateway.sessions?.getAttachment("s-1", "c")).not.toBeNull();
   });
 
   test("attachment lines on unregistered or gone sessions are dropped", () => {
     const gateway = harness();
-    gateway.sessions!.openConnection("unregistered");
+    gateway.sessions?.openConnection("unregistered");
     tap(gateway, "unregistered", {
       type: "attachment",
       attachmentId: "att-1",
       mimeType: "image/png",
       dataBase64: PNG_BASE64,
     });
-    expect(gateway.sessions!.getAttachment("s-1", "att-1")).toBeNull();
+    expect(gateway.sessions?.getAttachment("s-1", "att-1")).toBeNull();
 
     const conn = register(gateway, "s-gone");
     tap(gateway, conn, { type: "session_shutdown" });
@@ -226,7 +234,7 @@ describe("attachment body ingress (D5)", () => {
       mimeType: "image/png",
       dataBase64: PNG_BASE64,
     });
-    expect(gateway.sessions!.getAttachment("s-gone", "att-1")).toBeNull();
+    expect(gateway.sessions?.getAttachment("s-gone", "att-1")).toBeNull();
   });
 });
 
@@ -391,7 +399,7 @@ describe("POST /v1/sessions/{sessionId}/attachments (app upload, D5)", () => {
     const third = await upload(gateway, "s-1", PNG_BYTES);
     expect(third.status).toBe(201); // fits by evicting oldest-first (documented policy)
     expect(
-      gateway.sessions!.getAttachment(
+      gateway.sessions?.getAttachment(
         "s-1",
         ((await first.json()) as { attachmentId: string }).attachmentId,
       ),
@@ -426,7 +434,7 @@ function captureWriter(lines: string[]): (line: string) => void {
 }
 
 function parseLine<T = Record<string, unknown>>(lines: string[], index: number): T {
-  return JSON.parse(lines[index]!) as T;
+  return JSON.parse(must(lines[index])) as T;
 }
 
 async function submitInput(
@@ -496,10 +504,10 @@ describe("POST /v1/sessions/{sessionId}/input (downstream delivery, D5)", () => 
     });
 
     // 5. The frame on the stream carries the REFERENCE, not the body (D5).
-    const payload = userMessageFrame(gateway);
-    expect(payload).not.toBeNull();
-    expect(payload!.imageCount).toBe(1);
-    expect(payload!.attachments).toEqual([
+    const frame = userMessageFrame(gateway);
+    expect(frame).not.toBeNull();
+    expect(frame?.imageCount).toBe(1);
+    expect(frame?.attachments).toEqual([
       {
         attachmentId: ref.attachmentId,
         mimeType: "image/png",

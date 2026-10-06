@@ -10,6 +10,10 @@
 import { describe, expect, test } from "bun:test";
 
 import { authHeader, bootTestGateway, makePane, type TestGateway } from "./helpers";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 function paneGateway(overrides?: Parameters<typeof bootTestGateway>[0]): TestGateway & {
   paneSource: NonNullable<TestGateway["paneSource"]>;
@@ -34,7 +38,7 @@ async function openPaneStream(
 }
 
 async function readRaw(response: Response, deadlineMs = 1_500): Promise<string> {
-  const reader = response.body!.getReader();
+  const reader = response.body?.getReader();
   const decoder = new TextDecoder();
   let raw = "";
   const deadline = Date.now() + deadlineMs;
@@ -87,7 +91,7 @@ describe("GET /v1/panes", () => {
         makePane({ paneId: "w1:p2", workspaceId: "w1", state: "unknown" }),
       ];
       gateway.paneSource.setReading("w1:p1", 3, "hello");
-      await gateway.panes!.tick();
+      await gateway.panes?.tick();
 
       const response = await fetch(`${gateway.baseUrl}/v1/panes`, {
         headers: { ...authHeader(gateway.token()) },
@@ -114,7 +118,7 @@ describe("GET /v1/panes", () => {
         makePane({ paneId: "w1:p1", workspaceId: "w1", state: "active" }),
         makePane({ paneId: "w1:p2", workspaceId: "w1", state: "idle" }),
       ];
-      await gateway.panes!.tick();
+      await gateway.panes?.tick();
 
       const response = await fetch(`${gateway.baseUrl}/v1/panes`, {
         headers: { ...authHeader(gateway.token()) },
@@ -131,7 +135,7 @@ describe("GET /v1/panes", () => {
     const gateway = paneGateway();
     try {
       gateway.paneSource.unavailable = true;
-      await gateway.panes!.tick();
+      await gateway.panes?.tick();
       const response = await fetch(`${gateway.baseUrl}/v1/panes`, {
         headers: { ...authHeader(gateway.token()) },
       });
@@ -179,23 +183,23 @@ describe("GET /v1/panes/{paneId}/events", () => {
         makePane({ paneId: "w1:p1", workspaceId: "w1", state: "active" }),
       ];
       gateway.paneSource.setReading("w1:p1", 1, "first");
-      await gateway.panes!.tick();
+      await gateway.panes?.tick();
       gateway.paneSource.setReading("w1:p1", 2, "second");
-      await gateway.panes!.tick();
+      await gateway.panes?.tick();
 
       const response = await openPaneStream(gateway, "w1:p1");
       const frames = parsePaneFrames(await readRaw(response));
       const texts = frames.filter((frame) => frame.event === "pane_text");
       expect(texts).toHaveLength(2);
-      expect(texts[0]!.data).toMatchObject({
+      expect(texts[0]?.data).toMatchObject({
         paneId: "w1:p1",
         revision: "1",
         text: "first",
         truncated: false,
       });
-      expect(texts[1]!.data).toMatchObject({ paneId: "w1:p1", revision: "2", text: "second" });
+      expect(texts[1]?.data).toMatchObject({ paneId: "w1:p1", revision: "2", text: "second" });
       // Wire contract: revision is a decimal string (ADR §4.1 u64 rule).
-      expect(typeof (texts[0]!.data as { revision: unknown }).revision).toBe("string");
+      expect(typeof (texts[0]?.data as { revision: unknown } | undefined)?.revision).toBe("string");
     } finally {
       gateway.stop();
     }
@@ -208,16 +212,16 @@ describe("GET /v1/panes/{paneId}/events", () => {
         makePane({ paneId: "w1:p1", workspaceId: "w1", state: "active" }),
       ];
       gateway.paneSource.setReading("w1:p1", 5, "same text");
-      await gateway.panes!.tick();
-      await gateway.panes!.tick(); // same revision: no frame
+      await gateway.panes?.tick();
+      await gateway.panes?.tick(); // same revision: no frame
       gateway.paneSource.setReading("w1:p1", 6, "same text but changed");
-      await gateway.panes!.tick();
+      await gateway.panes?.tick();
 
-      const observation = gateway.panes!.observePane("w1:p1", null);
+      const observation = gateway.panes?.observePane("w1:p1", null);
       const texts = observation.intro.filter((frame) => frame.event === "pane_text");
       expect(texts).toHaveLength(2);
-      expect((texts[0]!.data as { revision: string }).revision).toBe("5");
-      expect((texts[1]!.data as { revision: string }).revision).toBe("6");
+      expect((texts[0]?.data as { revision: string } | undefined)?.revision).toBe("5");
+      expect((texts[1]?.data as { revision: string } | undefined)?.revision).toBe("6");
     } finally {
       gateway.stop();
     }
@@ -230,18 +234,18 @@ describe("GET /v1/panes/{paneId}/events", () => {
         makePane({ paneId: "w1:p1", workspaceId: "w1", state: "active" }),
       ];
       gateway.paneSource.setReading("w1:p1", 1, "v1");
-      await gateway.panes!.tick();
+      await gateway.panes?.tick();
 
       // Both changes land before the next tick: only the latest survives.
       gateway.paneSource.setReading("w1:p1", 2, "v2 (lost)");
       gateway.paneSource.setReading("w1:p1", 3, "v3 (kept)");
-      await gateway.panes!.tick();
+      await gateway.panes?.tick();
 
-      const observation = gateway.panes!.observePane("w1:p1", null);
+      const observation = gateway.panes?.observePane("w1:p1", null);
       const texts = observation.intro.filter((frame) => frame.event === "pane_text");
       expect(texts).toHaveLength(2);
-      expect((texts[1]!.data as { revision: string; text: string }).revision).toBe("3");
-      expect((texts[1]!.data as { revision: string; text: string }).text).toBe("v3 (kept)");
+      expect((texts[1]?.data as { revision: string; text: string } | undefined)?.revision).toBe("3");
+      expect((texts[1]?.data as { revision: string; text: string } | undefined)?.text).toBe("v3 (kept)");
       expect(JSON.stringify(observation.intro)).not.toContain("v2 (lost)");
     } finally {
       gateway.stop();
@@ -255,14 +259,14 @@ describe("GET /v1/panes/{paneId}/events", () => {
         makePane({ paneId: "w1:p1", workspaceId: "w1", state: "active" }),
       ];
       gateway.paneSource.setReading("w1:p1", 1, "one");
-      await gateway.panes!.tick();
+      await gateway.panes?.tick();
       gateway.paneSource.setReading("w1:p1", 2, "two");
-      await gateway.panes!.tick();
+      await gateway.panes?.tick();
       gateway.paneSource.setReading("w1:p1", 3, "three");
-      await gateway.panes!.tick();
+      await gateway.panes?.tick();
 
-      const head = gateway.panes!.observePane("w1:p1", null);
-      const firstFrameId = head.intro[0]!.id;
+      const head = gateway.panes?.observePane("w1:p1", null);
+      const firstFrameId = head.intro[0]?.id;
 
       const resume = await openPaneStream(gateway, "w1:p1", firstFrameId);
       const replayed = parsePaneFrames(await readRaw(resume)).filter(
@@ -275,8 +279,8 @@ describe("GET /v1/panes/{paneId}/events", () => {
 
       const stale = await openPaneStream(gateway, "w1:p1", "garbage-cursor");
       const staleFrames = parsePaneFrames(await readRaw(stale));
-      expect(staleFrames[0]!.event).toBe("pane_reset");
-      expect(staleFrames[0]!.data).toMatchObject({
+      expect(staleFrames[0]?.event).toBe("pane_reset");
+      expect(staleFrames[0]?.data).toMatchObject({
         paneId: "w1:p1",
         reason: "cursorUnavailable",
         revision: "3",
@@ -294,19 +298,19 @@ describe("GET /v1/panes/{paneId}/events", () => {
         makePane({ paneId: "w1:p1", workspaceId: "w1", state: "active" }),
       ];
       gateway.paneSource.setReading("w1:p1", 1, "before death");
-      await gateway.panes!.tick();
+      await gateway.panes?.tick();
 
       const response = await openPaneStream(gateway, "w1:p1");
       // Read intro frame, observe the pane's death, read until the reset.
       let raw = "";
       {
-        const reader = response.body!.getReader();
+        const reader = response.body?.getReader();
         const decoder = new TextDecoder();
         raw += decoder.decode((await reader.read()).value ?? new Uint8Array(), { stream: true });
         expect(raw).toContain("pane_text");
 
         gateway.paneSource.panes = []; // pane disappeared
-        await gateway.panes!.tick();
+        await gateway.panes?.tick();
 
         raw += await new Promise<string>((resolve) => {
           const deadline = Date.now() + 1_500;
@@ -327,7 +331,7 @@ describe("GET /v1/panes/{paneId}/events", () => {
       const frames = parsePaneFrames(raw);
       const resets = frames.filter((frame) => frame.event === "pane_reset");
       expect(resets).toHaveLength(1);
-      expect(resets[0]!.data).toMatchObject({
+      expect(resets[0]?.data).toMatchObject({
         paneId: "w1:p1",
         reason: "paneGone",
         text: "before death",
@@ -340,7 +344,7 @@ describe("GET /v1/panes/{paneId}/events", () => {
       expect(after.some((frame) => frame.event === "pane_text")).toBe(true);
       const goneFrames = after.filter((frame) => frame.event === "pane_reset");
       expect(goneFrames).toHaveLength(1);
-      expect(goneFrames[0]!.data).toMatchObject({ reason: "paneGone" });
+      expect(goneFrames[0]?.data).toMatchObject({ reason: "paneGone" });
     } finally {
       gateway.stop();
     }
@@ -353,10 +357,10 @@ describe("GET /v1/panes/{paneId}/events", () => {
         makePane({ paneId: "w1:p1", workspaceId: "w1", state: "active" }),
       ];
       gateway.paneSource.setReading("w1:p1", 1, "x".repeat(1_000));
-      await gateway.panes!.tick();
+      await gateway.panes?.tick();
 
-      const observation = gateway.panes!.observePane("w1:p1", null);
-      const frame = observation.intro[0]!;
+      const observation = gateway.panes?.observePane("w1:p1", null);
+      const frame = must(observation.intro[0]);
       const data = frame.data as { text: string; truncated: boolean };
       expect(data.truncated).toBe(true);
       expect(Buffer.byteLength(data.text, "utf8")).toBeLessThanOrEqual(64);
@@ -372,10 +376,10 @@ describe("GET /v1/panes/{paneId}/events", () => {
         makePane({ paneId: "w1:p1", workspaceId: "w1", state: "active" }),
       ];
       gateway.paneSource.setReading("w1:p1", 1, "deploy with --api-key sk-live-abc123 done");
-      await gateway.panes!.tick();
+      await gateway.panes?.tick();
 
-      const observation = gateway.panes!.observePane("w1:p1", null);
-      const data = observation.intro[0]!.data as { text: string };
+      const observation = gateway.panes?.observePane("w1:p1", null);
+      const data = observation.intro[0]?.data as { text: string };
       expect(data.text).toContain("[credential]=[redacted]");
       expect(data.text).not.toContain("sk-live-abc123");
     } finally {

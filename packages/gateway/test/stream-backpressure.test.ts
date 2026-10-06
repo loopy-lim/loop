@@ -9,6 +9,10 @@ import { describe, expect, test } from "bun:test";
 
 import type { SseFrameName } from "../src/events";
 import { encodeFrame, KEEPALIVE_COMMENT, SseClientStream } from "../src/stream";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 function frame(event: SseFrameName, seq: number, data: unknown = {}) {
   return { id: `id-${seq}`, event, data };
@@ -51,7 +55,7 @@ describe("bounded queue and slow-consumer convergence", () => {
     expect(stream.pendingFrames).toBe(0);
     expect(stream.write(resetFrame(6), "control")).toBe("queued");
     expect(stream.pendingFrames).toBe(1);
-    const queued = JSON.parse(readAll(stream).match(/data: (.*)\n/)![1]!);
+    const queued = JSON.parse(must(readAll(stream).match(/data: (.*)\n/)?.[1]));
     expect(queued).toMatchObject({ reason: "slow_consumer", run: { runId: "r" } });
     expect(stream.closed).toBe(false);
   });

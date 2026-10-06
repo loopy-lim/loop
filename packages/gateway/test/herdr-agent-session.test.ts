@@ -35,6 +35,10 @@ import {
   type HerdrAgentInventoryPort,
   HerdrAgentSessionRegistrar,
 } from "../src/herdr-agent-session";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 // ——— Fake port (registrar core; deterministic, no sockets) ———
 
@@ -86,7 +90,7 @@ describe("HerdrAgentSessionRegistrar core", () => {
     const registrar = new HerdrAgentSessionRegistrar({ port });
     await registrar.tick();
     expect(port.reports).toHaveLength(2);
-    const first = port.reports[0]!;
+    const first = must(port.reports[0]);
     expect(first.paneId).toBe("w1:p15");
     expect(first.agent).toBe("pi");
     expect(first.agentSessionId).toBe("loop-loop-0207f6a8-ad7b-192df734");
@@ -94,7 +98,7 @@ describe("HerdrAgentSessionRegistrar core", () => {
     expect(first.sessionStartSource).toBe(AGENT_SESSION_START_SOURCE);
     expect(Number.isInteger(first.seq)).toBe(true);
     // seq advances monotonically across reports (herdr upserts by source).
-    expect(port.reports[1]!.seq).toBeGreaterThan(first.seq);
+    expect(port.reports[1]?.seq).toBeGreaterThan(first.seq);
   });
 
   test("skips agents without the Loop prefix and agents already carrying a session", async () => {
@@ -219,13 +223,13 @@ describe("HerdrPaneSource agent-session protocol", () => {
       const agents = await source.listAgents();
       expect(agents).not.toBeNull();
       expect(agents).toHaveLength(2);
-      expect(agents![0]).toEqual({
+      expect(agents?.[0]).toEqual({
         name: "loop-loop-0207f6a8-ad7b-192df734",
         paneId: "w1:p15",
         agent: "pi",
         agentSession: null,
       });
-      expect(agents![1]!.agentSession).toEqual({
+      expect(agents?.[1]?.agentSession).toEqual({
         source: "herdr:pi",
         agent: "pi",
         kind: "id",

@@ -14,6 +14,10 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 import { MAX_FILE_VIEW_BYTES } from "../src/files";
 import { authHeader, bootTestGateway, type TestGateway } from "./helpers";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 let root: string;
 
@@ -59,10 +63,10 @@ describe("GET /v1/files (list)", () => {
         "notes.txt",
         "secret.txt",
       ]);
-      const docs = body.entries.find((entry) => entry.name === "docs")!;
+      const docs = must(body.entries.find((entry) => entry.name === "docs"));
       expect(docs.isDir).toBe(true);
       expect(docs.mtimeMs).toBeGreaterThan(0);
-      const notes = body.entries.find((entry) => entry.name === "notes.txt")!;
+      const notes = must(body.entries.find((entry) => entry.name === "notes.txt"));
       expect(notes.isDir).toBe(false);
       expect(notes.size).toBe("hello loop\n".length);
     } finally {
@@ -148,7 +152,7 @@ describe("GET /v1/files/content", () => {
         `/v1/files/content?path=${encodeURIComponent("notes.txt")}`,
         authHeader(gateway.token()),
       );
-      const etag = first.headers.get("ETag")!;
+      const etag = must(first.headers.get("ETag"));
       const second = await get(
         gateway,
         `/v1/files/content?path=${encodeURIComponent("notes.txt")}`,

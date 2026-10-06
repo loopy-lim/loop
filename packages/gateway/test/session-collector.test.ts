@@ -14,6 +14,10 @@ import { tmpdir } from "node:os";
 import type { SessionOutboundFrame } from "../src/session-events";
 import { SessionEventLog } from "../src/session-events";
 import { SessionCollector } from "../src/session-collector";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 function harness(
   overrides: { capacity?: number; maxFrameBytes?: number; mergeFlushMs?: number } = {},
@@ -75,8 +79,8 @@ describe("assistant delta merge (D4 §2)", () => {
 
     const deltas = h.frames("s-1");
     expect(deltas).toHaveLength(1);
-    expect(deltas[0]!.event).toBe("assistant_delta");
-    expect(deltas[0]!.data).toMatchObject({ messageId: "m-1", delta: "text 9" });
+    expect(deltas[0]?.event).toBe("assistant_delta");
+    expect(deltas[0]?.data).toMatchObject({ messageId: "m-1", delta: "text 9" });
 
     // Next snapshot schedules a NEW window ≥250 ms after the first flush.
     h.collector.ingestLine(
@@ -89,7 +93,7 @@ describe("assistant delta merge (D4 §2)", () => {
     h.clock.advance(200);
     h.collector.tickMerge(h.clock.now);
     expect(h.frames("s-1")).toHaveLength(2);
-    expect(h.frames("s-1")![1]!.data).toMatchObject({ delta: " and more" }); // suffix delta only
+    expect(h.frames("s-1")?.[1]?.data).toMatchObject({ delta: " and more" }); // suffix delta only
   });
 
   test("the final replaces the buffer: no trailing delta for pending snapshots, final is authoritative", () => {
@@ -107,7 +111,7 @@ describe("assistant delta merge (D4 §2)", () => {
     h.collector.tickMerge(h.clock.now);
 
     expect(h.events("s-1")).toEqual(["assistant_message"]);
-    expect(h.frames("s-1")![0]!.data).toMatchObject({
+    expect(h.frames("s-1")?.[0]?.data).toMatchObject({
       messageId: "m-1",
       text: "the real final",
       truncated: false,
@@ -191,16 +195,16 @@ describe("redaction and bounds (D4 §8, D2)", () => {
       }),
     );
 
-    const user = h.frames("s-1")[0]!.data as { text: string };
+    const user = h.frames("s-1")[0]?.data as { text: string };
     expect(user.text).toContain("[credential]=[redacted]");
     expect(user.text).not.toContain("supersecret123");
     expect(Buffer.byteLength(user.text, "utf8")).toBeLessThanOrEqual(64);
 
-    const started = h.frames("s-1")[1]!.data as { argsJson: string; argsTruncated: boolean };
+    const started = h.frames("s-1")[1]?.data as { argsJson: string; argsTruncated: boolean };
     expect(started.argsJson).toContain("[credential]=[redacted]");
     expect(started.argsJson).not.toContain("abc.def.ghi");
 
-    const ended = h.frames("s-1")[2]!.data as {
+    const ended = h.frames("s-1")[2]?.data as {
       resultText: string;
       resultTruncated: boolean;
       isError: boolean;
@@ -216,7 +220,7 @@ describe("redaction and bounds (D4 §8, D2)", () => {
     );
     h.clock.advance(1_000);
     h.collector.tickMerge(h.clock.now);
-    expect((h.frames("s-1")[3]!.data as { delta: string }).delta).toContain(
+    expect((h.frames("s-1")[3]?.data as { delta: string } | undefined)?.delta).toContain(
       "[credential]=[redacted]",
     );
   });
@@ -256,7 +260,7 @@ describe("fail-observer ingress (D1)", () => {
       JSON.stringify({ type: "user_message", messageId: "m-1", text: "ok", source: "hijacked" }),
     );
     expect(h.events("s-1")).toEqual(["user_message"]);
-    expect((h.frames("s-1")[0]!.data as { source: string }).source).toBe("interactive"); // default, not "hijacked"
+    expect((h.frames("s-1")[0]?.data as { source: string } | undefined)?.source).toBe("interactive"); // default, not "hijacked"
   });
 
   test("a second register on the same connection is ignored; unknown-session observations never create state", () => {
@@ -278,8 +282,8 @@ describe("fail-observer ingress (D1)", () => {
 
     const sessions = h.collector.listSessions().sessions;
     expect(sessions).toHaveLength(1);
-    expect(sessions[0]!.sessionId).toBe("s-1");
-    expect(h.collector.listSessions().sessions[0]!.state).toBe("live");
+    expect(sessions[0]?.sessionId).toBe("s-1");
+    expect(h.collector.listSessions().sessions[0]?.state).toBe("live");
   });
 });
 
@@ -293,16 +297,16 @@ describe("session lifetime (D3)", () => {
     );
     h.collector.ingestLine(conn, JSON.stringify({ type: "session_shutdown" }));
 
-    expect(h.collector.listSessions().sessions[0]!.state).toBe("ended");
+    expect(h.collector.listSessions().sessions[0]?.state).toBe("ended");
     // The gone reset is shared-recorded (run/pane terminal precedent), not a
     // buffered conversation frame.
-    const gone = h.log.goneReset("s-1")!;
+    const gone = must(h.log.goneReset("s-1"));
     expect(gone.event).toBe("conversation_reset");
     expect(gone.data).toMatchObject({ reason: "sessionGone" });
     // Shared-recorded: reconnect intro converges on the same frame.
     const observation = h.collector.observeSession("s-1", null);
     expect(observation.terminalAfterIntro).toBe(true);
-    expect(observation.intro.at(-1)!.data).toEqual(gone.data);
+    expect(observation.intro.at(-1)?.data).toEqual(gone.data);
 
     // Post-shutdown traffic is dropped.
     h.collector.ingestLine(
@@ -321,7 +325,7 @@ describe("session lifetime (D3)", () => {
     );
     h.collector.tapDisconnected(conn);
 
-    expect(h.collector.listSessions().sessions[0]!.state).toBe("unobserved");
+    expect(h.collector.listSessions().sessions[0]?.state).toBe("unobserved");
     expect(h.collector.observeSession("s-1", null).intro.map((frame) => frame.event)).toEqual([
       "user_message",
     ]);
@@ -333,7 +337,7 @@ describe("session lifetime (D3)", () => {
       conn2,
       JSON.stringify({ type: "register", sessionId: "s-1", lane: "pi" }),
     );
-    expect(h.collector.listSessions().sessions[0]!.state).toBe("live");
+    expect(h.collector.listSessions().sessions[0]?.state).toBe("live");
   });
 
   test("steer mirrors only onto live sessions correlated to the run", () => {
@@ -366,12 +370,12 @@ describe("session lifetime (D3)", () => {
     expect(h.events("s-other")).toEqual([]);
 
     // Text passes the gate on the mirror too.
-    expect((h.frames("s-live")[0]!.data as { text: string }).text).toBe("go");
+    expect((h.frames("s-live")[0]?.data as { text: string } | undefined)?.text).toBe("go");
     h.collector.ingestLine(live, JSON.stringify({ type: "lifecycle", phase: "turnStarted" }));
     expect(
       h.collector.mirrorSteerQueued({ runId: "run-1", steerId: "st-3", text: "token: abc123" }),
     ).toBe(1);
-    expect((h.frames("s-live").at(-1)!.data as { text: string }).text).toContain(
+    expect((h.frames("s-live").at(-1)?.data as { text: string } | undefined)?.text).toContain(
       "[credential]=[redacted]",
     );
   });
@@ -389,8 +393,8 @@ describe("unknown session surface rules", () => {
     );
     const reset = h.collector.slowConsumerReset("s-1");
     expect(reset).not.toBeNull();
-    expect(reset!.event).toBe("conversation_reset");
-    expect((reset!.data as { reason: string }).reason).toBe("slowConsumer");
+    expect(reset?.event).toBe("conversation_reset");
+    expect((reset?.data as { reason: string } | undefined)?.reason).toBe("slowConsumer");
   });
 });
 
@@ -417,7 +421,7 @@ describe("unix socket round-trip (D1 ingress)", () => {
 
       const observation = collector.observeSession("s-sock", null);
       expect(observation.intro.map((frame) => frame.event)).toEqual(["user_message"]);
-      expect(observation.intro[0]!.data).toMatchObject({
+      expect(observation.intro[0]?.data).toMatchObject({
         messageId: "m-1",
         text: "over the socket",
       });
@@ -429,7 +433,7 @@ describe("unix socket round-trip (D1 ingress)", () => {
 
       socket.end();
       await new Promise((resolve) => setTimeout(resolve, 50));
-      expect(collector.listSessions().sessions[0]!.state).toBe("unobserved");
+      expect(collector.listSessions().sessions[0]?.state).toBe("unobserved");
     } finally {
       collector.stop();
       rmSync(socketPath, { force: true });

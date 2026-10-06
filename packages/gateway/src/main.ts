@@ -504,6 +504,33 @@ export async function bootGatewayFromEnv(
     ...(panes === null ? {} : { panes }),
     ...(sessions === null ? {} : { sessions }),
     steer: protocolSteerPort(runtime.protocol, databasePath),
+    resolveAttention: {
+      async resolve(runId, attentionId, resolution) {
+        try {
+          const snapshot = await runtime.protocol.getSnapshot({ databasePath, runId });
+          if (!snapshot.attention.some((entry) => entry.id === attentionId)) {
+            throw new ProblemError(404, "not_found");
+          }
+          await runtime.protocol.resolveAttention({
+            databasePath,
+            runId,
+            attentionId,
+            resolution,
+            correctiveTask: null,
+          });
+        } catch (error) {
+          if (error instanceof ProblemError) throw error;
+          const message = error instanceof Error ? error.message : String(error);
+          if (/attention.*not found|unknown attention|not open/i.test(message)) {
+            throw new ProblemError(404, "not_found");
+          }
+          if (/run_not_found|unknown run|run.*not found/i.test(message)) {
+            throw new ProblemError(404, "run_not_found");
+          }
+          throw new ProblemError(502, "runtime_unavailable");
+        }
+      },
+    },
     graph: {
       async get(runId) {
         try {

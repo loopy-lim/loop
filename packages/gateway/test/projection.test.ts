@@ -75,7 +75,7 @@ describe("task buckets", () => {
       makeSnapshot({ runId: "r", tasks: [makeTask({ id: "t", resultSummary: long })] }),
       0,
     );
-    expect(Buffer.byteLength(run.tasks[0]!.summary ?? "", "utf8")).toBeLessThanOrEqual(2048);
+    expect(Buffer.byteLength(run.tasks[0]?.summary ?? "", "utf8")).toBeLessThanOrEqual(2048);
   });
 });
 
@@ -155,8 +155,8 @@ describe("incremental activity projection", () => {
       tasks: [makeTask({ id: "t", activities: ["y".repeat(9000)] })],
     });
     const emitted = projectNewActivities(snapshot, windows);
-    expect(emitted[0]!.truncated).toBe(true);
-    expect(Buffer.byteLength(emitted[0]!.text, "utf8")).toBeLessThanOrEqual(8 * 1024);
+    expect(emitted[0]?.truncated).toBe(true);
+    expect(Buffer.byteLength(emitted[0]?.text, "utf8")).toBeLessThanOrEqual(8 * 1024);
   });
 });
 

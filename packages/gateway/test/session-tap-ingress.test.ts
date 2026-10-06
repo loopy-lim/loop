@@ -164,12 +164,11 @@ describe("tap -> collector over the real socket (M-GC1)", () => {
       const frames = collector.bufferedFrames(sessionId) as Array<
         SessionOutboundFrame & { data: Record<string, unknown> }
       >;
-      expect(frames[0]!.data).toMatchObject({ phase: "sessionStarted" });
-      expect(frames[2]!.data).toMatchObject({ phase: "turnStarted" });
-      expect(frames[8]!.data).toMatchObject({ phase: "turnEnded" });
-      const attachmentId = (frames[1]!.data.attachments as Array<{ attachmentId: string }>)[0]!
-        .attachmentId;
-      expect(frames[1]!.data).toMatchObject({
+      expect(frames[0]?.data).toMatchObject({ phase: "sessionStarted" });
+      expect(frames[2]?.data).toMatchObject({ phase: "turnStarted" });
+      expect(frames[8]?.data).toMatchObject({ phase: "turnEnded" });
+      const attachmentId = (frames[1]?.data.attachments as Array<{ attachmentId: string }> | undefined)?.[0]?.attachmentId;
+      expect(frames[1]?.data).toMatchObject({
         text: "tmux 세션에서 온 인사",
         source: "interactive",
         imageCount: 1,
@@ -182,15 +181,15 @@ describe("tap -> collector over the real socket (M-GC1)", () => {
         ],
       });
       // Deltas are merged suffixes; the final replaces the buffer text.
-      expect(frames[3]!.data).toMatchObject({ delta: "안녕" });
-      expect(frames[4]!.data).toMatchObject({ delta: "하세요" });
-      expect(frames[5]!.data).toMatchObject({ text: "안녕하세요 최종", truncated: false });
-      expect(frames[6]!.data).toMatchObject({
+      expect(frames[3]?.data).toMatchObject({ delta: "안녕" });
+      expect(frames[4]?.data).toMatchObject({ delta: "하세요" });
+      expect(frames[5]?.data).toMatchObject({ text: "안녕하세요 최종", truncated: false });
+      expect(frames[6]?.data).toMatchObject({
         toolCallId: "tc-1",
         toolName: "bash",
         argsJson: '{"command":"echo hi"}',
       });
-      expect(frames[7]!.data).toMatchObject({
+      expect(frames[7]?.data).toMatchObject({
         toolCallId: "tc-1",
         resultText: "hi",
         isError: false,
@@ -199,7 +198,7 @@ describe("tap -> collector over the real socket (M-GC1)", () => {
       // The attachment body referenced by the user_message frame is fetchable.
       const attachment = collector.getAttachment(sessionId, attachmentId);
       expect(attachment).not.toBeNull();
-      expect(Buffer.from(attachment!.bytes).toString("utf8")).toBe("fakepng-bytes");
+      expect(Buffer.from(attachment?.bytes).toString("utf8")).toBe("fakepng-bytes");
     } finally {
       collector.stop();
       rmSync(socketPath, { force: true });
@@ -247,7 +246,7 @@ describe("tap -> collector over the real socket (M-GC1)", () => {
       });
       await waitFor(() => frameEvents(collector, sessionId).includes("assistant_message"));
       expect(frameEvents(collector, sessionId)).toEqual(["lifecycle", "assistant_message"]);
-      expect(collector.bufferedFrames(sessionId)[1]!.data).toMatchObject({ text: "다시 산다" });
+      expect(collector.bufferedFrames(sessionId)[1]?.data).toMatchObject({ text: "다시 산다" });
       void log;
     } finally {
       collector.stop();
@@ -272,7 +271,7 @@ describe("tap -> collector over the real socket (M-GC1)", () => {
 
       // The operator quits pi: the tap sends the honest shutdown line.
       tap.stopSession();
-      await waitFor(() => collector.listSessions().sessions[0]!.state === "ended");
+      await waitFor(() => collector.listSessions().sessions[0]?.state === "ended");
       expect(tap.connected).toBe(false);
 
       // History replays, then converges on the shared sessionGone reset.

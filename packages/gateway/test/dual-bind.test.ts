@@ -236,7 +236,7 @@ describe("SSE transport teardown hardening (v7 wrapper replacement precondition)
         headers: { Accept: "text/event-stream", ...authHeader(gateway.token()) },
       });
       expect(response.status).toBe(200);
-      const reader = response.body!.getReader();
+      const reader = response.body?.getReader();
       await reader.read(); // drain the intro so frames are flowing
       await reader.cancel(); // client walks away mid-stream
 
@@ -267,7 +267,7 @@ describe("SSE transport teardown hardening (v7 wrapper replacement precondition)
         signal: control.signal,
       });
       expect(response.status).toBe(200);
-      const reader = response.body!.getReader();
+      const reader = response.body?.getReader();
       await reader.read();
       control.abort();
       gateway.runtime.emit(makeSnapshot({ runId, state: "completed" }));

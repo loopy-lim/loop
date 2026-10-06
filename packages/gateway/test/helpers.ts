@@ -20,7 +20,7 @@ import { ProblemError } from "../src/problem";
 import { SessionCollector } from "../src/session-collector";
 import { SessionEventLog } from "../src/session-events";
 import type { SpawnOutcome, SpawnPort, SpawnRequest } from "../src/spawn";
-import type { GraphPort, SteerPort } from "../src/server";
+import type { GraphPort, ResolveAttentionPort, SteerPort } from "../src/server";
 import { GatewayService, type PromptPlannerPort, type RunRuntimePort } from "../src/service";
 import { startGateway, type GatewayServer } from "../src/server";
 
@@ -193,6 +193,7 @@ export type TestGateway = {
   sessionLog: SessionEventLog | null;
   /** Steer spy: records every accepted steer (bridge-call parity, M-GC2). */
   steer: ScriptedSteer;
+  attention: ScriptedResolveAttention;
 };
 
 /** Steer port spy (M-GC2: exactly one steer_run bridge call per accepted
@@ -204,6 +205,16 @@ export class ScriptedSteer implements SteerPort {
   async steer(runId: string, message: string): Promise<void> {
     if (this.failWith !== null) throw this.failWith;
     this.calls.push({ runId, message });
+  }
+}
+
+export class ScriptedResolveAttention implements ResolveAttentionPort {
+  calls: { runId: string; attentionId: string; resolution: string }[] = [];
+  failWith: ProblemError | null = null;
+
+  async resolve(runId: string, attentionId: string, resolution: string): Promise<void> {
+    if (this.failWith !== null) throw this.failWith;
+    this.calls.push({ runId, attentionId, resolution });
   }
 }
 
@@ -245,6 +256,8 @@ export function bootTestGateway(
       | false;
     /** Omit the steer seam (route 404s). */
     steer?: false;
+    /** Omit the attention resolution seam (route 404s). */
+    attention?: false;
     /** Remote session spawner (decision 2026-xx-session-spawn); default
      * absent → POST /v1/sessions/spawn is 404. Pass a ScriptedSpawner to
      * exercise the contract. */
@@ -343,6 +356,7 @@ export function bootTestGateway(
     });
   }
   const steer = new ScriptedSteer();
+  const attention = new ScriptedResolveAttention();
   const server = startGateway(config, {
     service,
     verifier: new Hs256BearerVerifier(authNames, () => clock.now),
@@ -351,6 +365,7 @@ export function bootTestGateway(
     ...(paneDeps === null ? {} : { panes: paneDeps.mirror }),
     ...(sessions === null ? {} : { sessions }),
     ...(overrides.steer === false ? {} : { steer }),
+    ...(overrides.attention === false ? {} : { resolveAttention: attention }),
     ...(overrides.spawn === undefined ? {} : { spawn: overrides.spawn }),
     ...(overrides.graph === undefined ? {} : { graph: overrides.graph }),
     ...(overrides.files === undefined || overrides.files === false
@@ -398,6 +413,7 @@ export function bootTestGateway(
     sessions,
     sessionLog,
     steer,
+    attention,
   };
 }
 
@@ -444,8 +460,8 @@ export function tapConnect(
   write?: (line: string) => void,
 ): string {
   const connectionId = `tap-test-${(tapConnectionCounter += 1)}`;
-  gateway.sessions!.openConnection(connectionId, write);
-  gateway.sessions!.ingestLine(connectionId, JSON.stringify({ type: "register", ...register }));
+  gateway.sessions?.openConnection(connectionId, write);
+  gateway.sessions?.ingestLine(connectionId, JSON.stringify({ type: "register", ...register }));
   return connectionId;
 }
 
@@ -455,12 +471,12 @@ export function tap(
   connectionId: string,
   line: Record<string, unknown>,
 ): void {
-  gateway.sessions!.ingestLine(connectionId, JSON.stringify(line));
+  gateway.sessions?.ingestLine(connectionId, JSON.stringify(line));
 }
 
 /** Close a tap connection (the pure-core equivalent of socket end). */
 export function tapDisconnect(gateway: TestGateway, connectionId: string): void {
-  gateway.sessions!.tapDisconnected(connectionId);
+  gateway.sessions?.tapDisconnected(connectionId);
 }
 
 // ——— HTTP helpers ———
@@ -556,7 +572,7 @@ export class SseCollector {
   closedByServer = false;
 
   constructor(response: Response) {
-    this.#reader = response.body!.getReader();
+    this.#reader = response.body?.getReader();
   }
 
   get raw(): string {

@@ -47,6 +47,10 @@ export interface SteerPort {
   steer(runId: string, message: string): Promise<void>;
 }
 
+export interface ResolveAttentionPort {
+  resolve(runId: string, attentionId: string, resolution: string): Promise<void>;
+}
+
 export interface GraphPort {
   get(runId: string): Promise<RunGraphOutput>;
 }
@@ -68,6 +72,8 @@ export type GatewayServerDeps = {
   sessions?: SessionCollector;
   /** Steer delivery seam; absent → POST /v1/runs/{runId}/steer is 404. */
   steer?: SteerPort;
+  /** Attention resolution seam; absent → resolve route is 404. */
+  resolveAttention?: ResolveAttentionPort;
   graph?: GraphPort;
   /** Remote session spawner (decision 2026-xx-session-spawn); absent →
    * POST /v1/sessions/spawn is 404 (fail-closed, like every other optional
@@ -347,6 +353,10 @@ async function handleRunRoute(
   if (segments.length === 4 && segments[3] === "steer") {
     if (request.method !== "POST") return problemResponse(405, "method_not_allowed", requestId);
     return handleSteer(request, decodeSegment(routeSegment(segments, 2)), deps, requestId);
+  }
+  if (segments.length === 5 && segments[3] === "attention" && segments[4] === "resolve") {
+    if (request.method !== "POST") return problemResponse(405, "method_not_allowed", requestId);
+    return handleResolveAttention(request, decodeSegment(routeSegment(segments, 2)), deps, requestId);
   }
   return problemResponse(404, "not_found", requestId);
 }
@@ -695,6 +705,40 @@ async function handleSteer(
   // is correlated to the run — the frame is never synthesized elsewhere.
   const mirrored = deps.sessions?.mirrorSteerQueued({ runId, steerId, text: message }) ?? 0;
   return jsonResponse({ steerId, mirrored }, 202, requestId);
+}
+
+// ——— POST /v1/runs/{runId}/attention/resolve ———
+
+async function handleResolveAttention(
+  request: Request,
+  runId: string,
+  deps: GatewayServerDeps,
+  requestId: string,
+): Promise<Response> {
+  const port = deps.resolveAttention;
+  if (port === undefined) return problemResponse(404, "not_found", requestId);
+  const contentType = request.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw invalid({ "content-type": "application/json is required" });
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await request.text());
+  } catch {
+    throw invalid({ body: "must be valid JSON" });
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw invalid({ body: "must be a JSON object" });
+  }
+  const body = parsed as { attentionId?: unknown; resolution?: unknown };
+  if (typeof body.attentionId !== "string" || body.attentionId.trim() === "") {
+    throw invalid({ attentionId: "must be a non-empty string" });
+  }
+  if (typeof body.resolution !== "string" || body.resolution.trim() === "") {
+    throw invalid({ resolution: "must be a non-empty string" });
+  }
+  await port.resolve(runId, body.attentionId, body.resolution);
+  return jsonResponse({ runId, attentionId: body.attentionId, resolved: true }, 200, requestId);
 }
 
 // ——— POST /v1/sessions/{sessionId}/attachments (decision 2026-xx-gui-conversation D5, app upload) ———
