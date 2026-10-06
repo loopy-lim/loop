@@ -105,7 +105,7 @@ test("Herdr success summary and final event redact credentials from raw pane tex
   expect(finalEvent).toBeDefined();
   expect(finalEvent?.type === "final" && finalEvent.summary).not.toContain("secret-value");
 
-  await provider.release!(handle.id);
+  await provider.release?.(handle.id);
 });
 
 test("Herdr failure summary redacts credentials from raw pane text", async () => {
@@ -126,7 +126,7 @@ test("Herdr failure summary redacts credentials from raw pane text", async () =>
   expect(result.summary).not.toContain("secret-value");
   expect(result.summary).toContain("ran the deployment step");
 
-  await provider.release!(handle.id);
+  await provider.release?.(handle.id);
 });
 
 test("Herdr worker completing with only credential output still reports readable output", async () => {
@@ -145,5 +145,5 @@ test("Herdr worker completing with only credential output still reports readable
   expect(result.success).toBe(false);
   expect(result.failure?.kind).toBe("incomplete_output");
 
-  await provider.release!(handle.id);
+  await provider.release?.(handle.id);
 });

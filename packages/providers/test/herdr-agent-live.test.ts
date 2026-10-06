@@ -134,7 +134,7 @@ test("steer delivers one agent prompt call into the live conversation", async ()
   const handle = await provider.start(input);
 
   const message = "pivot: use plan 'B'\nsecond line";
-  await provider.steer!(handle.id, message);
+  await provider.steer?.(handle.id, message);
 
   // The initial prompt uses the same verb; the steer call is the one carrying
   // the message verbatim as a single argv element.
@@ -158,7 +158,7 @@ test("steer rejects workers whose conversation already ended", async () => {
   const handle = await provider.start(input);
   await provider.result(handle.id);
 
-  await expect(provider.steer!(handle.id, "too late")).rejects.toThrow(/no longer running/);
+  await expect(provider.steer?.(handle.id, "too late")).rejects.toThrow(/no longer running/);
 });
 
 test("completed worker tab closes when its resources are released", async () => {
@@ -254,7 +254,7 @@ test("steer propagates agent_blocked so the recorded-steer fallback keeps the me
   });
   const handle = await provider.start(input);
 
-  await expect(provider.steer!(handle.id, "unblock please")).rejects.toThrow(/agent_blocked/);
+  await expect(provider.steer?.(handle.id, "unblock please")).rejects.toThrow(/agent_blocked/);
 });
 
 test("status polling falls back to the pane when the agent record disappears mid-run", async () => {
@@ -402,7 +402,7 @@ test("MirroringProvider forwards steer to the wrapped live provider and rejects 
   });
   const handle = await wrapped.start(input);
 
-  await wrapped.steer!(handle.id, "steer through the decorator");
+  await wrapped.steer?.(handle.id, "steer through the decorator");
 
   expect(runner.calls).toContainEqual([
     "agent",
@@ -413,7 +413,7 @@ test("MirroringProvider forwards steer to the wrapped live provider and rejects 
 
   const headless = new MirroringProvider(new FakeProvider("fake", ["fast"]), () => {});
   const fakeHandle = await headless.start(input);
-  await expect(headless.steer!(fakeHandle.id, "no conversation here")).rejects.toThrow(
+  await expect(headless.steer?.(fakeHandle.id, "no conversation here")).rejects.toThrow(
     /does not support steer/,
   );
 });

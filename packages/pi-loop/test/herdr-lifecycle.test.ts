@@ -43,7 +43,7 @@ describe("HerdrLifecycleReporter", () => {
         },
         reporter,
       );
-      await handlers.get("agent_end")!();
+      await handlers.get("agent_end")?.();
       expect(existsSync(lateReply)).toBe(false);
     } finally {
       rmSync(directory, { recursive: true, force: true });

@@ -112,11 +112,11 @@ export class NodeProcessRunner implements ProcessRunner {
         stderr = bounded(`${stderr}\n${error.message}`);
         finish(1);
       });
-      child.on("exit", (code, signal) => {
-        const exitCode = code ?? (signal ? 128 : 1);
+      child.on("exit", (code, exitSignal) => {
+        const exitCode = code ?? (exitSignal ? 128 : 1);
         drainTimer = setTimeout(() => finish(exitCode), this.#drainTimeoutMs);
       });
-      child.on("close", (code, signal) => finish(code ?? (signal ? 128 : 1)));
+      child.on("close", (code, exitSignal) => finish(code ?? (exitSignal ? 128 : 1)));
       if (this.#runTimeoutMs !== undefined) {
         runTimer = setTimeout(() => {
           if (settled) return;

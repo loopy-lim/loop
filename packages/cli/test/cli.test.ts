@@ -800,7 +800,7 @@ test("promote-steer forwards the promotion to the bridge and returns its receipt
   });
   expect(receipt.evidenceTests.length).toBeGreaterThan(0);
   const snapshot = await protocol.getSnapshot({ databasePath, runId });
-  expect(snapshot.tasks.map((task) => task.id).sort()).toEqual(["correction", "impl"]);
+  expect(snapshot.tasks.map((task) => task.id).toSorted()).toEqual(["correction", "impl"]);
   expect(snapshot.goalCriteria).toMatchObject([{ id: "correction", state: "pending" }]);
 });
 

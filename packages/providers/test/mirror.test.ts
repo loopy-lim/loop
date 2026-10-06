@@ -267,65 +267,70 @@ describe("MirroringProvider", () => {
   });
 });
 
+/** Placeholder released before the create-pane promise stores a resolver. */
+const noopRelease = (): void => {};
+
+/** Scripted PaneMirrorHost: records calls, no real herdr/pane side effects. */
+function fakeHost() {
+  const created: Array<{ tabId: string; paneId: string; label: string; worktree: string }> = [];
+  const callers: Array<HerdrCaller | undefined> = [];
+  const closed: string[] = [];
+  const sent: Array<{ paneId: string; text: string }> = [];
+  const hosted: Array<{ paneId: string; command: string; args: string[] }> = [];
+  const relays: Array<{ paneId: string; exited: boolean }> = [];
+  let failRunInPane = false;
+  const host = {
+    created,
+    callers,
+    closed,
+    sent,
+    hosted,
+    relays,
+    setFailRunInPane(value: boolean) {
+      failRunInPane = value;
+    },
+    async createPane(
+      runId: string,
+      taskId: string,
+      projectRoot: string,
+      worktree: string,
+      label: string,
+      caller?: HerdrCaller,
+    ) {
+      callers.push(caller);
+      const pane = {
+        tabId: `tab-${created.length + 1}`,
+        paneId: `pane-${created.length + 1}`,
+        label,
+        worktree,
+      };
+      void runId;
+      void taskId;
+      void projectRoot;
+      created.push(pane);
+      return pane;
+    },
+    async closePane(tabId: string) {
+      closed.push(tabId);
+      // Hosting model: closing the pane ends the relay process hosted in it.
+      const paneId = created.find((pane) => pane.tabId === tabId)?.paneId;
+      for (const relay of relays) {
+        if (relay.paneId === paneId) relay.exited = true;
+      }
+    },
+    async sendText(paneId: string, text: string) {
+      sent.push({ paneId, text });
+    },
+    async runInPane(paneId: string, command: string, args: string[]) {
+      if (failRunInPane) throw new Error("pane run failed");
+      hosted.push({ paneId, command, args });
+      relays.push({ paneId, exited: false });
+    },
+  };
+  return host;
+}
+
 describe("PaneMirrorSink", () => {
-  function fakeHost() {
-    const created: Array<{ tabId: string; paneId: string; label: string; worktree: string }> = [];
-    const callers: Array<HerdrCaller | undefined> = [];
-    const closed: string[] = [];
-    const sent: Array<{ paneId: string; text: string }> = [];
-    const hosted: Array<{ paneId: string; command: string; args: string[] }> = [];
-    const relays: Array<{ paneId: string; exited: boolean }> = [];
-    let failRunInPane = false;
-    const host = {
-      created,
-      callers,
-      closed,
-      sent,
-      hosted,
-      relays,
-      setFailRunInPane(value: boolean) {
-        failRunInPane = value;
-      },
-      async createPane(
-        runId: string,
-        taskId: string,
-        projectRoot: string,
-        worktree: string,
-        label: string,
-        caller?: HerdrCaller,
-      ) {
-        callers.push(caller);
-        const pane = {
-          tabId: `tab-${created.length + 1}`,
-          paneId: `pane-${created.length + 1}`,
-          label,
-          worktree,
-        };
-        void runId;
-        void taskId;
-        void projectRoot;
-        created.push(pane);
-        return pane;
-      },
-      async closePane(tabId: string) {
-        closed.push(tabId);
-        // Hosting model: closing the pane ends the relay process hosted in it.
-        const paneId = created.find((pane) => pane.tabId === tabId)?.paneId;
-        for (const relay of relays) {
-          if (relay.paneId === paneId) relay.exited = true;
-        }
-      },
-      async sendText(paneId: string, text: string) {
-        sent.push({ paneId, text });
-      },
-      async runInPane(paneId: string, command: string, args: string[]) {
-        if (failRunInPane) throw new Error("pane run failed");
-        hosted.push({ paneId, command, args });
-        relays.push({ paneId, exited: false });
-      },
-    };
-    return host;
-  }
 
   const herdrEnv = { HERDR_WORKSPACE_ID: "ws-1", HERDR_PANE_ID: "ws-1:p-main" };
 
@@ -463,7 +468,7 @@ describe("PaneMirrorSink", () => {
   });
 
   test("a worker finishing while its pane is still being created closes the pane", async () => {
-    let releaseCreate: () => void = () => {};
+    let releaseCreate: () => void = noopRelease;
     const inner = fakeHost();
     const slowHost: PaneMirrorHost = {
       createPane: async (runId, taskId, projectRoot, worktree, label) => {
@@ -639,20 +644,22 @@ describe("PaneMirrorSink", () => {
   });
 });
 
+/** Scripted herdr runner: answers from a fixed response map, records calls. */
+function scriptedRunner(responses: Map<string, string>) {
+  const calls: string[][] = [];
+  const runner: HerdrRunner = {
+    async run(_command: string, args: string[]): Promise<HerdrResult> {
+      calls.push(args);
+      const key = args.join(" ");
+      const stdout = responses.get(key);
+      if (stdout === undefined) throw new Error(`unexpected herdr call: ${key}`);
+      return { exitCode: 0, stdout, stderr: "" };
+    },
+  };
+  return { calls, runner };
+}
+
 describe("HerdrWorkerRuntime pane surface", () => {
-  function scriptedRunner(responses: Map<string, string>) {
-    const calls: string[][] = [];
-    const runner: HerdrRunner = {
-      async run(_command: string, args: string[]): Promise<HerdrResult> {
-        calls.push(args);
-        const key = args.join(" ");
-        const stdout = responses.get(key);
-        if (stdout === undefined) throw new Error(`unexpected herdr call: ${key}`);
-        return { exitCode: 0, stdout, stderr: "" };
-      },
-    };
-    return { calls, runner };
-  }
 
   test("createPane, sendText, and closePane drive the passive mirror tab lifecycle", async () => {
     const responses = new Map<string, string>([

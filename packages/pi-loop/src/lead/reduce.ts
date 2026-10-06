@@ -12,7 +12,7 @@ export type CompactFinding =
   | { kind: "overflow"; omitted: number; text: string };
 
 export function compactFindings(findings: ReviewFinding[], limits: OutputLimits): CompactFinding[] {
-  const sorted = [...findings].sort(
+  const sorted = findings.toSorted(
     (left, right) => severityRank(left.severity) - severityRank(right.severity),
   );
   const compacted = compactItems(sorted, limits.findingsLineLimit);

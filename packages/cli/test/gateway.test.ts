@@ -35,6 +35,10 @@ import {
   type GatewayStatusInfo,
 } from "../src/gateway";
 import { GATEWAY_RUNTIME_FILE_ENV, runPairCommand } from "../src/pair";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 // ---------------------------------------------------------------------------
 // Temp scaffolding: the LOOP_GATEWAY_RUNTIME_FILE override relocates the
@@ -61,8 +65,8 @@ function tempGatewayRoot(): {
 /** A real loopback listener standing in for the bound gateway. */
 async function listenLoopback(): Promise<{ server: Server; port: number }> {
   const server = createServer();
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", () => resolve());
+  await new Promise<void>((fulfil) => {
+    server.listen(0, "127.0.0.1", () => fulfil());
   });
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error("no tcp address");
@@ -185,8 +189,8 @@ test("pickFreePort returns a port that then accepts and refuses connections", as
   expect(await isPortAccepting("127.0.0.1", port)).toBe(false);
   const server = createServer();
   try {
-    await new Promise<void>((resolve) => {
-      server.listen(port, "127.0.0.1", () => resolve());
+    await new Promise<void>((fulfil) => {
+      server.listen(port, "127.0.0.1", () => fulfil());
     });
     expect(await isPortAccepting("127.0.0.1", port)).toBe(true);
   } finally {
@@ -330,16 +334,16 @@ test("ensureGatewayRunning spawns the daemon, records the pid, and waits for the
     };
     const result = await ensureGatewayRunning(deps);
     expect(spawnedArgs).not.toBeNull();
-    expect(spawnedArgs!.command).toBe("bun");
-    expect(spawnedArgs!.args[0]!.endsWith(join("packages", "gateway", "src", "main.ts"))).toBe(
+    expect(spawnedArgs?.command).toBe("bun");
+    expect(spawnedArgs?.args[0]?.endsWith(join("packages", "gateway", "src", "main.ts"))).toBe(
       true,
     );
-    expect(spawnedArgs!.cwd).toBe(resolve(spawnedArgs!.args[0]!, "..", "..", ".."));
-    expect(spawnedArgs!.env).toMatchObject({ LOOP_GATEWAY_HOST: "100.80.133.120" });
+    expect(spawnedArgs?.cwd).toBe(resolve(must(spawnedArgs?.args[0]), "..", "..", ".."));
+    expect(spawnedArgs?.env).toMatchObject({ LOOP_GATEWAY_HOST: "100.80.133.120" });
     expect(readFileSync(pidPath, "utf8")).toBe("4242\n");
     expect(result.decision.action).toBe("spawn");
     expect(result.record).not.toBeNull();
-    expect(result.record!.port).toBe(Number(spawnedArgs!.env.LOOP_GATEWAY_PORT));
+    expect(result.record?.port).toBe(Number(spawnedArgs?.env.LOOP_GATEWAY_PORT));
   } finally {
     for (const server of openedServers) server.close();
     rmSync(root, { recursive: true, force: true });
@@ -352,7 +356,7 @@ test("ensureGatewayRunning cleans a stale pid record before spawning a fresh dae
   writeFileSync(recordPath, JSON.stringify({ host: "100.80.133.120", port: 1 }), "utf8");
   // Dead pid: an already-exited child.
   const dead = spawn(process.execPath, ["-e", "process.exit(0)"]);
-  await new Promise((resolve) => dead.once("exit", resolve));
+  await new Promise((fulfil) => dead.once("exit", fulfil));
   writeFileSync(pidPath, `${dead.pid}\n`, "utf8");
   const openedServers: Server[] = [];
   try {
@@ -440,7 +444,7 @@ test("gateway status: running, stopped, and stale pid shapes in text and JSON", 
 
     // A deterministically dead pid: an already-exited child.
     const dead = spawn(process.execPath, ["-e", "process.exit(0)"]);
-    await new Promise((resolve) => dead.once("exit", resolve));
+    await new Promise((fulfil) => dead.once("exit", fulfil));
     const deadPid = dead.pid as number;
     writeFileSync(recordPath, JSON.stringify({ host: "100.80.133.120", port }), "utf8");
     writeFileSync(`${recordPath}${GATEWAY_PID_SUFFIX}`, `${deadPid}\n`, "utf8");
@@ -481,7 +485,7 @@ test("gateway stop terminates the recorded pid and removes the pid record", asyn
   const { pidPath, env } = tempGatewayRoot();
   const child = spawnSleeper();
   try {
-    await new Promise<void>((resolve) => child.once("spawn", resolve));
+    await new Promise<void>((fulfil) => child.once("spawn", fulfil));
     writeFileSync(pidPath, `${child.pid}\n`, "utf8");
     const result = await gatewayStop(baseDeps({ env }));
     expect(result.exitCode).toBe(0);
@@ -496,7 +500,7 @@ test("gateway stop terminates the recorded pid and removes the pid record", asyn
 test("gateway stop cleans a stale pid record without signaling anything", async () => {
   const { pidPath, env } = tempGatewayRoot();
   const dead = spawn(process.execPath, ["-e", "process.exit(0)"]);
-  await new Promise((resolve) => dead.once("exit", resolve));
+  await new Promise((fulfil) => dead.once("exit", fulfil));
   writeFileSync(pidPath, `${dead.pid}\n`, "utf8");
   const result = await gatewayStop(baseDeps({ env }));
   expect(result.exitCode).toBe(0);

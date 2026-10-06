@@ -14,6 +14,10 @@ import {
   type ViewerFile,
   type ViewerTheme,
 } from "../src";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 const theme: ViewerTheme = {
   fg: (_token, text) => text,
@@ -46,7 +50,7 @@ test("listViewerFiles walks the working directory, skips ignored dirs, and sorts
     const files = await listViewerFiles(root);
     const paths = files.map((file) => file.path);
     expect(paths).toEqual(["README.md", "docs/diagnosis/diag-1.md", "docs/findings/run-1.md"]);
-    expect(files[0]!.size).toBe(8);
+    expect(files[0]?.size).toBe(8);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -88,7 +92,7 @@ test("split layout appears only at or above the width threshold and previews the
     files,
     read: async (path) => {
       readCalls.push(path);
-      return bodies.get(path)!;
+      return must(bodies.get(path));
     },
     viewportRows: () => ROWS,
     done: () => {
@@ -123,7 +127,7 @@ test("narrow layout toggles list to view on Enter and back on Escape before clos
     files,
     read: async (path) => {
       readCalls.push(path);
-      return bodies.get(path)!;
+      return must(bodies.get(path));
     },
     viewportRows: () => ROWS,
     done: () => {
@@ -169,7 +173,7 @@ test("up/down move the selection and Enter loads the newly selected file lazily"
     files,
     read: async (path) => {
       readCalls.push(path);
-      return bodies.get(path)!;
+      return must(bodies.get(path));
     },
     viewportRows: () => ROWS,
     done: () => {},

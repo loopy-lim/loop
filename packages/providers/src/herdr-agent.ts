@@ -365,7 +365,7 @@ function lastAgentContentLine(transcript: string): string {
     transcript
       .split(/\r?\n/)
       .map((line) => line.trim())
-      .reverse()
+      .toReversed()
       .find(
         (line) =>
           line.length > 0 &&

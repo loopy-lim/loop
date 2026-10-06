@@ -48,7 +48,7 @@ export function codeMap(projectRoot: string, requestedPath: string, lineLimit: n
           .map((path) => resolve(target, path));
       })();
   const lines: string[] = [];
-  for (const path of paths.sort()) {
+  for (const path of paths.toSorted()) {
     if (lines.length >= lineLimit) break;
     let canonical: string;
     try {

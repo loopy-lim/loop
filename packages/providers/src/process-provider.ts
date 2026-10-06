@@ -165,7 +165,7 @@ function extractMachineResult(stdout: string): { summary?: string; sessionId?: s
       // Plain-text output cannot carry a structured session identifier.
     }
   }
-  for (const line of lines.reverse()) {
+  for (const line of lines.toReversed()) {
     try {
       const value = JSON.parse(line) as unknown;
       const summary = findFinalSummary(value);

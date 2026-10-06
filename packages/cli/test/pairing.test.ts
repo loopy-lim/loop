@@ -33,6 +33,11 @@ import {
   runPairCommand,
   type PairDeps,
 } from "../src/pair";
+
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 import golden from "./fixtures/pairing-qr-golden.json";
 
 const PAYLOAD_HOST = "loopy-macbookpro.tail42f248.ts.net";
@@ -91,19 +96,20 @@ test("golden matrix: the shared pairing payload encodes identically on both surf
   );
 });
 
+/** Binary-shift GF(256) multiplication — an independent code path from the
+ * encoder's log/exp tables. */
+function gfMul(a: number, b: number): number {
+  let result = 0;
+  while (b > 0) {
+    if ((b & 1) !== 0) result ^= a;
+    b >>= 1;
+    a <<= 1;
+    if (a >= 0x100) a ^= 0x11d;
+  }
+  return result;
+}
+
 test("Reed-Solomon: the codeword stream is divisible by an independently built generator", () => {
-  // Binary-shift GF(256) multiplication — an independent code path from the
-  // encoder's log/exp tables.
-  const gfMul = (a: number, b: number): number => {
-    let result = 0;
-    while (b > 0) {
-      if ((b & 1) !== 0) result ^= a;
-      b >>= 1;
-      a <<= 1;
-      if (a >= 0x100) a ^= 0x11d;
-    }
-    return result;
-  };
   const exp: number[] = [];
   {
     let value = 1;
@@ -117,8 +123,8 @@ test("Reed-Solomon: the codeword stream is divisible by an independently built g
     for (let i = 0; i < n; i += 1) {
       const next: number[] = Array.from({ length: poly.length + 1 }, () => 0);
       for (let j = 0; j < poly.length; j += 1) {
-        next[j]! ^= poly[j]!;
-        next[j + 1]! ^= gfMul(poly[j]!, exp[i]!);
+        next[j] = must(next[j]) ^ must(poly[j]);
+        next[j + 1] = must(next[j + 1]) ^ gfMul(must(poly[j]), must(exp[i]));
       }
       poly = next;
     }
@@ -137,9 +143,9 @@ test("Reed-Solomon: the codeword stream is divisible by an independently built g
   const gen = generator(spec.eccCodewords);
   const working = codewords.slice();
   for (let i = 0; i < spec.dataCodewords; i += 1) {
-    const factor = working[i]!;
+    const factor = must(working[i]);
     if (factor === 0) continue;
-    for (let j = 0; j < gen.length; j += 1) working[i + j]! ^= gfMul(gen[j]!, factor);
+    for (let j = 0; j < gen.length; j += 1) working[i + j] = must(working[i + j]) ^ gfMul(must(gen[j]), factor);
   }
   expect(working.slice(spec.dataCodewords).every((byte) => byte === 0)).toBe(true);
 });
@@ -149,7 +155,7 @@ test("placement: an independent zigzag+unmask extraction reproduces the bitstrea
   const size = encoding.matrix.length;
   const reserved = Array.from({ length: size }, () => Array.from({ length: size }, () => false));
   const mark = (row: number, col: number): void => {
-    if (row >= 0 && row < size && col >= 0 && col < size) reserved[row]![col] = true;
+    if (row >= 0 && row < size && col >= 0 && col < size) must(reserved[row])[col] = true;
   };
   for (const [top, left] of [
     [0, 0],
@@ -193,8 +199,8 @@ test("placement: an independent zigzag+unmask extraction reproduces the bitstrea
         const col = right - offset;
         const upward = ((right + 1) & 2) === 0;
         const row = upward ? size - 1 - vertical : vertical;
-        if (reserved[row]![col]) continue;
-        extracted.push(encoding.matrix[row]![col] !== maskBit(encoding.maskId, col, row));
+        if (reserved[row]?.[col]) continue;
+        extracted.push(encoding.matrix[row]?.[col] !== maskBit(encoding.maskId, col, row));
         if (extracted.length === encoding.finalBits.length) break outer;
       }
     }
@@ -213,15 +219,15 @@ test("format info matches an independent BCH(15,5) computation", () => {
   }
   const expected = ((data << 10) | remainder) ^ 0x5412;
   const placed: number[] = [];
-  for (let i = 0; i <= 5; i += 1) placed.push(encoding.matrix[i]![8]! ? 1 : 0);
+  for (let i = 0; i <= 5; i += 1) placed.push(must(encoding.matrix[i])[8] ? 1 : 0);
   placed.push(
-    encoding.matrix[7]![8]! ? 1 : 0,
-    encoding.matrix[8]![8]! ? 1 : 0,
-    encoding.matrix[8]![7]! ? 1 : 0,
+    must(encoding.matrix[7])[8] ? 1 : 0,
+    must(encoding.matrix[8])[8] ? 1 : 0,
+    must(encoding.matrix[8])[7] ? 1 : 0,
   );
-  for (let i = 9; i <= 14; i += 1) placed.push(encoding.matrix[8]![14 - i]! ? 1 : 0);
-  for (let i = 0; i <= 7; i += 1) placed.push(encoding.matrix[size - 1 - i]![8]! ? 1 : 0);
-  for (let i = 8; i <= 14; i += 1) placed.push(encoding.matrix[8]![size - 15 + i]! ? 1 : 0);
+  for (let i = 9; i <= 14; i += 1) placed.push(must(encoding.matrix[8])[14 - i] ? 1 : 0);
+  for (let i = 0; i <= 7; i += 1) placed.push(must(encoding.matrix[size - 1 - i])[8] ? 1 : 0);
+  for (let i = 8; i <= 14; i += 1) placed.push(must(encoding.matrix[8])[size - 15 + i] ? 1 : 0);
   let got = 0;
   for (let i = 0; i < 15; i += 1) if (placed[i] === 1) got |= 1 << i;
   expect(got).toBe(expected);
@@ -231,7 +237,7 @@ test("format info matches an independent BCH(15,5) computation", () => {
 test("structural invariants: size, finder corners, timing alternation, capacity error", () => {
   const matrix = encodeQr(golden.payload);
   expect(matrix.length).toBe(golden.size);
-  const at = (row: number, col: number): boolean => matrix[row]![col]!;
+  const at = (row: number, col: number): boolean => must(matrix[row])[col];
   for (const [top, left] of [
     [0, 0],
     [0, golden.size - 7],
@@ -581,7 +587,7 @@ test("plain output warns on IP-literal hosts and still round-trips", async () =>
   await runPairCommand(pairDeps(), { stdout: (value) => lines.push(value), stderr: () => {} }, {});
   const text = lines.join("");
   expect(text).toContain("iOS ATS rejects numeric hosts");
-  const url = text.split("\n").find((line) => line.startsWith(PAIR_URL_PREFIX))!;
+  const url = must(text.split("\n").find((line) => line.startsWith(PAIR_URL_PREFIX)));
   expect(parsePairUrl(url)).toEqual({ host: "100.80.133.120", port: 18477 });
 });
 

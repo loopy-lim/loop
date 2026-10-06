@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
 import type { EventOutput } from "@loop/protocol";
 import { guidanceStatus } from "../src/guidance-status";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 function event(sequence: number, type: string, data: Record<string, unknown>): EventOutput {
   return { sequence, payloadJson: JSON.stringify({ run_id: "run-1", kind: { type, data } }) };
@@ -57,17 +61,17 @@ test("a delivered correction is checked only after stable-source receipts and a 
   expect(guidanceStatus(events, "impl")).toEqual([
     { sequence: 4, taskId: "impl", state: "checked" },
   ]);
-  expect(guidanceStatus([events[0]!, events[2]!, events[3]!, events[1]!], "impl")).toEqual([
+  expect(guidanceStatus([must(events[0]), must(events[2]), must(events[3]), must(events[1])], "impl")).toEqual([
     { sequence: 4, taskId: "impl", state: "checked" },
   ]);
   expect(guidanceStatus(events.slice(0, 3), "impl")[0]?.state).toBe("delivered");
   expect(
     guidanceStatus(
       [
-        events[0]!,
-        events[1]!,
+        must(events[0]),
+        must(events[1]),
         event(6, "check_receipts_recorded", { task_id: "impl", checks: [{ id: "unit" }] }),
-        events[3]!,
+        must(events[3]),
       ],
       "impl",
     )[0]?.state,

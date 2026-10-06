@@ -228,7 +228,7 @@ export function piCatalogSources(document: unknown): PiCatalogSource[] {
     if (!provider) continue;
     sources.set(`${provider}/${parsed.id}`, { provider, id: parsed.id });
   }
-  return [...sources.values()].sort(
+  return [...sources.values()].toSorted(
     (left, right) => left.provider.localeCompare(right.provider) || left.id.localeCompare(right.id),
   );
 }
@@ -270,8 +270,8 @@ export function buildModelsJsonFragment(
     byProvider.set(provider, list);
   }
   const providers: Record<string, { models: PiModelDefinition[] }> = {};
-  for (const provider of [...byProvider.keys()].sort()) {
-    const models = (byProvider.get(provider) ?? []).sort((left, right) =>
+  for (const provider of [...byProvider.keys()].toSorted()) {
+    const models = (byProvider.get(provider) ?? []).toSorted((left, right) =>
       left.id.localeCompare(right.id),
     );
     providers[provider] = { models };
@@ -392,11 +392,11 @@ export function syncPiModelsJson(options: SyncPiModelsJsonOptions): PiModelsJson
   );
   const serialized = `${JSON.stringify(merged, null, 2)}\n`;
   if (serialized === existingRaw) {
-    return { filePath, changed: false, providers: Object.keys(fragment.providers).sort(), models };
+    return { filePath, changed: false, providers: Object.keys(fragment.providers).toSorted(), models };
   }
   mkdirSync(agentDir, { recursive: true });
   const stagedPath = `${filePath}.loop-sync.tmp`;
   writeFileSync(stagedPath, serialized);
   renameSync(stagedPath, filePath);
-  return { filePath, changed: true, providers: Object.keys(fragment.providers).sort(), models };
+  return { filePath, changed: true, providers: Object.keys(fragment.providers).toSorted(), models };
 }

@@ -124,10 +124,14 @@ export class ZaiApiProvider implements AgentProvider {
   }
 
   async #request(input: StartWorkerInput, signal: AbortSignal): Promise<WorkerResult> {
+    const codingPlanPath = this.#options.codingPlanPath;
+    if (this.#options.mode !== "general" && codingPlanPath === undefined) {
+      throw new Error("codingPlanPath is required in coding-plan mode");
+    }
     const path =
       this.#options.mode === "general"
         ? (this.#options.generalPath ?? "/chat/completions")
-        : this.#options.codingPlanPath!;
+        : codingPlanPath;
     const response = await this.#fetch(`${this.#options.baseUrl.replace(/\/$/, "")}${path}`, {
       method: "POST",
       signal,

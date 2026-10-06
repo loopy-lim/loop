@@ -113,6 +113,6 @@ test("pi worker routes to caller workspace instead of creating a headless one", 
     ],
   ]);
 
-  await provider.release!(worker.id);
+  await provider.release?.(worker.id);
   expect(runner.calls.at(-1)).toEqual(["tab", "close", "caller-ws:t-new"]);
 });

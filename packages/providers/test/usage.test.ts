@@ -131,7 +131,7 @@ describe("usage metadata collection (G17)", () => {
       requirements: [],
     });
     const events: ProviderEvent[] = [];
-    provider.subscribe!(handle.id, (event) => events.push(event));
+    provider.subscribe?.(handle.id, (event) => events.push(event));
     const result = await provider.result(handle.id);
     expect(result.success).toBe(true);
     const usageEvent = events.find((event) => event.type === "usage");

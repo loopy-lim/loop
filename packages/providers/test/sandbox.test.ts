@@ -23,7 +23,7 @@ function at<T>(items: readonly T[], index: number): T {
 
 test("every adapter declares its sandbox capability honestly (G4a)", async () => {
   const codex = new CodexProvider({ cwd: "/project", computeClasses: ["fast"] });
-  const codexDeclaration = await codex.sandboxDeclaration!();
+  const codexDeclaration = await codex.sandboxDeclaration?.();
   expect(codexDeclaration.adapterId).toBe("codex");
   expect(codexDeclaration.isolation).toBe("partial");
   expect(codexDeclaration.filesystemScoped).toBe(true);
@@ -36,17 +36,17 @@ test("every adapter declares its sandbox capability honestly (G4a)", async () =>
     computeClasses: ["fast"],
     approveForMe: true,
   });
-  expect((await approvalCodex.sandboxDeclaration!()).isolation).toBe("none");
+  expect((await approvalCodex.sandboxDeclaration?.())?.isolation).toBe("none");
 
   const fullAccess = new CodexProvider({
     cwd: "/project",
     computeClasses: ["fast"],
     sandbox: "danger-full-access",
   });
-  expect((await fullAccess.sandboxDeclaration!()).isolation).toBe("none");
+  expect((await fullAccess.sandboxDeclaration?.())?.isolation).toBe("none");
 
   const pi = new PiProvider({ cwd: "/project", computeClasses: ["fast"] });
-  const piDeclaration = await pi.sandboxDeclaration!();
+  const piDeclaration = await pi.sandboxDeclaration?.();
   expect(piDeclaration.isolation).toBe("none");
   expect(piDeclaration.filesystemScoped).toBe(false);
   expect(piDeclaration.detail).toContain("advisory");
@@ -58,10 +58,10 @@ test("every adapter declares its sandbox capability honestly (G4a)", async () =>
     mode: "general",
     computeClasses: ["fast"],
   });
-  expect((await zaiApi.sandboxDeclaration!()).isolation).toBe("none");
+  expect((await zaiApi.sandboxDeclaration?.())?.isolation).toBe("none");
 
   const zaiCli = new ZaiCliProvider({ cwd: "/project", computeClasses: ["fast"] });
-  expect((await zaiCli.sandboxDeclaration!()).isolation).toBe("none");
+  expect((await zaiCli.sandboxDeclaration?.())?.isolation).toBe("none");
 });
 
 test("collection declares absence as isolation none instead of omitting the adapter (G4a)", () => {
@@ -100,6 +100,6 @@ test("declaration detail is bounded and trimmed", () => {
     "x",
     `  ${"very long detail".repeat(100)}  `,
   );
-  expect(declaration.detail!.length).toBeLessThanOrEqual(300);
+  expect(declaration.detail?.length).toBeLessThanOrEqual(300);
   expect(declaration.detail).not.toContain("  very");
 });

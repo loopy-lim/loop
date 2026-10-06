@@ -356,6 +356,12 @@ function chooseMask(
   return bestMaskId;
 }
 
+/** N3: no dark module within the four light modules before the pattern. */
+function lightBefore(get: (i: number) => boolean, offset: number): boolean {
+  for (let i = 1; i <= 4; i += 1) if (get(offset - i)) return false;
+  return true;
+}
+
 /** Advisory mask-quality score (ISO 18004 §8.8.3); deterministic. */
 function scorePenalty(modules: boolean[][]): number {
   const size = modules.length;
@@ -395,10 +401,6 @@ function scorePenalty(modules: boolean[][]): number {
     for (let i = 0; i < 7; i += 1) {
       if (get(offset + i) !== at(finderPattern, i)) return false;
     }
-    return true;
-  };
-  const lightBefore = (get: (i: number) => boolean, offset: number): boolean => {
-    for (let i = 1; i <= 4; i += 1) if (get(offset - i)) return false;
     return true;
   };
   const scanFinders = (get: (i: number) => boolean): void => {

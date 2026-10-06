@@ -11,7 +11,7 @@ export function guidanceStatus(events: EventOutput[], taskId: string): GuidanceS
   const stableReceipts: number[] = [];
   const verificationPasses: number[] = [];
   const recorded: Array<{ sequence: number; taskId: string | null }> = [];
-  for (const event of [...events].sort(
+  for (const event of events.toSorted(
     (left, right) => Number(left.sequence) - Number(right.sequence),
   )) {
     const sequence = Number(event.sequence);
@@ -49,7 +49,7 @@ export function guidanceStatus(events: EventOutput[], taskId: string): GuidanceS
     recorded.push({ sequence, taskId: target });
   }
   return recorded
-    .sort((left, right) => left.sequence - right.sequence)
+    .toSorted((left, right) => left.sequence - right.sequence)
     .map((item) => {
       const delivery = deliveries.find((candidate) => candidate.through >= item.sequence);
       const checked =

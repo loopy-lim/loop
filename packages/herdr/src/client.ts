@@ -536,7 +536,7 @@ export class HerdrWorkerRuntime {
         const tabListPayload = await this.#run(["tab", "list", "--workspace", workspaceId]);
         const tabsFromList = optionalArray(tabListPayload, ["result", "tabs"]);
         if (!tabsFromList) {
-          throw new Error("Herdr tab list response is missing tabs");
+          throw new Error("Herdr tab list response is missing tabs", { cause: wsError });
         }
         const allTabIds = new Set<string>(tabIds);
         for (const t of tabsFromList) {

@@ -29,6 +29,10 @@ import {
   type TapSocketHandlers,
 } from "../../../pi-extensions/session-tap";
 import sessionTapExtension from "../../../pi-extensions/session-tap";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 // ——— fakes ———
 
@@ -77,7 +81,7 @@ class ScriptedConnect {
   }
 
   get last(): RecordedHandle {
-    return this.handles[this.handles.length - 1]!;
+    return must(this.handles[this.handles.length - 1]);
   }
 }
 
@@ -119,8 +123,8 @@ function makeTap(
       ...(overrides.schedule === undefined
         ? {}
         : {
-            schedule: (fn: () => void, ms: number) => overrides.schedule!.schedule(fn, ms),
-            cancelSchedule: (timer: unknown) => overrides.schedule!.cancel(timer),
+            schedule: (fn: () => void, ms: number) => overrides.schedule?.schedule(fn, ms),
+            cancelSchedule: (timer: unknown) => overrides.schedule?.cancel(timer),
           }),
     },
   });
@@ -241,11 +245,11 @@ describe("register-first ingress (D1)", () => {
 
     scripted.last.handlers.onDown(); // gateway restart -> backoff scheduled
     expect(schedule.pending).toHaveLength(1);
-    schedule.pending[0]!.fn(); // retry -> NEW connection
+    schedule.pending[0]?.fn(); // retry -> NEW connection
     expect(scripted.handles).toHaveLength(2);
-    scripted.handles[1]!.handlers.onConnected();
+    scripted.handles[1]?.handlers.onConnected();
 
-    const lines = parseLines(scripted.handles[1]!.writes);
+    const lines = parseLines(scripted.handles[1]?.writes);
     expect(lines[0]).toMatchObject({ type: "register", sessionId: "sess-1" });
     expect(lines[1]).toMatchObject({ type: "lifecycle", phase: "sessionStarted" });
     expect(tap.connected).toBe(true);
@@ -516,10 +520,10 @@ describe("fail-open and shutdown", () => {
     scripted.last.handlers.onConnected();
 
     tap.startSession({ sessionManager: { getSessionId: () => "sess-2" } });
-    expect(parseLines(scripted.handles[0]!.writes).at(-1)).toEqual({ type: "session_shutdown" }); // old tap closed honestly
+    expect(parseLines(scripted.handles[0]?.writes).at(-1)).toEqual({ type: "session_shutdown" }); // old tap closed honestly
     expect(scripted.handles).toHaveLength(2);
     scripted.last.handlers.onConnected(); // the new connection registers on connect
-    expect(parseLines(scripted.handles[1]!.writes)[0]).toMatchObject({
+    expect(parseLines(scripted.handles[1]?.writes)[0]).toMatchObject({
       type: "register",
       sessionId: "sess-2",
     });
@@ -571,20 +575,20 @@ describe("reconnect backoff", () => {
     tap.startSession({ sessionManager: { getSessionId: () => "sess-1" } });
     expect(schedule.pending.map((entry) => entry.ms)).toEqual([500]);
 
-    schedule.pending[0]!.fn(); // retry fails -> 1000
-    schedule.pending.at(-1)!.fn(); // retry fails -> capped 1500
-    schedule.pending.at(-1)!.fn(); // retry fails -> still 1500
+    schedule.pending[0]?.fn(); // retry fails -> 1000
+    schedule.pending.at(-1)?.fn(); // retry fails -> capped 1500
+    schedule.pending.at(-1)?.fn(); // retry fails -> still 1500
     expect(schedule.pending.map((entry) => entry.ms)).toEqual([500, 1000, 1500, 1500]);
 
     // Success resets the backoff for future drops.
     scripted.failing = false;
-    schedule.pending.at(-1)!.fn();
+    schedule.pending.at(-1)?.fn();
     scripted.last.handlers.onConnected();
     expect(tap.connected).toBe(true);
 
     // Drop the connection: the next delay is the reset base (500), not the cap.
     scripted.last.handlers.onDown();
-    expect(schedule.pending.at(-1)!.ms).toBe(500);
+    expect(schedule.pending.at(-1)?.ms).toBe(500);
 
     tap.stopSession();
     expect(schedule.pending).toHaveLength(4); // the pending retry was cancelled
@@ -649,10 +653,10 @@ describe("extension factory wiring", () => {
 
     // Throwing/garbage handler bodies must never escape into pi.
     expect(() =>
-      pi.handlers.get("input")![0]!(undefined as never, undefined as never),
+      pi.handlers.get("input")?.[0]?.(undefined as never, undefined as never),
     ).not.toThrow();
     expect(() =>
-      pi.handlers.get("input")!.at(-1)!({ text: { evil: true } } as never, undefined as never),
+      pi.handlers.get("input")?.at(-1)?.({ text: { evil: true } } as never, undefined as never),
     ).not.toThrow();
 
     pi.fire("session_shutdown", { type: "session_shutdown", reason: "quit" });

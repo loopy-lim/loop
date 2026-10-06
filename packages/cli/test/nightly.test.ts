@@ -6,6 +6,10 @@ import * as protocol from "@loop/protocol";
 import type { SnapshotOutput } from "@loop/protocol";
 import { nightlyDisposition, withNightlyLock } from "../src/nightly";
 import { runCli } from "../src/main";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 function snapshot(overrides: Partial<SnapshotOutput> = {}): SnapshotOutput {
   return {
@@ -52,14 +56,14 @@ test("nightly resumes only active, idle runs with ready work", () => {
     nightlyDisposition(snapshot({ activeWorkers: [{ id: "worker", taskId: "task" }] }), now),
   ).toBe("in-flight");
   expect(
-    nightlyDisposition(snapshot({ tasks: [{ ...snapshot().tasks[0]!, state: "verifying" }] }), now),
+    nightlyDisposition(snapshot({ tasks: [{ ...must(snapshot().tasks[0]), state: "verifying" }] }), now),
   ).toBe("in-flight");
   expect(
-    nightlyDisposition(snapshot({ tasks: [{ ...snapshot().tasks[0]!, state: "done" }] }), now),
+    nightlyDisposition(snapshot({ tasks: [{ ...must(snapshot().tasks[0]), state: "done" }] }), now),
   ).toBe("settlement");
   expect(
     nightlyDisposition(
-      snapshot({ tasks: [{ ...snapshot().tasks[0]!, state: "blocked", blockedBy: ["failed"] }] }),
+      snapshot({ tasks: [{ ...must(snapshot().tasks[0]), state: "blocked", blockedBy: ["failed"] }] }),
       now,
     ),
   ).toBe("stalled");
@@ -131,10 +135,10 @@ test("nightly command previews and launches only eligible saved work", async () 
   ];
   expect(await runCli(args, options)).toBe(0);
   expect(calls).toEqual([]);
-  expect(JSON.parse(output.pop()!).rows).toContainEqual({ runId: "ready", disposition: "ready" });
+  expect(JSON.parse(must(output.pop())).rows).toContainEqual({ runId: "ready", disposition: "ready" });
   expect(await runCli([...args, "--execute"], options)).toBe(0);
   expect(calls).toEqual(["ready"]);
-  expect(JSON.parse(output.pop()!).rows).toContainEqual({ runId: "held", disposition: "paused" });
+  expect(JSON.parse(must(output.pop())).rows).toContainEqual({ runId: "held", disposition: "paused" });
 });
 
 test("nightly one-shot lock prevents overlapping invocations and cleans up", async () => {

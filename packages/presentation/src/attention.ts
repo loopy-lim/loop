@@ -50,17 +50,20 @@ export function attentionSeverity(kind: AttentionKind): AttentionSeverity {
 }
 
 /**
- * Resolution tokens valid for the kind, matching the CLI resolve grammar
- * (`loop resolve <run-id> <attention-id> <resolution>`): failure answers
- * with retry or cancel, approval with approve or reject, and question,
- * decision, and conflict — all choices the operator types — with answer.
+ * Resolution tokens valid for the kind, mirroring the bridge resolution
+ * parser (`parse_resolution` in loop-bridge guidance.rs — the single
+ * source the core acceptance rules enforce): failure answers with retry,
+ * defer, cancel, add_task, or relax_routing; approval with approved or
+ * rejected (never approve/reject, which the parser reads as free text and
+ * the core refuses); and question, decision, and conflict with a
+ * free-text answer. Every token advertised here is accepted there.
  */
 export function attentionResolutions(kind: AttentionKind): string[] {
   switch (kind) {
     case "failure":
-      return ["retry", "cancel"];
+      return ["retry", "defer", "cancel", "add_task", "relax_routing"];
     case "approval":
-      return ["approve", "reject"];
+      return ["approved", "rejected"];
     case "question":
     case "decision":
     case "conflict":

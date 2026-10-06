@@ -18,6 +18,7 @@ import {
   singleLine,
 } from "@loop/presentation";
 import type {
+  AttentionSnapshotOutput,
   RunListOutput,
   SnapshotOutput,
   TaskContextOutput,
@@ -31,6 +32,11 @@ import { validateGoalPlan, type GoalPlan } from "./lead/decompose";
 import { codeMap } from "./lead/code-map";
 import { decompositionPrompt, taskSpecInputDescription } from "./lead/prompts";
 import { LeadTiming, formatFinalTiming, formatHandoffTiming } from "./lead/timing";
+import {
+  describeBlockedConstraints,
+  isRoutingConstraintFailure,
+  renderAttentionQuestion,
+} from "./attention-question";
 import {
   FilesViewerComponent,
   listViewerFiles,
@@ -48,7 +54,10 @@ import {
  */
 export interface LeadSettings {
   limits: OutputLimits;
-  vocabulary: PersonaVocabulary;
+  /** Derived once from Loop config. Embedding hosts that construct
+   * settings without config access may omit it; the extension falls back
+   * to the compile-time persona floor (disk-free). */
+  vocabulary?: PersonaVocabulary;
   herdrVisible?: boolean;
   /**
    * Main-orchestration milestone surfacing through herdr (desktop toast;
@@ -123,6 +132,19 @@ type LeadToolParams = {
   path?: string;
   checks?: Array<Pick<TaskSpecInput["completionChecks"][number], "id" | "command" | "args">>;
   acceptance?: Array<{ requirement: string; checkIds: string[] }>;
+  correctiveTask?: {
+    id: string;
+    title: string;
+    writeScope: string[];
+    requirements: string[];
+    completionChecks: Array<{
+      id: string;
+      command: string;
+      args?: string[];
+      workingDirectory?: string;
+      timeoutMs: number;
+    }>;
+  };
 };
 
 interface PiToolResult {
@@ -266,7 +288,8 @@ export function registerLoopExtension(
   settings: LeadSettings = loadLeadSettings(),
   notifier: HerdrNotificationReporter = new HerdrNotificationReporter(),
 ): void {
-  const { limits, vocabulary } = settings;
+  const { limits } = settings;
+  const vocabulary = settings.vocabulary ?? derivePersonaVocabulary({});
 
   /** Main-orchestration milestone surfacing (desktop toast + done/request
    * sound) through herdr. Disabled by LOOP_HERDR_NOTIFY or when not inside
@@ -306,6 +329,42 @@ export function registerLoopExtension(
   const leadSnapshotOptions = (snapshot: SnapshotOutput): SnapshotRenderOptions =>
     isActiveRunState(snapshot.state) ? { elapsedMs: leadTiming.activeMs(snapshot.runId) } : {};
 
+  /** Announces one attention as an answerable question: decision explanation
+   * plus the options that resolve it. A batch-absence failure additionally
+   * names the routing constraints that blocked it, read from the failed
+   * task's spec so the user can pick which one to relax. The constraint
+   * lookup is best-effort: without it the question still renders, minus the
+   * constraint line. */
+  const announceAttentionQuestion = (
+    runId: string,
+    detail: AttentionSnapshotOutput | undefined,
+    context: PiContext,
+  ): void => {
+    void (async () => {
+      let blockedConstraints: string | undefined;
+      if (
+        detail?.kind === "failure" &&
+        detail.taskId &&
+        isRoutingConstraintFailure(detail.summary)
+      ) {
+        try {
+          const spec = (await backend.task(runId, detail.taskId, context.cwd)).task;
+          blockedConstraints = describeBlockedConstraints(spec);
+        } catch {
+          // The question still renders; the constraint names stay unknown.
+        }
+      }
+      pi.sendMessage?.(
+        {
+          customType: "loop-attention",
+          content: renderAttentionQuestion(detail, limits, blockedConstraints),
+          display: true,
+        },
+        { triggerTurn: false },
+      );
+    })();
+  };
+
   const stopObserver = () => {
     observerVersion++;
     if (observer) clearInterval(observer);
@@ -318,11 +377,9 @@ export function registerLoopExtension(
     recoveryAttempted = false;
   };
   const reportFinal = async (snapshot: SnapshotOutput, context: PiContext) => {
-    const prioritized = [...snapshot.tasks].sort((left, right) => {
-      const priority = (state: string) =>
-        state === "failed" ? 0 : state === "cancelled" ? 1 : state === "done" ? 3 : 2;
-      return priority(left.state) - priority(right.state);
-    });
+    const prioritized = snapshot.tasks.toSorted(
+      (left, right) => statePriority(left.state) - statePriority(right.state),
+    );
     const findings = await Promise.all(
       prioritized.slice(0, limits.findingsLineLimit).map(async (task) => {
         try {
@@ -457,25 +514,10 @@ export function registerLoopExtension(
         body: attentionSummary,
         sound: "none",
       }).catch(() => {});
-      pi.sendMessage?.(
-        {
-          customType: "loop-attention",
-          content: compactLines(
-            [
-              `Loop attention ${id}`,
-              singleLine(detail?.summary ?? "Decision needed", limits.lineTextLimit),
-              "Answer in this conversation to resolve it.",
-            ],
-            {
-              lineLimit: limits.attentionLineLimit,
-              lineTextLimit: limits.lineTextLimit,
-              overflow: (omitted) => `… ${omitted} more`,
-            },
-          ).join("\n"),
-          display: true,
-        },
-        { triggerTurn: false },
-      );
+      // Every attention surfaces as an answerable question: decision
+      // explanation plus the options that resolve it; batch-absence
+      // failures also name the blocked routing constraints.
+      announceAttentionQuestion(snapshot.runId, detail, context);
     }
     observedAttention = new Set(snapshot.openAttentionIds);
     if (["completed", "failed", "cancelled"].includes(snapshot.state)) {
@@ -772,7 +814,7 @@ export function registerLoopExtension(
         id: `implementation:${index + 1}`,
         taskId: task.id,
         description: item.requirement.trim(),
-        checkIds: item.checkIds.map((id) => id.trim()),
+        checkIds: item.checkIds.map((checkId) => checkId.trim()),
       }));
       return runTool.execute(
         id,
@@ -1046,20 +1088,48 @@ export function registerLoopExtension(
     name: "loop_resolve",
     label: "Loop Resolve Attention",
     description:
-      "Resolve a material attention item only from the user's explicit answer. Inspect loop_status attention first; never guess approval.",
+      "Resolve a material attention item only from the user's explicit answer. Inspect loop_status attention first; never guess approval. Vocabulary by kind — question/decision/conflict: any free-text answer; approval: approved | rejected; failure: retry | defer | cancel | add_task (requires the correctiveTask contract: id, title, writeScope, requirements, completionChecks) | relax_routing (steps one routing constraint down the core ladder and re-dispatches the failed task when no compute candidate satisfies its constraints).",
     parameters: Type.Object({
       attentionId: Type.String(),
       resolution: Type.String(),
       runId: Type.Optional(Type.String()),
+      correctiveTask: Type.Optional(
+        Type.Object({
+          id: Type.String(),
+          title: Type.String(),
+          writeScope: Type.Array(Type.String()),
+          requirements: Type.Array(Type.String()),
+          completionChecks: Type.Array(
+            Type.Object({
+              id: Type.String(),
+              command: Type.String(),
+              args: Type.Optional(Type.Array(Type.String())),
+              workingDirectory: Type.Optional(Type.String()),
+              timeoutMs: Type.Number(),
+            }),
+          ),
+        }),
+      ),
     }),
     async execute(_id, params, _signal, _update, context) {
       const snapshot = await current(context, params.runId);
       if (!params.attentionId || !params.resolution)
         throw new Error("attentionId and explicit resolution are required");
+      let resolution = params.resolution;
+      if (params.correctiveTask !== undefined) {
+        if (params.resolution !== "add_task")
+          throw new Error(
+            "correctiveTask is only valid with the add_task resolution",
+          );
+        // The resolution string is the only Lead→bridge channel, so the
+        // corrective contract travels embedded in the add_task directive
+        // token; the bridge parses it back into the structured payload.
+        resolution = `add_task:${JSON.stringify(params.correctiveTask)}`;
+      }
       const { snapshot: next, restarted } = await resolveAttentionAndRestart(
         snapshot.runId,
         params.attentionId,
-        params.resolution,
+        resolution,
         context,
       );
       acceptSnapshot(next, context);
@@ -1382,6 +1452,11 @@ class DefaultLoopLeadBackend implements LoopLeadBackend {
   }
 }
 
+/** Terminal-state display priority: failures first, done last. */
+function statePriority(state: string): number {
+  return state === "failed" ? 0 : state === "cancelled" ? 1 : state === "done" ? 3 : 2;
+}
+
 export function runLoopPlan(input: {
   intent: string;
   tasks: TaskSpecInput[];
@@ -1391,7 +1466,7 @@ export function runLoopPlan(input: {
   signal: AbortSignal;
   onProgress?: (snapshot: SnapshotOutput) => void;
 }): Promise<RunSummary> {
-  return new Promise((resolve, reject) => {
+  return new Promise((fulfil, reject) => {
     const child = spawn(process.env.LOOP_BIN || "loop", ["__execute-plan", "--json", "--detach"], {
       cwd: input.cwd,
       shell: false,
@@ -1425,7 +1500,7 @@ export function runLoopPlan(input: {
         };
         if (accepted.runId !== input.runId || !accepted.state || !accepted.ownerPid)
           throw new Error("invalid handoff receipt");
-        resolve(
+        fulfil(
           normalizeRunSummary(
             {
               status: accepted.state === "active" ? "running" : accepted.state,
@@ -1459,7 +1534,7 @@ function runLoopCommand(
   stdin?: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  return new Promise((resolve, reject) => {
+  return new Promise((fulfil, reject) => {
     const child = spawn(process.env.LOOP_BIN || "loop", args, {
       cwd,
       shell: false,
@@ -1473,7 +1548,7 @@ function runLoopCommand(
     child.stderr.on("data", (chunk: string) => (stderr += chunk));
     child.on("error", reject);
     child.on("close", (code) => {
-      if (code === 0) resolve(stdout);
+      if (code === 0) fulfil(stdout);
       else reject(new Error((stderr || `Loop exited ${code}`).slice(-4_000)));
     });
     if (stdin) child.stdin.end(stdin);

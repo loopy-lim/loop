@@ -256,7 +256,7 @@ export class WorkspaceSnapshotStore {
         const [ref, commit, createdAt] = line.split("\t");
         return { ref: ref ?? "", commit: commit ?? "", createdAt: createdAt ?? "" };
       })
-      .sort((a, b) => a.ref.localeCompare(b.ref));
+      .toSorted((a, b) => a.ref.localeCompare(b.ref));
   }
 
   async #git(cwd: string, args: string[], options: { indexFile?: string } = {}) {

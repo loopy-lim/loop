@@ -12,6 +12,10 @@ import {
   type LoopLeadBackend,
   type PiExtensionApi,
 } from "../src/extension";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 const limits = {
   statusLineLimit: 8,
@@ -41,7 +45,7 @@ test("loop_run forwards a per-task persona into the submitted plan", async () =>
   });
   registerLoopExtension(host.api, backend, undefined, settings);
 
-  await host.tools.get("loop_run")!.execute(
+  await host.tools.get("loop_run")?.execute(
     "tool-persona",
     {
       intent: "Implement feature X",
@@ -73,7 +77,7 @@ test("loop_run rejects unknown persona ids at submission and lists the valid ids
   });
   registerLoopExtension(host.api, backend, undefined, settings);
 
-  const pending = host.tools.get("loop_run")!.execute(
+  const pending = host.tools.get("loop_run")?.execute(
     "tool-persona-invalid",
     {
       intent: "Implement feature X",
@@ -102,7 +106,7 @@ test("absent, blank, and unpadded persona values forward as null or the trimmed 
   });
   registerLoopExtension(host.api, backend, undefined, settings);
 
-  await host.tools.get("loop_run")!.execute(
+  await host.tools.get("loop_run")?.execute(
     "tool-persona-absent",
     {
       intent: "Implement feature X",
@@ -126,7 +130,7 @@ test("loop_run tool description documents the optional persona field and kind de
   const host = fakePi();
   registerLoopExtension(host.api, fakeBackend(), undefined, settings);
 
-  const tool = host.tools.get("loop_run")!;
+  const tool = must(host.tools.get("loop_run"));
   expect(tool.description).toContain("optional persona id");
   expect(tool.description).toContain("implementer | reviewer | debugger | architect");
   expect(tool.description).toContain("verification→reviewer");
@@ -164,7 +168,7 @@ test("loop_run validation and prose reflect a configured persona vocabulary", as
   });
   registerLoopExtension(host.api, backend, undefined, { limits, vocabulary });
 
-  await host.tools.get("loop_run")!.execute(
+  await host.tools.get("loop_run")?.execute(
     "tool-persona-vocabulary",
     {
       intent: "Implement feature X",
@@ -180,7 +184,7 @@ test("loop_run validation and prose reflect a configured persona vocabulary", as
   );
   expect(submitted[0]?.map((value) => value.persona)).toEqual(["pirate", null]);
 
-  const pending = host.tools.get("loop_run")!.execute(
+  const pending = host.tools.get("loop_run")?.execute(
     "tool-persona-vocabulary-invalid",
     {
       intent: "Implement feature X",
@@ -196,7 +200,7 @@ test("loop_run validation and prose reflect a configured persona vocabulary", as
   );
   await pending.catch(() => {});
 
-  const tool = host.tools.get("loop_run")!;
+  const tool = must(host.tools.get("loop_run"));
   expect(tool.description).toContain("decision→designer");
   expect(tool.description).toContain("pirate");
   // designer is now a kind default; pirate (registry-only) is the explicit-only remainder.

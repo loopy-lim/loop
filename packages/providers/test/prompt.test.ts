@@ -3,6 +3,11 @@ import { expect, test } from "bun:test";
 import { buildWorkerPrompt } from "../src/prompt";
 import type { StartWorkerInput } from "../src/types";
 
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
+
 function contextualInput(): StartWorkerInput {
   return {
     runId: "run-1",
@@ -126,13 +131,13 @@ Previous check receipts:
 
 test("large evidence cannot remove the worker's scope and completion contract", () => {
   const input = contextualInput();
-  input.context!.dependencyResults = Array.from({ length: 30 }, (_, index) => ({
+  must(input.context).dependencyResults = Array.from({ length: 30 }, (_, index) => ({
     taskId: `dependency-${index}`,
     title: "Context",
     summary: "x".repeat(6000),
   }));
-  input.context!.previousChecks = Array.from({ length: 30 }, (_, index) => ({
-    ...input.context!.previousChecks[0]!,
+  must(input.context).previousChecks = Array.from({ length: 30 }, (_, index) => ({
+    ...must(input.context?.previousChecks[0]),
     id: `check-${index}`,
     stdout: "y".repeat(6000),
   }));
@@ -146,7 +151,7 @@ test("large evidence cannot remove the worker's scope and completion contract", 
 
 test("oversized required guidance fails before a worker receives an incomplete brief", () => {
   const input = contextualInput();
-  input.context!.guidance = Array.from(
+  must(input.context).guidance = Array.from(
     { length: 30 },
     (_, index) => `guidance-${index}: ${"z".repeat(6000)}`,
   );
@@ -155,9 +160,9 @@ test("oversized required guidance fails before a worker receives an incomplete b
 
 test("a read-only verification prompt keeps guidance from expanding its write scope", () => {
   const input = contextualInput();
-  input.context!.task.kind = "verification";
-  input.context!.task.writeScope = [];
-  input.context!.guidance = ["Also update src/slug.ts to handle underscores"];
+  must(input.context).task.kind = "verification";
+  must(input.context).task.writeScope = [];
+  must(input.context).guidance = ["Also update src/slug.ts to handle underscores"];
 
   const prompt = buildWorkerPrompt(input);
 
@@ -192,8 +197,8 @@ Requirements:
 
 test("buildWorkerPrompt rejects oversized required context without exposing credentials", () => {
   const input = contextualInput();
-  input.context!.intent = `password=do-not-leak Authorization: Basic basic-secret ${"x".repeat(50_000)}`;
-  input.context!.guidance = [`--token also-secret ${"y".repeat(50_000)}`];
+  must(input.context).intent = `password=do-not-leak Authorization: Basic basic-secret ${"x".repeat(50_000)}`;
+  must(input.context).guidance = [`--token also-secret ${"y".repeat(50_000)}`];
 
   let error = "";
   try {
@@ -209,8 +214,8 @@ test("buildWorkerPrompt rejects oversized required context without exposing cred
 
 test("buildWorkerPrompt preserves result, failure, and guidance ahead of oversized receipts", () => {
   const input = contextualInput();
-  input.context!.guidance = ["LATEST_GUIDANCE_MUST_SURVIVE"];
-  input.context!.previousChecks = Array.from({ length: 30 }, (_, index) => ({
+  must(input.context).guidance = ["LATEST_GUIDANCE_MUST_SURVIVE"];
+  must(input.context).previousChecks = Array.from({ length: 30 }, (_, index) => ({
     id: `check-${index}`,
     command: "test",
     args: [],

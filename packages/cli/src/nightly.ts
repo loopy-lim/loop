@@ -63,7 +63,7 @@ export async function withNightlyLock<T>(path: string, action: () => Promise<T>)
       } catch {
         /* Keep an ambiguous lock. */
       }
-      if (!stale) throw new Error("nightly continuation is already running");
+      if (!stale) throw new Error("nightly continuation is already running", { cause: error });
       unlinkSync(path);
       return openSync(path, "wx", 0o600);
     }

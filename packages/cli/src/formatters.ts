@@ -90,7 +90,7 @@ export function formatBenchmarkReport(report: BenchmarkReport, limits: OutputLim
 }
 
 export function formatAgentComparison(report: AgentComparisonReport, limits: OutputLimits): string {
-  const ranked = [...report.rows].sort(
+  const ranked = report.rows.toSorted(
     (a, b) =>
       b.verifiedCriteria - a.verifiedCriteria ||
       a.scopeViolations.length - b.scopeViolations.length ||
@@ -133,7 +133,7 @@ export function formatDoctorChecks(
   checks: Array<{ name: string; ok: boolean; detail: string; auth?: string }>,
   limits: OutputLimits,
 ): string {
-  const ordered = [...checks].sort((left, right) => Number(left.ok) - Number(right.ok));
+  const ordered = checks.toSorted((left, right) => Number(left.ok) - Number(right.ok));
   const failed = checks.filter((check) => !check.ok).length;
   const passed = checks.length - failed;
   const lines = [

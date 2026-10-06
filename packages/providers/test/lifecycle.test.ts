@@ -129,7 +129,7 @@ test("process providers release only completed worker sessions", async () => {
   const handle = await provider.start(input);
   await provider.result(handle.id);
 
-  await provider.release!(handle.id);
+  await provider.release?.(handle.id);
 
   expect(cancelled).toBe(true);
   expect(provider.status(handle.id)).rejects.toThrow("unknown worker");

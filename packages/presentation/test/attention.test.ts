@@ -81,9 +81,15 @@ describe("attention composition policy", () => {
     expect(attentionSeverity("question")).toBe("low");
   });
 
-  test("resolutions match the CLI resolve vocabulary per kind", () => {
-    expect(attentionResolutions("failure")).toEqual(["retry", "cancel"]);
-    expect(attentionResolutions("approval")).toEqual(["approve", "reject"]);
+  test("resolutions match the bridge resolution parser grammar per kind", () => {
+    expect(attentionResolutions("failure")).toEqual([
+      "retry",
+      "defer",
+      "cancel",
+      "add_task",
+      "relax_routing",
+    ]);
+    expect(attentionResolutions("approval")).toEqual(["approved", "rejected"]);
     expect(attentionResolutions("question")).toEqual(["answer"]);
     expect(attentionResolutions("decision")).toEqual(["answer"]);
     expect(attentionResolutions("conflict")).toEqual(["answer"]);
@@ -132,7 +138,7 @@ describe("attention rendering", () => {
     expect(lines[1]).toBe("  criteria: pair-check, types-check");
     expect(lines[2]).toContain("  cause: Worker timeout retry budget exhausted: exit 1");
     expect(lines[3]).toBe(`  evidence: ${path}`);
-    expect(lines[4]).toBe("  resolutions: retry / cancel");
+    expect(lines[4]).toBe("  resolutions: retry / defer / cancel / add_task / relax_routing");
     expect(lines[5]).toBe(
       "Next: /loop resolve run-1 failure-run-1-impl-0-timeout-exhausted <resolution>",
     );
@@ -168,7 +174,7 @@ describe("attention rendering", () => {
       { nowMs },
     );
     expect(approval).toContain("approval · medium · gate-1");
-    expect(approval).toContain("resolutions: approve / reject");
+    expect(approval).toContain("resolutions: approved / rejected");
     const question = renderAttention(
       open([attention({ kind: "question", id: "ask-1", summary: "Which schema?" })]),
       limits,
@@ -207,7 +213,7 @@ describe("attention rendering", () => {
     );
     const lines = renderAttention(open(items), limits, { nowMs }).split("\n");
     expect(lines[1]).toBe(
-      "approval attention-1 · impl · waited 3m05s · Approve 1 · medium · resolutions approve / reject",
+      "approval attention-1 · impl · waited 3m05s · Approve 1 · medium · resolutions approved / rejected",
     );
   });
 

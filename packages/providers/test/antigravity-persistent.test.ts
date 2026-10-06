@@ -160,7 +160,7 @@ describe("AgyStreamDriver", () => {
     });
     expect(driver.conversationId).toBe("conv-9");
     expect(capturedArgs).toContain("--conversation");
-    expect(capturedArgs![capturedArgs!.indexOf("--conversation") + 1]).toBe("conv-9");
+    expect(capturedArgs?.[capturedArgs?.indexOf("--conversation") + 1]).toBe("conv-9");
     expect(capturedArgs).toContain("--input-format");
     await driver.dispose();
   });
@@ -386,7 +386,7 @@ describe("AgyPersistentProvider", () => {
     const handle = await provider.start(input);
     await provider.result(handle.id);
 
-    await provider.release!(handle.id);
+    await provider.release?.(handle.id);
 
     expect(disposed).toBe(true);
     expect(provider.status(handle.id)).rejects.toThrow("unknown worker");

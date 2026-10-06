@@ -54,7 +54,7 @@ export function buildInteractiveLeadInvocation(input: {
 }
 
 export function runInteractiveLead(input: InteractiveLeadInvocation): Promise<number> {
-  return new Promise((resolve, reject) => {
+  return new Promise((fulfil, reject) => {
     const child = spawn(input.command, input.args, {
       cwd: input.cwd,
       env: input.configDirectory
@@ -64,6 +64,6 @@ export function runInteractiveLead(input: InteractiveLeadInvocation): Promise<nu
       stdio: "inherit",
     });
     child.on("error", reject);
-    child.on("close", (code) => resolve(code ?? 1));
+    child.on("close", (code) => fulfil(code ?? 1));
   });
 }

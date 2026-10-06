@@ -14,6 +14,10 @@ import {
   type StartWorkerInput,
   normalizeProcessResult,
 } from "../src";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 class UnavailableProvider extends FakeProvider {
   override async capabilities() {
@@ -161,7 +165,7 @@ test("pi provider launches headless pi with the configured model pattern", async
     computeClasses: ["fast"],
   });
   await provider.start(input);
-  const launch = runner.calls.at(-1)!;
+  const launch = must(runner.calls.at(-1));
   expect(launch.command).toBe("pi");
   expect(launch.args).toContain("--provider");
   expect(launch.args).toContain("zai");
@@ -183,10 +187,10 @@ test("Pi workers without a write scope receive only read-only tools", async () =
   });
   const readOnlyInput = {
     ...input,
-    context: { ...input.context!, task: { ...input.context!.task, writeScope: [] } },
+    context: { ...must(input.context), task: { ...input.context?.task, writeScope: [] } },
   };
   await headless.start(readOnlyInput);
-  const headlessArgs = runner.calls.at(-1)!.args;
+  const headlessArgs = runner.calls.at(-1)?.args;
   expect(
     headlessArgs.slice(headlessArgs.indexOf("--tools"), headlessArgs.indexOf("--tools") + 2),
   ).toEqual(["--tools", "read,grep,find,ls"]);
@@ -218,7 +222,7 @@ test("Pi workers without a write scope receive only read-only tools", async () =
   const handle = await visible.start(readOnlyInput);
   try {
     expect((await visible.result(handle.id)).success).toBe(true);
-    const startArgs = calls.find((args) => args[0] === "agent" && args[1] === "start")!;
+    const startArgs = must(calls.find((args) => args[0] === "agent" && args[1] === "start"));
     expect(startArgs.slice(startArgs.indexOf("--tools"), startArgs.indexOf("--tools") + 2)).toEqual(
       ["--tools", "read,grep,find,ls"],
     );
@@ -233,7 +237,7 @@ test("Z.AI CLI provider uses the shared generated worker context", async () => {
 
   await provider.start(input);
 
-  const launch = runner.calls.at(-1)!;
+  const launch = must(runner.calls.at(-1));
   expect(launch.args[launch.args.indexOf("--prompt") + 1]).toContain("CONTEXT_INTENT_ONLY");
 });
 
@@ -248,7 +252,7 @@ test("Codex resume uses only arguments supported by the installed resume surface
     computeClasses: ["balanced"],
   });
   await provider.resume("session-1", { ...input, previousWorkerId: "old" });
-  const launch = runner.calls.at(-1)!;
+  const launch = must(runner.calls.at(-1));
   expect(launch.args.slice(0, 4)).toEqual(["exec", "resume", "session-1", "--json"]);
   expect(launch.args).not.toContain("--sandbox");
   expect(launch.args).not.toContain("--approve-for-me");
@@ -367,7 +371,7 @@ test("Z.AI API adapter keeps the key in the header", async () => {
   expect(authorization).toBe("Bearer secret-value");
   expect(prompt).toContain("CONTEXT_INTENT_ONLY");
   expect(JSON.stringify(await provider.status(handle.id))).not.toContain("secret-value");
-  await provider.release!(handle.id);
+  await provider.release?.(handle.id);
   expect(provider.status(handle.id)).rejects.toThrow("unknown worker");
 });
 
@@ -734,7 +738,7 @@ test("Herdr cancellation waits for the active turn and release closes only the w
   expect(await provider.status(handle.id)).toBe("cancelled");
   expect((await provider.result(handle.id)).failure?.kind).toBe("cancelled");
 
-  await provider.release!(handle.id);
+  await provider.release?.(handle.id);
   expect(calls).toContainEqual(["tab", "close", "worker-tab"]);
   expect(calls.some((args) => args[0] === "pane" && args[1] === "close")).toBe(false);
   expect(calls.some((args) => args[0] === "workspace" && args[1] === "close")).toBe(false);

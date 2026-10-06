@@ -87,7 +87,11 @@ export async function runControlCommand(
   if (parsed.command === "resume") {
     await protocol.resumeRun(input);
     const plan = await protocol.getRunPlan(input);
-    await launchOwner(parsed, config, runId, plan.workingDirectory, options);
+    // Fire-and-forget here created lease-less zombie runs whenever the owner
+    // failed to start (stall diagnosis C3). Confirm readiness like resolve
+    // and nightly do, so a failed launch surfaces as an explicit error.
+    const owner = await launchOwner(parsed, config, runId, plan.workingDirectory, options);
+    await waitForOwnerReady({ owner, snapshot: () => protocol.getSnapshot(input) });
   }
   if (parsed.command === "watch") {
     // D3/D5: the live worker-activity feed is a watch-only section, gated

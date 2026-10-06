@@ -409,12 +409,14 @@ export class MirroringProvider implements AgentProvider {
     this.#sink = toMirrorSink(sink);
     this.#family = options.family ?? deriveFamily(inner.id);
     this.#lineTextLimit = options.lineTextLimit ?? 160;
-    if (inner.repair)
+    if (inner.repair) {
+      const repair = inner.repair.bind(inner);
       this.repair = async (workerId, feedback) => {
-        const result = await inner.repair!(workerId, feedback);
+        const result = await repair(workerId, feedback);
         this.#publishLines(workerId, [`[repair] ${result.summary}`]);
         return result;
       };
+    }
   }
 
   get id(): string {
