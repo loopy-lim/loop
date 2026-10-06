@@ -46,7 +46,10 @@ mod tests {
 
     #[test]
     fn serde_vocabulary_is_snake_case_and_lost_not_failed() {
-        assert_eq!(serde_json::to_string(&WorkerState::Lost).unwrap(), "\"lost\"");
+        assert_eq!(
+            serde_json::to_string(&WorkerState::Lost).unwrap(),
+            "\"lost\""
+        );
         assert_eq!(
             serde_json::to_string(&WorkerState::Starting).unwrap(),
             "\"starting\""

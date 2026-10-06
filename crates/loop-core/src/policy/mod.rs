@@ -1,5 +1,6 @@
 mod cleanup;
 mod compute_class;
+mod context_budget;
 mod failure;
 mod routing;
 mod stall;
@@ -12,19 +13,26 @@ pub use cleanup::{
     CleanupRefusal, PurgeAction, PurgePlan, RefusalCode, RetentionPolicy,
 };
 pub use compute_class::{next_compute_class, ComputeClass};
+pub use context_budget::{
+    ClampedText, ContextBudgetPolicy, ReductionPass, DEFAULT_COMPACTED_BODY_CHARS,
+    DEFAULT_DEPENDENCY_SUMMARY_CHARS, DEFAULT_MAX_FIELD_CHARS, DEFAULT_MAX_PROMPT_CHARS,
+    PROMPT_OVERHEAD_CHARS, utf16_head, utf16_len,
+};
 pub use failure::{
     BackoffPolicy, FailureClass, FailurePolicy, OnExhaustion, RetryBudget, RetryOutcome, RetryScope,
 };
 pub use routing::{
-    select_candidate, CapabilityRequirements, ComputeCandidate, ComputeCapabilities, Risk,
-    RoutingError, TaskRouting,
+    select_candidate, CapabilityKind, CapabilityRequirements, ComputeCandidate,
+    ComputeCapabilities, Risk, RoutingError, RoutingRelaxation, TaskRouting,
 };
 pub use stall::{progress_freshness, ProgressFreshness};
 pub use terminalization::{
     DependencyTerminalization, IndependentBranchAction, RunFailureAction, TerminalizationOutcome,
     TerminalizationPolicy,
 };
-pub use verification::{focused_rerun_check_ids, is_check_side_effect_path, CheckOutcome, FocusedRerun};
+pub use verification::{
+    focused_rerun_check_ids, is_check_side_effect_path, CheckOutcome, FocusedRerun,
+};
 
 #[cfg(test)]
 mod minimal_intervention_tests {

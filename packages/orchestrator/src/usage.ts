@@ -50,24 +50,26 @@ function nonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
+/** Parsed decimal string: sign, integer part, fraction, fraction length. */
+function parseDecimalString(value: string) {
+  const match = /^-?\d+(\.\d+)?$/.exec(value.trim());
+  if (!match) throw new Error(`usage cost is not a decimal string: ${JSON.stringify(value)}`);
+  const negative = value.trim().startsWith("-");
+  const [whole, fraction = ""] = value.trim().replace(/^-/, "").split(".");
+  if (whole === undefined)
+    throw new Error(`usage cost is not a decimal string: ${JSON.stringify(value)}`);
+  return { negative, whole: BigInt(whole), fraction, scale: fraction.length };
+}
+
 /**
  * Exact decimal-string addition (no float money): aligns scales as integers
  * and re-renders the sum.
  */
 export function addDecimalStrings(left: string, right: string): string {
-  const parse = (value: string) => {
-    const match = /^-?\d+(\.\d+)?$/.exec(value.trim());
-    if (!match) throw new Error(`usage cost is not a decimal string: ${JSON.stringify(value)}`);
-    const negative = value.trim().startsWith("-");
-    const [whole, fraction = ""] = value.trim().replace(/^-/, "").split(".");
-    if (whole === undefined)
-      throw new Error(`usage cost is not a decimal string: ${JSON.stringify(value)}`);
-    return { negative, whole: BigInt(whole), fraction, scale: fraction.length };
-  };
-  const a = parse(left);
-  const b = parse(right);
+  const a = parseDecimalString(left);
+  const b = parseDecimalString(right);
   const scale = Math.max(a.scale, b.scale);
-  const align = (entry: ReturnType<typeof parse>) =>
+  const align = (entry: ReturnType<typeof parseDecimalString>) =>
     entry.whole * 10n ** BigInt(scale) + BigInt(entry.fraction.padEnd(scale, "0") || "0");
   const sum = (a.negative ? -1n : 1n) * align(a) + (b.negative ? -1n : 1n) * align(b);
   const negative = sum < 0n;

@@ -133,6 +133,162 @@ impl CapabilityRequirements {
     }
 }
 
+/// A capability requirement that the graduated relaxation ladder can step
+/// down. The order is core policy: relax the least load-bearing senses first
+/// (perception before tooling before reasoning before coding), then the risk
+/// floor, so each step frees the cheapest constraint before a heavier one.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityKind {
+    Vision,
+    LongContext,
+    Tools,
+    Reasoning,
+    Coding,
+}
+
+impl CapabilityKind {
+    fn level(self, capabilities: ComputeCapabilities) -> u8 {
+        match self {
+            Self::Vision => capabilities.vision,
+            Self::LongContext => capabilities.long_context,
+            Self::Tools => capabilities.tools,
+            Self::Reasoning => capabilities.reasoning,
+            Self::Coding => capabilities.coding,
+        }
+    }
+
+    fn set_level(self, capabilities: &mut ComputeCapabilities, value: u8) {
+        match self {
+            Self::Vision => capabilities.vision = value,
+            Self::LongContext => capabilities.long_context = value,
+            Self::Tools => capabilities.tools = value,
+            Self::Reasoning => capabilities.reasoning = value,
+            Self::Coding => capabilities.coding = value,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Vision => "vision",
+            Self::LongContext => "long_context",
+            Self::Tools => "tools",
+            Self::Reasoning => "reasoning",
+            Self::Coding => "coding",
+        }
+    }
+}
+
+/// One graduated, downgrade-only relaxation step the core policy grants a
+/// task whose routing constraints no eligible compute candidate can satisfy.
+/// The step is the durable evidence: it names what was relaxed and from what
+/// level to what, and replays deterministically through
+/// [`RoutingRelaxation::apply_to`].
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoutingRelaxation {
+    Capability {
+        capability: CapabilityKind,
+        from: u8,
+        to: u8,
+    },
+    Risk {
+        from: Risk,
+        to: Risk,
+    },
+}
+
+impl RoutingRelaxation {
+    /// Human-readable evidence, e.g. `tools 1→0` or `risk high→medium`.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Capability {
+                capability,
+                from,
+                to,
+            } => format!("{} {from}→{to}", capability.name()),
+            Self::Risk { from, to } => format!("risk {from:?}→{to:?}").to_lowercase(),
+        }
+    }
+
+    /// Applies the recorded step. Only strict downgrades of the recorded
+    /// constraint are accepted: an event that claims to relax a constraint
+    /// the task does not currently have, or that would raise a level, is a
+    /// corrupted or forged record and must fail replay.
+    pub fn apply_to(&self, routing: &mut TaskRouting) -> Result<(), RoutingError> {
+        match self {
+            Self::Capability {
+                capability,
+                from,
+                to,
+            } => {
+                if capability.level(routing.required) != *from {
+                    return Err(RoutingError::RelaxationNotApplicable);
+                }
+                if *to >= *from {
+                    return Err(RoutingError::RelaxationNotDowngrade);
+                }
+                capability.set_level(&mut routing.required, *to);
+            }
+            Self::Risk { from, to } => {
+                if routing.risk != *from {
+                    return Err(RoutingError::RelaxationNotApplicable);
+                }
+                if risk_level(*to) >= risk_level(*from) {
+                    return Err(RoutingError::RelaxationNotDowngrade);
+                }
+                routing.risk = *to;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn risk_level(risk: Risk) -> u8 {
+    match risk {
+        Risk::Low => 0,
+        Risk::Medium => 1,
+        Risk::High => 2,
+        Risk::Critical => 3,
+    }
+}
+
+impl TaskRouting {
+    /// The next graduated relaxation step for constraints no candidate can
+    /// satisfy, or `None` when the ladder is spent (every required
+    /// capability is zero and the risk floor is already low). One step at a
+    /// time keeps the relaxation reviewable in the event log and prevents a
+    /// single resolution from erasing the whole contract.
+    pub fn relax_step(&self) -> Option<RoutingRelaxation> {
+        for capability in [
+            CapabilityKind::Vision,
+            CapabilityKind::LongContext,
+            CapabilityKind::Tools,
+            CapabilityKind::Reasoning,
+            CapabilityKind::Coding,
+        ] {
+            let level = capability.level(self.required);
+            if level > 0 {
+                return Some(RoutingRelaxation::Capability {
+                    capability,
+                    from: level,
+                    to: level - 1,
+                });
+            }
+        }
+        let to = match self.risk {
+            Risk::Critical => Some(Risk::High),
+            Risk::High => Some(Risk::Medium),
+            Risk::Medium => Some(Risk::Low),
+            Risk::Low => None,
+        }?;
+        Some(RoutingRelaxation::Risk {
+            from: self.risk,
+            to,
+        })
+    }
+}
+
 pub fn select_candidate<'a>(
     candidates: &'a [ComputeCandidate],
     eligible_candidate_ids: &BTreeSet<String>,
@@ -162,4 +318,84 @@ pub fn select_candidate<'a>(
 pub enum RoutingError {
     #[error("no eligible compute candidate satisfies task constraints")]
     NoSufficientCandidate,
+    #[error("relaxation does not match the task's current routing constraints")]
+    RelaxationNotApplicable,
+    #[error("relaxation must lower a constraint, never raise it")]
+    RelaxationNotDowngrade,
+}
+
+#[cfg(test)]
+mod relaxation_tests {
+    use super::*;
+
+    #[test]
+    fn the_ladder_steps_down_one_constraint_at_a_time_in_policy_order() {
+        let mut routing = TaskRouting {
+            risk: Risk::High,
+            required: ComputeCapabilities::new(1, 2, 1, 0, 0),
+        };
+        // Policy order: vision → long_context → tools → reasoning → coding,
+        // then the risk floor. Each step lowers exactly one level.
+        let mut steps = Vec::new();
+        while let Some(step) = routing.relax_step() {
+            step.apply_to(&mut routing).unwrap();
+            steps.push(step.describe());
+        }
+        assert_eq!(
+            steps,
+            vec![
+                "tools 1→0",
+                "reasoning 2→1",
+                "reasoning 1→0",
+                "coding 1→0",
+                "risk high→medium",
+                "risk medium→low",
+            ]
+        );
+        assert_eq!(routing.required, ComputeCapabilities::new(0, 0, 0, 0, 0));
+        assert_eq!(routing.risk, Risk::Low);
+    }
+
+    #[test]
+    fn a_spent_ladder_reports_exhaustion_instead_of_a_step() {
+        let routing = TaskRouting {
+            risk: Risk::Low,
+            required: ComputeCapabilities::new(0, 0, 0, 0, 0),
+        };
+        assert_eq!(routing.relax_step(), None);
+    }
+
+    #[test]
+    fn applied_relaxation_must_be_a_real_downgrade_of_the_current_constraint() {
+        let mut routing = TaskRouting {
+            risk: Risk::Medium,
+            required: ComputeCapabilities::new(0, 1, 0, 0, 0),
+        };
+        let raise = RoutingRelaxation::Capability {
+            capability: CapabilityKind::Reasoning,
+            from: 1,
+            to: 2,
+        };
+        assert_eq!(
+            raise.apply_to(&mut routing),
+            Err(RoutingError::RelaxationNotDowngrade)
+        );
+        let stale = RoutingRelaxation::Capability {
+            capability: CapabilityKind::Reasoning,
+            from: 2,
+            to: 1,
+        };
+        assert_eq!(
+            stale.apply_to(&mut routing),
+            Err(RoutingError::RelaxationNotApplicable)
+        );
+        let risk_raise = RoutingRelaxation::Risk {
+            from: Risk::Medium,
+            to: Risk::High,
+        };
+        assert_eq!(
+            risk_raise.apply_to(&mut routing),
+            Err(RoutingError::RelaxationNotDowngrade)
+        );
+    }
 }

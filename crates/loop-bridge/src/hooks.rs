@@ -124,14 +124,20 @@ mod tests {
             (LifecycleHookPhase::ToolCallStarted, "toolCallStarted"),
             (LifecycleHookPhase::ToolCallEnded, "toolCallEnded"),
         ] {
-            assert_eq!(serde_json::to_string(&variant).unwrap(), format!(r#""{wire}""#));
+            assert_eq!(
+                serde_json::to_string(&variant).unwrap(),
+                format!(r#""{wire}""#)
+            );
         }
         for (variant, wire) in [
             (LifecycleHookOutcome::Completed, "completed"),
             (LifecycleHookOutcome::Failed, "failed"),
             (LifecycleHookOutcome::Skipped, "skipped"),
         ] {
-            assert_eq!(serde_json::to_string(&variant).unwrap(), format!(r#""{wire}""#));
+            assert_eq!(
+                serde_json::to_string(&variant).unwrap(),
+                format!(r#""{wire}""#)
+            );
         }
     }
 

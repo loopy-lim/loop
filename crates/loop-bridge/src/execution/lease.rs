@@ -1,7 +1,7 @@
 //! Execution lease commands: claim/renew/release, task reconciliation,
 //! interrupted-claim recycling, and run listing.
 
-use crate::commands::{bridge_error, store, OperationOutput};
+use crate::commands::{OperationOutput, bridge_error, store};
 use loop_core::attention::{AttentionKind, AttentionResolution, AttentionState};
 use loop_core::event::{Event, EventKind};
 use loop_core::task::TaskId;
@@ -73,7 +73,10 @@ pub fn claim_execution(input: ExecutionLeaseInput) -> Result<OperationOutput> {
     let accepted = store(&input.database_path)?
         .claim_execution(&input.run_id, &input.owner, input.ttl_ms)
         .map_err(|e| bridge_error("execution_lease_failed", e))?;
-    Ok(OperationOutput { accepted })
+    Ok(OperationOutput {
+        accepted,
+        ..OperationOutput::default()
+    })
 }
 
 #[command]
@@ -82,7 +85,10 @@ pub fn renew_execution(input: ExecutionLeaseInput) -> Result<OperationOutput> {
     let accepted = store(&input.database_path)?
         .renew_execution(&input.run_id, &input.owner, input.ttl_ms)
         .map_err(|e| bridge_error("execution_lease_failed", e))?;
-    Ok(OperationOutput { accepted })
+    Ok(OperationOutput {
+        accepted,
+        ..OperationOutput::default()
+    })
 }
 
 #[command]
@@ -90,7 +96,10 @@ pub fn release_execution(input: ReleaseExecutionInput) -> Result<OperationOutput
     store(&input.database_path)?
         .release_execution(&input.run_id, &input.owner)
         .map_err(|e| bridge_error("execution_release_failed", e))?;
-    Ok(OperationOutput { accepted: true })
+    Ok(OperationOutput {
+        accepted: true,
+        ..OperationOutput::default()
+    })
 }
 
 #[command]
@@ -143,7 +152,10 @@ pub fn reconcile_task(input: ReconcileTaskInput) -> Result<OperationOutput> {
         store
             .append_batch_owned(&events, Some(&owner))
             .map_err(|e| bridge_error("reconcile_failed", e))?;
-        Ok(OperationOutput { accepted: true })
+        Ok(OperationOutput {
+            accepted: true,
+            ..OperationOutput::default()
+        })
     })();
     store
         .release_execution(&input.run_id, &owner)

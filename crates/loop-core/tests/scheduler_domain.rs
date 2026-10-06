@@ -7,9 +7,7 @@ use loop_core::policy::{
     next_compute_class, select_candidate, CapabilityRequirements, ComputeCandidate,
     ComputeCapabilities, ComputeClass, Risk,
 };
-use loop_core::scheduler::{
-    Capacity, ClaimSkip, ClaimSkipReason, Scheduler,
-};
+use loop_core::scheduler::{Capacity, ClaimSkip, ClaimSkipReason, Scheduler};
 use loop_core::task::{
     CompletionCheck, CompletionContract, Task, TaskBuildError, TaskId, TaskKind, TaskState,
     VerificationEvidence, WorkOwnership,
@@ -118,10 +116,7 @@ fn non_conflicting_sibling_is_claimed_while_a_serial_task_runs() {
         task("research", TaskKind::Research, &[], &[]),
     ])
     .unwrap();
-    graph
-        .task_mut(&TaskId::from("decision"))
-        .unwrap()
-        .state = TaskState::Running;
+    graph.task_mut(&TaskId::from("decision")).unwrap().state = TaskState::Running;
 
     let plan = Scheduler::new(Capacity::new(4, 1)).claim_plan(&graph, &[TaskId::from("decision")]);
     assert_eq!(plan.claimed, vec![TaskId::from("research")]);
@@ -144,12 +139,10 @@ fn a_second_serial_task_waits_while_one_holds_the_world() {
         task("decision-b", TaskKind::Decision, &[], &["decisions/b.md"]),
     ])
     .unwrap();
-    graph
-        .task_mut(&TaskId::from("decision-a"))
-        .unwrap()
-        .state = TaskState::Running;
+    graph.task_mut(&TaskId::from("decision-a")).unwrap().state = TaskState::Running;
 
-    let plan = Scheduler::new(Capacity::new(4, 1)).claim_plan(&graph, &[TaskId::from("decision-a")]);
+    let plan =
+        Scheduler::new(Capacity::new(4, 1)).claim_plan(&graph, &[TaskId::from("decision-a")]);
     assert!(plan.claimed.is_empty());
     assert_eq!(
         plan.skipped,
@@ -207,13 +200,10 @@ fn capacity_and_frontier_exhaustion_are_recorded_as_skip_reasons() {
         task("waiter-d", TaskKind::Research, &[], &["d/**"]),
     ])
     .unwrap();
-    graph
-        .task_mut(&TaskId::from("frontier-a"))
-        .unwrap()
-        .state = TaskState::Running;
+    graph.task_mut(&TaskId::from("frontier-a")).unwrap().state = TaskState::Running;
 
-    let plan = Scheduler::new(Capacity::new(3, 1))
-        .claim_plan(&graph, &[TaskId::from("frontier-a")]);
+    let plan =
+        Scheduler::new(Capacity::new(3, 1)).claim_plan(&graph, &[TaskId::from("frontier-a")]);
     assert_eq!(
         plan.claimed,
         vec![TaskId::from("fast-c"), TaskId::from("waiter-d")]
@@ -235,13 +225,9 @@ fn worker_cap_exhaustion_is_recorded_per_task() {
         task("waiter-b", TaskKind::Research, &[], &["b/**"]),
     ])
     .unwrap();
-    graph
-        .task_mut(&TaskId::from("running-a"))
-        .unwrap()
-        .state = TaskState::Running;
+    graph.task_mut(&TaskId::from("running-a")).unwrap().state = TaskState::Running;
 
-    let plan = Scheduler::new(Capacity::new(1, 1))
-        .claim_plan(&graph, &[TaskId::from("running-a")]);
+    let plan = Scheduler::new(Capacity::new(1, 1)).claim_plan(&graph, &[TaskId::from("running-a")]);
     assert!(plan.claimed.is_empty());
     assert_eq!(
         plan.skipped,

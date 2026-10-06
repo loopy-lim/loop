@@ -18,8 +18,8 @@ pub use setup::*;
 pub use steer::*;
 
 use crate::commands::{
-    AssumptionInput, CompletionCheckInput, CompletionCoverageInput, DependencyConsumptionInput,
-    DecompositionContractOutput, SemanticTouchpointInput, TaskSpecInput,
+    AssumptionInput, CompletionCheckInput, CompletionCoverageInput, DecompositionContractOutput,
+    DependencyConsumptionInput, SemanticTouchpointInput, TaskSpecInput,
 };
 use loop_core::task::Task;
 
@@ -199,11 +199,13 @@ mod preflight_bridge_tests {
             }],
         });
         assert!(result.is_err());
-        assert!(crate::commands::get_snapshot(RunInput {
-            database_path,
-            run_id: "run".into()
-        })
-        .is_err());
+        assert!(
+            crate::commands::get_snapshot(RunInput {
+                database_path,
+                run_id: "run".into()
+            })
+            .is_err()
+        );
     }
 
     #[test]
@@ -363,8 +365,8 @@ mod preflight_bridge_tests {
 mod steer_promotion_bridge_tests {
     use super::*;
     use crate::{
-        CheckResultInput, CompletionCheckInput, RecordCheckReceiptsInput, RunInput, UpdateTaskInput,
-        VerificationInput, WorkerInput, WorkerResultInput,
+        CheckResultInput, CompletionCheckInput, RecordCheckReceiptsInput, RunInput,
+        UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput,
     };
     use loop_core::event::{CheckReceipt, SourceReceipt};
     use loop_core::policy::ComputeClass;
@@ -550,10 +552,12 @@ mod steer_promotion_bridge_tests {
         assert_eq!(correction.dependencies, vec!["original".to_string()]);
         assert_eq!(correction.blocked_by, vec!["original".to_string()]);
         assert_eq!(after.goal_criteria.len(), 2);
-        assert!(after
-            .goal_criteria
-            .iter()
-            .all(|item| item.state == loop_core::event::GoalCriterionState::Pending));
+        assert!(
+            after
+                .goal_criteria
+                .iter()
+                .all(|item| item.state == loop_core::event::GoalCriterionState::Pending)
+        );
         assert_eq!(after.guidance.len(), 1);
         assert!(after.guidance[0].contains("corrected behavior"));
     }
@@ -582,7 +586,10 @@ mod steer_promotion_bridge_tests {
         start_task(&database_path, "correction");
         verify_task(&database_path, "correction", false);
         let mut store = SqliteStore::open(&database_path).unwrap();
-        assert_eq!(store.projection(RUN_ID).unwrap().run_state, Some(RunState::Active));
+        assert_eq!(
+            store.projection(RUN_ID).unwrap().run_state,
+            Some(RunState::Active)
+        );
         assert!(matches!(
             store.append(&loop_core::event::Event::new(
                 RUN_ID,
@@ -612,9 +619,11 @@ mod steer_promotion_bridge_tests {
             .unwrap();
         let after = snapshot(&database_path);
         assert_eq!(after.state, RunState::Completed);
-        assert!(after
-            .goal_criteria
-            .iter()
-            .all(|item| item.state == loop_core::event::GoalCriterionState::Verified));
+        assert!(
+            after
+                .goal_criteria
+                .iter()
+                .all(|item| item.state == loop_core::event::GoalCriterionState::Verified)
+        );
     }
 }

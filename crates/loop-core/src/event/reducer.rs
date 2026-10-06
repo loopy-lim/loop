@@ -6,7 +6,9 @@ use thiserror::Error;
 
 use crate::attention::{Attention, AttentionState};
 use crate::graph::{GraphError, TaskGraph};
-use crate::policy::{is_check_side_effect_path, next_compute_class, ArtifactKind, FailureClass};
+use crate::policy::{
+    is_check_side_effect_path, next_compute_class, ArtifactKind, FailureClass, RoutingError,
+};
 use crate::run::RunState;
 use crate::task::{Task, TaskId, TaskState, TaskTransitionError};
 
@@ -284,6 +286,27 @@ impl RunProjection {
                     }
                 }
             }
+            EventKind::TaskRoutingUpdated {
+                task_id,
+                relaxation,
+                ..
+            } => {
+                self.require_controllable()?;
+                let task = self.task_mut(task_id)?;
+                // Constraints may only be relaxed while the work is parked or
+                // queued — never under an active execution that already
+                // planned against the recorded contract.
+                if !matches!(
+                    task.state,
+                    TaskState::Pending
+                        | TaskState::Ready
+                        | TaskState::Attention
+                        | TaskState::Failed
+                ) {
+                    return Err(ProjectionError::RoutingUpdateState(task_id.clone()));
+                }
+                relaxation.apply_to(&mut task.routing)?;
+            }
             EventKind::TaskDependencyAdded {
                 task_id,
                 depends_on,
@@ -382,7 +405,20 @@ impl RunProjection {
                     // worker, so it remains terminal.
                     let invalid_contract = *failure_class == FailureClass::InvalidContract;
                     if *failure_class == FailureClass::Interrupted {
-                        task.transition(TaskState::Attention, None)?;
+                        // Transport faults (connection resets, timeouts) are
+                        // nondeterministic, so they retry inside the existing
+                        // attempt ladder instead of parking the run in
+                        // Attention on the first network hiccup. Only an
+                        // exhausted ladder holds the task for a human
+                        // decision. The retry keeps the recorded routing: a
+                        // connection fault says nothing about compute-class
+                        // fit, so stepping down would only degrade the next
+                        // attempt.
+                        if task.attempt >= task.max_attempts {
+                            task.transition(TaskState::Attention, None)?;
+                        } else {
+                            task.transition(TaskState::Ready, None)?;
+                        }
                         false
                     } else if invalid_contract {
                         task.transition(TaskState::Failed, None)?;
@@ -758,6 +794,12 @@ pub enum ProjectionError {
     },
     #[error(transparent)]
     Transition(#[from] TaskTransitionError),
+    #[error(transparent)]
+    Routing(#[from] RoutingError),
+    #[error(
+        "routing constraints can only be relaxed on pending, ready, attention, or failed work: {0}"
+    )]
+    RoutingUpdateState(TaskId),
     #[error(transparent)]
     Attention(#[from] crate::attention::AttentionError),
     #[error(transparent)]

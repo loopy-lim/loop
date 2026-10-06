@@ -1,7 +1,7 @@
 //! Run lifecycle commands: creation, pause/resume/cancel, snapshots, the run
 //! graph projection, and event subscription.
 
-use super::{append, append_and_notify, bridge_error, store, OperationOutput};
+use super::{OperationOutput, append, append_and_notify, bridge_error, store};
 use loop_core::attention::AttentionKind;
 use loop_core::event::{Event, EventKind};
 use loop_core::policy::ComputeClass;
@@ -134,22 +134,22 @@ pub struct AttentionSnapshotOutput {
     pub task_id: Option<String>,
 }
 
-pub(crate) fn register_run_entry(
-    builder: rustra::PackageBuilder,
-) -> rustra::PackageBuilder {
+pub(crate) fn register_run_entry(builder: rustra::PackageBuilder) -> rustra::PackageBuilder {
     register!(builder, create_run, get_run)
 }
 
-pub(crate) fn register_run_lifecycle(
-    builder: rustra::PackageBuilder,
-) -> rustra::PackageBuilder {
+pub(crate) fn register_run_lifecycle(builder: rustra::PackageBuilder) -> rustra::PackageBuilder {
     register!(builder, cancel_run, pause_run, confirm_paused)
 }
 
-pub(crate) fn register_run_queries(
-    builder: rustra::PackageBuilder,
-) -> rustra::PackageBuilder {
-    register!(builder, resume_run, get_snapshot, get_run_graph, subscribe_events)
+pub(crate) fn register_run_queries(builder: rustra::PackageBuilder) -> rustra::PackageBuilder {
+    register!(
+        builder,
+        resume_run,
+        get_snapshot,
+        get_run_graph,
+        subscribe_events
+    )
 }
 
 #[command]
@@ -171,7 +171,10 @@ pub fn cancel_run(input: RunInput) -> Result<OperationOutput> {
         .projection(&input.run_id)
         .map_err(|error| bridge_error("run_not_found", error))?;
     if current.run_state.is_some_and(RunState::is_terminal) {
-        return Ok(OperationOutput { accepted: true });
+        return Ok(OperationOutput {
+            accepted: true,
+            ..OperationOutput::default()
+        });
     }
     let kind = if current.has_in_flight_work() {
         EventKind::RunCancellationRequested

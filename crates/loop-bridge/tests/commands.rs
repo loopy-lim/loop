@@ -3,11 +3,10 @@ use loop_bridge::{
     CheckResultInput, ClaimRunnableTasksInput, CleanupRunInput, CompareTracesInput,
     CompletionCheckInput, CorrectiveTaskInput, CreateRunInput, GetTraceInput,
     RequestAttentionInput, ResolveAttentionInput, RunInput, SubmitPlanInput, TaskContextInput,
-    TaskSpecInput, UpdateTaskInput, VerificationInput, WorkerInput, WorkerResultInput, cancel_run,
+    TaskSpecInput, VerificationInput, WorkerInput, WorkerResultInput, cancel_run,
     claim_runnable_tasks, cleanup_run, compare_traces, create_run, get_run_plan, get_snapshot,
     get_task_context, get_trace, loop_package, record_check_receipts, record_verification,
     record_worker_result, record_worker_started, request_attention, resolve_attention, submit_plan,
-    update_task,
 };
 use loop_core::attention::AttentionKind;
 use loop_core::event::{CheckReceipt, SourceReceipt};
@@ -639,6 +638,260 @@ fn connection_error_verification_failure_takes_the_attention_path_not_terminal_f
     .unwrap();
     assert_eq!(resumed.state, RunState::Active);
     assert_eq!(resumed.tasks[0].state, TaskState::Ready);
+}
+
+#[test]
+fn connection_error_below_the_retry_limit_requeues_without_attention() {
+    use loop_bridge::{ExecutionLeaseInput, claim_execution};
+
+    let dir = tempfile::tempdir().unwrap();
+    let database_path = dir.path().join("transport-retry.db").display().to_string();
+    create_run(CreateRunInput {
+        database_path: database_path.clone(),
+        run_id: "transport-retry".into(),
+    })
+    .unwrap();
+    submit_plan(SubmitPlanInput {
+        database_path: database_path.clone(),
+        run_id: "transport-retry".into(),
+        tasks: vec![research("lonely")],
+    })
+    .unwrap();
+    claim_execution(ExecutionLeaseInput {
+        database_path: database_path.clone(),
+        run_id: "transport-retry".into(),
+        owner: "owner-1".into(),
+        now_ms: 0,
+        ttl_ms: 30_000,
+    })
+    .unwrap();
+    claim_runnable_tasks(ClaimRunnableTasksInput {
+        database_path: database_path.clone(),
+        run_id: "transport-retry".into(),
+        running_task_ids: vec![],
+        max_workers: 1,
+        max_frontier_workers: 1,
+        execution_owner: Some("owner-1".into()),
+    })
+    .unwrap();
+    record_worker_started(WorkerInput {
+        database_path: database_path.clone(),
+        run_id: "transport-retry".into(),
+        task_id: "lonely".into(),
+        worker_id: "worker-1".into(),
+        execution_owner: Some("owner-1".into()),
+        state: None,
+    })
+    .unwrap();
+    // With attempts remaining, a connection error must re-queue the task
+    // inside the attempt ladder instead of parking the run in attention.
+    record_worker_result(WorkerResultInput {
+        database_path: database_path.clone(),
+        run_id: "transport-retry".into(),
+        task_id: "lonely".into(),
+        worker_id: "worker-1".into(),
+        success: false,
+        summary: "Error: Connection error.".into(),
+        execution_owner: Some("owner-1".into()),
+        state: None,
+    })
+    .unwrap();
+
+    let requeued = get_snapshot(RunInput {
+        database_path: database_path.clone(),
+        run_id: "transport-retry".into(),
+    })
+    .unwrap();
+    assert_eq!(requeued.state, RunState::Active);
+    assert_eq!(requeued.tasks[0].state, TaskState::Ready);
+    assert_eq!(requeued.tasks[0].attempt, 1);
+    assert!(requeued.open_attention_ids.is_empty());
+
+    let reclaimed = claim_runnable_tasks(ClaimRunnableTasksInput {
+        database_path,
+        run_id: "transport-retry".into(),
+        running_task_ids: vec![],
+        max_workers: 1,
+        max_frontier_workers: 1,
+        execution_owner: Some("owner-1".into()),
+    })
+    .unwrap();
+    assert_eq!(reclaimed.task_ids, vec!["lonely"]);
+}
+
+#[test]
+fn defer_resolution_redispatches_the_parked_task() {
+    use loop_bridge::{ExecutionLeaseInput, claim_execution};
+
+    let dir = tempfile::tempdir().unwrap();
+    let database_path = dir.path().join("defer-redispatch.db").display().to_string();
+    create_run(CreateRunInput {
+        database_path: database_path.clone(),
+        run_id: "defer-redispatch".into(),
+    })
+    .unwrap();
+    submit_plan(SubmitPlanInput {
+        database_path: database_path.clone(),
+        run_id: "defer-redispatch".into(),
+        tasks: vec![exhaustible("lonely")],
+    })
+    .unwrap();
+    claim_execution(ExecutionLeaseInput {
+        database_path: database_path.clone(),
+        run_id: "defer-redispatch".into(),
+        owner: "owner-1".into(),
+        now_ms: 0,
+        ttl_ms: 30_000,
+    })
+    .unwrap();
+    claim_runnable_tasks(ClaimRunnableTasksInput {
+        database_path: database_path.clone(),
+        run_id: "defer-redispatch".into(),
+        running_task_ids: vec![],
+        max_workers: 1,
+        max_frontier_workers: 1,
+        execution_owner: Some("owner-1".into()),
+    })
+    .unwrap();
+    record_worker_started(WorkerInput {
+        database_path: database_path.clone(),
+        run_id: "defer-redispatch".into(),
+        task_id: "lonely".into(),
+        worker_id: "worker-1".into(),
+        execution_owner: Some("owner-1".into()),
+        state: None,
+    })
+    .unwrap();
+    record_worker_result(WorkerResultInput {
+        database_path: database_path.clone(),
+        run_id: "defer-redispatch".into(),
+        task_id: "lonely".into(),
+        worker_id: "worker-1".into(),
+        success: false,
+        summary: "Error: Connection error.".into(),
+        execution_owner: Some("owner-1".into()),
+        state: None,
+    })
+    .unwrap();
+    let parked = get_snapshot(RunInput {
+        database_path: database_path.clone(),
+        run_id: "defer-redispatch".into(),
+    })
+    .unwrap();
+    assert_eq!(parked.state, RunState::Attention);
+    assert_eq!(parked.tasks[0].state, TaskState::Attention);
+
+    // A defer records a no-escalation decision, but the resolution must
+    // still re-enter the task into the dispatch lane instead of silently
+    // parking the run with only Attention-state work.
+    let output = resolve_attention(ResolveAttentionInput {
+        database_path: database_path.clone(),
+        run_id: "defer-redispatch".into(),
+        attention_id: parked.open_attention_ids[0].clone(),
+        resolution: "defer".into(),
+        corrective_task: None,
+    })
+    .unwrap();
+    assert!(output.accepted);
+    assert_eq!(output.redispatched_task_id.as_deref(), Some("lonely"));
+
+    let resumed = get_snapshot(RunInput {
+        database_path,
+        run_id: "defer-redispatch".into(),
+    })
+    .unwrap();
+    assert_eq!(resumed.state, RunState::Active);
+    assert_eq!(resumed.tasks[0].state, TaskState::Ready);
+    assert!(resumed.open_attention_ids.is_empty());
+}
+
+#[test]
+fn answer_resolution_redispatches_a_parked_task_bound_attention() {
+    use loop_bridge::{ExecutionLeaseInput, claim_execution};
+
+    let dir = tempfile::tempdir().unwrap();
+    let database_path = dir.path().join("answer-redispatch.db").display().to_string();
+    create_run(CreateRunInput {
+        database_path: database_path.clone(),
+        run_id: "answer-redispatch".into(),
+    })
+    .unwrap();
+    submit_plan(SubmitPlanInput {
+        database_path: database_path.clone(),
+        run_id: "answer-redispatch".into(),
+        tasks: vec![exhaustible("lonely")],
+    })
+    .unwrap();
+    claim_execution(ExecutionLeaseInput {
+        database_path: database_path.clone(),
+        run_id: "answer-redispatch".into(),
+        owner: "owner-1".into(),
+        now_ms: 0,
+        ttl_ms: 30_000,
+    })
+    .unwrap();
+    claim_runnable_tasks(ClaimRunnableTasksInput {
+        database_path: database_path.clone(),
+        run_id: "answer-redispatch".into(),
+        running_task_ids: vec![],
+        max_workers: 1,
+        max_frontier_workers: 1,
+        execution_owner: Some("owner-1".into()),
+    })
+    .unwrap();
+    record_worker_started(WorkerInput {
+        database_path: database_path.clone(),
+        run_id: "answer-redispatch".into(),
+        task_id: "lonely".into(),
+        worker_id: "worker-1".into(),
+        execution_owner: Some("owner-1".into()),
+        state: None,
+    })
+    .unwrap();
+    record_worker_result(WorkerResultInput {
+        database_path: database_path.clone(),
+        run_id: "answer-redispatch".into(),
+        task_id: "lonely".into(),
+        worker_id: "worker-1".into(),
+        success: false,
+        summary: "Error: Connection error.".into(),
+        execution_owner: Some("owner-1".into()),
+        state: None,
+    })
+    .unwrap();
+    // A question bound to the parked task, answered while the failure
+    // attention is still open.
+    request_attention(RequestAttentionInput {
+        database_path: database_path.clone(),
+        run_id: "answer-redispatch".into(),
+        attention_id: "question-1".into(),
+        kind: AttentionKind::Question,
+        summary: "which mirror should the retry use?".into(),
+        task_id: Some("lonely".into()),
+        execution_owner: None,
+    })
+    .unwrap();
+    let output = resolve_attention(ResolveAttentionInput {
+        database_path: database_path.clone(),
+        run_id: "answer-redispatch".into(),
+        attention_id: "question-1".into(),
+        resolution: "use the staging mirror".into(),
+        corrective_task: None,
+    })
+    .unwrap();
+    assert!(output.accepted);
+    assert_eq!(output.redispatched_task_id.as_deref(), Some("lonely"));
+
+    let snapshot = get_snapshot(RunInput {
+        database_path,
+        run_id: "answer-redispatch".into(),
+    })
+    .unwrap();
+    // The answered question re-qualified the parked task; the unrelated
+    // failure attention is still open, so the run stays held.
+    assert_eq!(snapshot.tasks[0].state, TaskState::Ready);
+    assert_eq!(snapshot.open_attention_ids.len(), 1);
+    assert_eq!(snapshot.state, RunState::Attention);
 }
 
 #[test]
@@ -1561,12 +1814,12 @@ fn failure_attention_resolves_only_through_directives_and_free_text_is_rejected(
 }
 
 #[test]
-fn defer_directive_parks_the_failed_task_without_redispatch() {
+fn defer_directive_redispatches_the_failed_task_instead_of_silent_parking() {
     let dir = tempfile::tempdir().unwrap();
     let database_path = dir.path().join("loop.db").display().to_string();
     let attention_id = exhausted_failure_attention(&database_path, "defer-run", "fragile");
 
-    resolve_attention(ResolveAttentionInput {
+    let output = resolve_attention(ResolveAttentionInput {
         database_path: database_path.clone(),
         run_id: "defer-run".into(),
         attention_id,
@@ -1574,36 +1827,24 @@ fn defer_directive_parks_the_failed_task_without_redispatch() {
         corrective_task: None,
     })
     .unwrap();
-    let parked = get_snapshot(RunInput {
+    // A defer records a no-escalation decision, but the resolution must
+    // still re-enter the task into the dispatch lane: a silent park would
+    // leave an Active run holding only Attention-state tasks with an empty
+    // scheduler verdict.
+    assert_eq!(output.redispatched_task_id.as_deref(), Some("fragile"));
+    let resumed = get_snapshot(RunInput {
         database_path: database_path.clone(),
         run_id: "defer-run".into(),
     })
     .unwrap();
-    // The run resumes and the attention closes, but the failed task stays
-    // parked: re-dispatch remains an explicit later decision.
-    assert_eq!(parked.state, RunState::Active);
-    assert_eq!(parked.tasks[0].state, TaskState::Attention);
-    let claimed = claim_runnable_tasks(ClaimRunnableTasksInput {
-        database_path: database_path.clone(),
-        run_id: "defer-run".into(),
-        running_task_ids: vec![],
-        max_workers: 2,
-        max_frontier_workers: 2,
-        execution_owner: None,
-    })
-    .unwrap();
-    assert!(claimed.task_ids.is_empty());
+    assert_eq!(resumed.state, RunState::Active);
+    assert_eq!(resumed.open_attention_ids.len(), 0);
+    assert_eq!(resumed.tasks[0].state, TaskState::Ready);
 
-    // The deferred re-dispatch is the deterministic updateTask transition.
-    update_task(UpdateTaskInput {
-        database_path: database_path.clone(),
-        run_id: "defer-run".into(),
-        task_id: "fragile".into(),
-        state: TaskState::Ready,
-    })
-    .unwrap();
+    // The re-dispatch is immediate: the scheduler can claim the deferred
+    // task without any further human step.
     let claimed = claim_runnable_tasks(ClaimRunnableTasksInput {
-        database_path: database_path.clone(),
+        database_path,
         run_id: "defer-run".into(),
         running_task_ids: vec![],
         max_workers: 2,

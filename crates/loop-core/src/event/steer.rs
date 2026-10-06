@@ -61,7 +61,9 @@ pub fn steer_promotion_events(
     let mut seen_ids = std::collections::BTreeSet::new();
     for criterion in &criteria {
         if !seen_ids.insert(criterion.id.clone()) {
-            return Err(SteerPromotionError::DuplicateCriterion(criterion.id.clone()));
+            return Err(SteerPromotionError::DuplicateCriterion(
+                criterion.id.clone(),
+            ));
         }
         if criterion.task_id != task.id {
             return Err(SteerPromotionError::CriterionTaskMismatch {
@@ -112,20 +114,26 @@ mod tests {
     };
     use crate::policy::ComputeClass;
     use crate::run::RunState;
-    use crate::task::{CompletionCheck, CompletionContract, TaskId, TaskKind, VerificationEvidence, WorkOwnership};
+    use crate::task::{
+        CompletionCheck, CompletionContract, TaskId, TaskKind, VerificationEvidence, WorkOwnership,
+    };
 
     fn correction_task() -> Task {
-        Task::builder(TaskId::from("correction"), "apply correction", TaskKind::Implementation)
-            .dependencies([TaskId::from("original")])
-            .ownership(WorkOwnership::new(
-                std::iter::empty::<&str>(),
-                ["src/correction.rs"],
-            ))
-            .requirements(["corrected behavior works"])
-            .compute(ComputeClass::Fast, ComputeClass::Tiny, ComputeClass::Strong)
-            .completion_contract(CompletionContract::new([CompletionCheck::new("unit")]))
-            .build()
-            .unwrap()
+        Task::builder(
+            TaskId::from("correction"),
+            "apply correction",
+            TaskKind::Implementation,
+        )
+        .dependencies([TaskId::from("original")])
+        .ownership(WorkOwnership::new(
+            std::iter::empty::<&str>(),
+            ["src/correction.rs"],
+        ))
+        .requirements(["corrected behavior works"])
+        .compute(ComputeClass::Fast, ComputeClass::Tiny, ComputeClass::Strong)
+        .completion_contract(CompletionContract::new([CompletionCheck::new("unit")]))
+        .build()
+        .unwrap()
     }
 
     fn criterion() -> GoalCriterion {
@@ -161,7 +169,12 @@ mod tests {
     /// Drives one task from pending through verification, optionally with a
     /// stable passing receipt, to isolate the criterion gate from the
     /// task-completeness gate.
-    fn verify_task(projection: &mut RunProjection, task_id: &str, check_id: &str, with_receipt: bool) {
+    fn verify_task(
+        projection: &mut RunProjection,
+        task_id: &str,
+        check_id: &str,
+        with_receipt: bool,
+    ) {
         let task_id = TaskId::from(task_id);
         let mut kinds = vec![
             EventKind::TaskReady(task_id.clone()),
@@ -191,9 +204,13 @@ mod tests {
 
     #[test]
     fn steer_promotion_binds_message_task_and_criterion() {
-        let events =
-            steer_promotion_events("run", "also cover the corrected behavior", correction_task(), vec![criterion()])
-                .unwrap();
+        let events = steer_promotion_events(
+            "run",
+            "also cover the corrected behavior",
+            correction_task(),
+            vec![criterion()],
+        )
+        .unwrap();
         assert_eq!(events.len(), 3);
         assert!(matches!(
             &events[0].kind,
@@ -215,16 +232,20 @@ mod tests {
 
     #[test]
     fn steer_promotion_requires_dependency_and_bound_checks() {
-        let detached = Task::builder(TaskId::from("correction"), "apply correction", TaskKind::Implementation)
-            .dependencies([TaskId::from("original")])
-            .ownership(WorkOwnership::new(
-                std::iter::empty::<&str>(),
-                ["src/correction.rs"],
-            ))
-            .requirements(["corrected behavior works"])
-            .completion_contract(CompletionContract::new([CompletionCheck::new("unit")]))
-            .build()
-            .unwrap();
+        let detached = Task::builder(
+            TaskId::from("correction"),
+            "apply correction",
+            TaskKind::Implementation,
+        )
+        .dependencies([TaskId::from("original")])
+        .ownership(WorkOwnership::new(
+            std::iter::empty::<&str>(),
+            ["src/correction.rs"],
+        ))
+        .requirements(["corrected behavior works"])
+        .completion_contract(CompletionContract::new([CompletionCheck::new("unit")]))
+        .build()
+        .unwrap();
         let detached = Task {
             dependencies: vec![],
             ..detached
@@ -246,7 +267,8 @@ mod tests {
             ..criterion()
         };
         assert_eq!(
-            steer_promotion_events("run", "message", correction_task(), vec![wrong_task]).unwrap_err(),
+            steer_promotion_events("run", "message", correction_task(), vec![wrong_task])
+                .unwrap_err(),
             SteerPromotionError::CriterionTaskMismatch {
                 criterion: "steer-criterion".into(),
                 task: "correction".into()
@@ -257,7 +279,8 @@ mod tests {
             ..criterion()
         };
         assert_eq!(
-            steer_promotion_events("run", "message", correction_task(), vec![unknown_check]).unwrap_err(),
+            steer_promotion_events("run", "message", correction_task(), vec![unknown_check])
+                .unwrap_err(),
             SteerPromotionError::UnknownCheck("missing".into())
         );
         let unmapped = GoalCriterion {
@@ -265,25 +288,32 @@ mod tests {
             ..criterion()
         };
         assert_eq!(
-            steer_promotion_events("run", "message", correction_task(), vec![unmapped]).unwrap_err(),
+            steer_promotion_events("run", "message", correction_task(), vec![unmapped])
+                .unwrap_err(),
             SteerPromotionError::UnmappedRequirement
         );
     }
 
     #[test]
     fn steer_criterion_blocks_run_completion_until_verified() {
-        let original = Task::builder(TaskId::from("original"), "original", TaskKind::Implementation)
-            .ownership(WorkOwnership::new(
-                std::iter::empty::<&str>(),
-                ["src/original.rs"],
-            ))
-            .requirements(["behavior works"])
-            .compute(ComputeClass::Fast, ComputeClass::Tiny, ComputeClass::Strong)
-            .completion_contract(CompletionContract::new([CompletionCheck::new("unit")]))
-            .build()
-            .unwrap();
+        let original = Task::builder(
+            TaskId::from("original"),
+            "original",
+            TaskKind::Implementation,
+        )
+        .ownership(WorkOwnership::new(
+            std::iter::empty::<&str>(),
+            ["src/original.rs"],
+        ))
+        .requirements(["behavior works"])
+        .compute(ComputeClass::Fast, ComputeClass::Tiny, ComputeClass::Strong)
+        .completion_contract(CompletionContract::new([CompletionCheck::new("unit")]))
+        .build()
+        .unwrap();
         let mut projection = RunProjection::default();
-        projection.apply(&Event::new("run", EventKind::RunCreated)).unwrap();
+        projection
+            .apply(&Event::new("run", EventKind::RunCreated))
+            .unwrap();
         projection
             .apply(&Event::new("run", EventKind::TaskCreated(original)))
             .unwrap();

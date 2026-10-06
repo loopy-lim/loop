@@ -10,6 +10,10 @@ import {
   scopeContainsPath,
   scopedFingerprint,
 } from "../src/source-state";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 function repository() {
   const root = mkdtempSync(join(tmpdir(), "loop-source-state-"));
@@ -32,7 +36,7 @@ test("source snapshots distinguish unchanged pre-existing dirty files from new e
   const after = await captureSourceState(root);
   expect(before).toBeDefined();
   expect(after).toBeDefined();
-  expect(changedSourcePaths(before!, after!)).toEqual(["owned.ts"]);
+  expect(changedSourcePaths(must(before), must(after))).toEqual(["owned.ts"]);
   expect(before?.fingerprint).not.toBe(after?.fingerprint);
 });
 
@@ -41,7 +45,7 @@ test("source snapshots include untracked files and detect mutation during a chec
   const before = await captureSourceState(root);
   writeFileSync(join(root, "new.ts"), "export const fresh = true;\n");
   const after = await captureSourceState(root);
-  expect(changedSourcePaths(before!, after!)).toEqual(["new.ts"]);
+  expect(changedSourcePaths(must(before), must(after))).toEqual(["new.ts"]);
 });
 
 test("source snapshots exclude the run database and its journals", async () => {
@@ -52,7 +56,7 @@ test("source snapshots exclude the run database and its journals", async () => {
   writeFileSync(database, "second");
   writeFileSync(`${database}-wal`, "journal");
   const after = await captureSourceState(root, [database]);
-  expect(changedSourcePaths(before!, after!)).toEqual([]);
+  expect(changedSourcePaths(must(before), must(after))).toEqual([]);
 });
 
 test("write scope uses path boundaries and does not claim an unrelated file", () => {
@@ -67,6 +71,6 @@ test("scoped check snapshots avoid hashing unrelated files", async () => {
   const root = repository();
   const full = await captureSourceState(root);
   const scoped = await captureSourceState(root, [], ["owned.ts"]);
-  expect([...scoped!.files.keys()]).toEqual(["owned.ts"]);
-  expect(scopedFingerprint(full!, ["owned.ts"])).toBe(scopedFingerprint(scoped!, ["owned.ts"]));
+  expect([...must(scoped).files.keys()]).toEqual(["owned.ts"]);
+  expect(scopedFingerprint(must(full), ["owned.ts"])).toBe(scopedFingerprint(must(scoped), ["owned.ts"]));
 });

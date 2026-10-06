@@ -44,6 +44,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -316,6 +340,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -565,6 +613,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -628,6 +700,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -677,6 +773,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -1078,6 +1198,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -1113,6 +1257,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -3111,6 +3279,17 @@
             "items": {
               "type": "string"
             }
+          },
+          "contextReduction": {
+            "description": "Present when the context-budget policy had to shrink anything (docs/defects/limits-inventory.md R1·R2·R4). The full text of every shrunk field stays in the run store; this record is observability for the dispatch surface.",
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ContextReductionRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -3730,6 +3909,49 @@
               }
             }
           }
+        },
+        "ContextReductionRecord": {
+          "description": "What the context-budget policy changed while assembling one dispatch context. Counts are UTF-16 code units dropped, matching the unit the worker prompt renderer measures its limits in.",
+          "type": "object",
+          "required": [
+            "bodyCompactions",
+            "droppedChars",
+            "estimatedEssentialChars",
+            "fieldClamps",
+            "retryCompaction",
+            "totalBudgetPasses"
+          ],
+          "properties": {
+            "fieldClamps": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "bodyCompactions": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "droppedChars": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "retryCompaction": {
+              "description": "True when this dispatch continues a retry after a stall/limit failure, so the prior attempt's bulky context was compacted.",
+              "type": "boolean"
+            },
+            "totalBudgetPasses": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "estimatedEssentialChars": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            }
+          }
         }
       }
     },
@@ -3968,6 +4190,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -4025,6 +4271,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -4308,6 +4578,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -4565,6 +4859,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -5422,6 +5740,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -5471,6 +5813,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -5523,6 +5889,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -5672,6 +6062,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -5717,6 +6131,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -5790,6 +6228,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -5850,6 +6312,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -5934,6 +6420,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -6006,6 +6516,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -6078,6 +6612,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -6173,6 +6731,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -6222,6 +6804,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -6281,6 +6887,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -6347,6 +6977,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -6454,6 +7108,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -6676,6 +7354,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -6721,6 +7423,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -7074,6 +7800,30 @@
         "properties": {
           "accepted": {
             "type": "boolean"
+          },
+          "summary": {
+            "description": "Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations.",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routingRelaxations": {
+            "description": "Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redispatchedTaskId": {
+            "description": "Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch).",
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },

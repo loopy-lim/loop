@@ -53,7 +53,7 @@ test("buildScopeCodeMap lists scoped files with declaration names and respects c
   expect(map).toContain("src/alpha.ts");
   expect(map).toContain("Alpha, beta");
   expect(map).not.toContain("outside/gamma.ts");
-  expect(map!.length).toBeLessThanOrEqual(1_201);
+  expect(map?.length).toBeLessThanOrEqual(1_201);
 
   // Scopes that resolve to nothing yield no map (advisory never invents).
   expect(
@@ -77,9 +77,9 @@ test("withCodeMapEntry appends one bounded synthetic advisory entry", () => {
   };
   const mapped = withCodeMapEntry(base, "src/a.ts · A");
   expect(mapped.dependencyResults).toHaveLength(1);
-  expect(mapped.dependencyResults[0]!.taskId).toBe(CODE_MAP_ENTRY_ID);
-  expect(mapped.dependencyResults[0]!.title).toContain("advisory");
-  expect(mapped.dependencyResults[0]!.summary).toBe("src/a.ts · A");
+  expect(mapped.dependencyResults[0]?.taskId).toBe(CODE_MAP_ENTRY_ID);
+  expect(mapped.dependencyResults[0]?.title).toContain("advisory");
+  expect(mapped.dependencyResults[0]?.summary).toBe("src/a.ts · A");
   // The input is never mutated, and an empty map injects nothing.
   expect(base.dependencyResults).toHaveLength(0);
   expect(withCodeMapEntry(base, "   ")).toBe(base);
@@ -87,6 +87,6 @@ test("withCodeMapEntry appends one bounded synthetic advisory entry", () => {
 
   const oversized = "x".repeat(2_000);
   expect(
-    withCodeMapEntry(base, oversized)!.dependencyResults[0]!.summary.length,
+    withCodeMapEntry(base, oversized)?.dependencyResults[0]?.summary.length,
   ).toBeLessThanOrEqual(1_200);
 });

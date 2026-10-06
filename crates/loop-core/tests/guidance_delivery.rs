@@ -7,9 +7,7 @@
 
 use loop_core::event::{Event, EventKind, ProjectionError, RunProjection};
 use loop_core::policy::ComputeClass;
-use loop_core::task::{
-    CompletionCheck, CompletionContract, Task, TaskId, TaskKind, WorkOwnership,
-};
+use loop_core::task::{CompletionCheck, CompletionContract, Task, TaskId, TaskKind, WorkOwnership};
 
 fn implementation_task(id: &str) -> Task {
     Task::builder(TaskId::from(id), id, TaskKind::Implementation)
@@ -54,16 +52,24 @@ fn projection_with_task() -> RunProjection {
 #[test]
 fn watermark_advances_only_in_ascending_sequence_order() {
     let mut projection = projection_with_task();
-    assert_eq!(projection.guidance_delivered_through[&TaskId::from("impl")], 30);
+    assert_eq!(
+        projection.guidance_delivered_through[&TaskId::from("impl")],
+        30
+    );
 
     // Strictly ascending deliveries advance the watermark.
     projection
         .apply(&delivered("impl", "worker-1", 41))
         .unwrap();
-    assert_eq!(projection.guidance_delivered_through[&TaskId::from("impl")], 41);
+    assert_eq!(
+        projection.guidance_delivered_through[&TaskId::from("impl")],
+        41
+    );
 
     // Out-of-order (below the watermark) delivery is rejected.
-    let regression = projection.apply(&delivered("impl", "worker-1", 35)).unwrap_err();
+    let regression = projection
+        .apply(&delivered("impl", "worker-1", 35))
+        .unwrap_err();
     assert!(matches!(
         regression,
         ProjectionError::GuidanceDeliveryRegression { ref task_id, through_sequence, watermark }
@@ -71,14 +77,23 @@ fn watermark_advances_only_in_ascending_sequence_order() {
     ));
 
     // Duplicate delivery (equal to the watermark) is rejected too.
-    let duplicate = projection.apply(&delivered("impl", "worker-1", 41)).unwrap_err();
+    let duplicate = projection
+        .apply(&delivered("impl", "worker-1", 41))
+        .unwrap_err();
     assert!(matches!(
         duplicate,
-        ProjectionError::GuidanceDeliveryRegression { through_sequence: 41, watermark: 41, .. }
+        ProjectionError::GuidanceDeliveryRegression {
+            through_sequence: 41,
+            watermark: 41,
+            ..
+        }
     ));
 
     // Rejections leave the watermark unchanged.
-    assert_eq!(projection.guidance_delivered_through[&TaskId::from("impl")], 41);
+    assert_eq!(
+        projection.guidance_delivered_through[&TaskId::from("impl")],
+        41
+    );
 }
 
 #[test]
@@ -94,13 +109,17 @@ fn watermarks_are_tracked_per_task_independently() {
     ] {
         projection.apply(&event).unwrap();
     }
-    projection.apply(&delivered("impl", "worker-1", 55)).unwrap();
+    projection
+        .apply(&delivered("impl", "worker-1", 55))
+        .unwrap();
     projection
         .apply(&delivered("impl-sub", "worker-2", 12))
         .unwrap();
 
     assert_eq!(
-        projection.guidance_delivered_through.get(&TaskId::from("impl")),
+        projection
+            .guidance_delivered_through
+            .get(&TaskId::from("impl")),
         Some(&55)
     );
     assert_eq!(
@@ -116,7 +135,11 @@ fn watermarks_are_tracked_per_task_independently() {
         .unwrap_err();
     assert!(matches!(
         regression,
-        ProjectionError::GuidanceDeliveryRegression { through_sequence: 12, watermark: 55, .. }
+        ProjectionError::GuidanceDeliveryRegression {
+            through_sequence: 12,
+            watermark: 55,
+            ..
+        }
     ));
 }
 
@@ -127,14 +150,19 @@ fn guidance_delivery_requires_a_known_task_and_positive_sequence() {
         .apply(&Event::new("run-1", EventKind::RunCreated))
         .unwrap();
 
-    let unknown_task = projection.apply(&delivered("impl", "worker-1", 7)).unwrap_err();
+    let unknown_task = projection
+        .apply(&delivered("impl", "worker-1", 7))
+        .unwrap_err();
     assert!(matches!(
         unknown_task,
         ProjectionError::TaskNotFound(ref task_id) if task_id == &TaskId::from("impl")
     ));
 
     projection
-        .apply(&Event::new("run-1", EventKind::TaskCreated(implementation_task("impl"))))
+        .apply(&Event::new(
+            "run-1",
+            EventKind::TaskCreated(implementation_task("impl")),
+        ))
         .unwrap();
     for sequence in [0, -3] {
         let invalid = projection
@@ -168,7 +196,10 @@ fn guidance_delivery_replays_deterministically_from_the_event_log() {
     for event in &events {
         replay.apply(event).unwrap();
     }
-    assert_eq!(first.guidance_delivered_through, replay.guidance_delivered_through);
+    assert_eq!(
+        first.guidance_delivered_through,
+        replay.guidance_delivered_through
+    );
     assert_eq!(
         first.guidance_delivered_through[&TaskId::from("impl")],
         44,
@@ -189,7 +220,10 @@ fn guidance_delivery_replays_deterministically_from_the_event_log() {
         from_log.apply(event).unwrap();
     }
     from_log.apply(&deserialized).unwrap();
-    assert_eq!(from_log.guidance_delivered_through, replay.guidance_delivered_through);
+    assert_eq!(
+        from_log.guidance_delivered_through,
+        replay.guidance_delivered_through
+    );
 }
 
 #[test]
@@ -201,5 +235,8 @@ fn delivered_guidance_keeps_the_recorded_steer_fallback() {
     // delivery bookkeeping never erases run history.
     assert_eq!(projection.guidance.len(), 1);
     assert_eq!(projection.guidance[0].message, "keep the boundary intact");
-    assert_eq!(projection.guidance_delivered_through[&TaskId::from("impl")], 30);
+    assert_eq!(
+        projection.guidance_delivered_through[&TaskId::from("impl")],
+        30
+    );
 }

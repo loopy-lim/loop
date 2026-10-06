@@ -117,7 +117,10 @@ mod tests {
             (SandboxIsolation::Partial, "partial"),
             (SandboxIsolation::Enforced, "enforced"),
         ] {
-            assert_eq!(serde_json::to_string(&variant).unwrap(), format!(r#""{wire}""#));
+            assert_eq!(
+                serde_json::to_string(&variant).unwrap(),
+                format!(r#""{wire}""#)
+            );
         }
     }
 

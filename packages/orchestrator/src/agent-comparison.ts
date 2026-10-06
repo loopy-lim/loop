@@ -123,7 +123,7 @@ export async function runAgentComparison(
         status: result.status,
         verifiedCriteria: snapshot.goalCriteria.filter((item) => item.state === "verified").length,
         totalCriteria: snapshot.goalCriteria.length,
-        scopeViolations: [...scopeViolations].sort(),
+        scopeViolations: [...scopeViolations].toSorted(),
         elapsedMs,
         summary: trace.summary,
         score: trace.score,

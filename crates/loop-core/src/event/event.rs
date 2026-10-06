@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::attention::{Attention, AttentionResolution};
-use crate::policy::{ArtifactKind, FailureClass};
+use crate::policy::{ArtifactKind, FailureClass, RoutingRelaxation};
 use crate::task::{Task, TaskId, VerificationEvidence};
 
 #[derive(Clone, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -97,6 +97,17 @@ pub enum EventKind {
     },
     TaskCreated(Task),
     TaskReady(TaskId),
+    /// Durable evidence of one graduated routing relaxation granted while
+    /// resolving a batch-candidate-absence failure (the `relax_routing`
+    /// directive). The recorded step is the only thing allowed to change the
+    /// task's routing constraints, and the reducer re-validates that it is a
+    /// strict downgrade before applying it — a replayed or forged event can
+    /// never raise a capability requirement or the risk floor.
+    TaskRoutingUpdated {
+        task_id: TaskId,
+        relaxation: RoutingRelaxation,
+        reason: String,
+    },
     /// Wires a new prerequisite onto a not-yet-running task. The directive
     /// path (`add_task` failure resolution) is the only emitter: a corrective
     /// task created after the fact becomes a dependency of the failed task so

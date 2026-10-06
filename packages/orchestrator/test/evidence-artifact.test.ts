@@ -12,10 +12,10 @@ test("large check output is saved privately after redaction and only then gets a
   const stored = await storeCheckOutput(database, "run", "task", "check", output, "");
   expect(stored?.path).toContain("run.db.artifacts");
   expect(stored?.preview).toContain("artifact saved");
-  const body = readFileSync(stored!.path, "utf8");
+  const body = readFileSync(stored?.path, "utf8");
   expect(body).toContain("normal output");
   expect(body).not.toContain("private-value");
-  expect(statSync(stored!.path).mode & 0o077).toBe(0);
+  expect(statSync(stored?.path).mode & 0o077).toBe(0);
 });
 
 test("small output stays inline without creating an artifact", async () => {

@@ -59,10 +59,11 @@ impl Attention {
     /// Accepts a resolution only when it belongs to this attention's kind.
     /// Failure attentions resolve exclusively through the directive
     /// vocabulary ([`AttentionResolution::Retry`], [`AttentionResolution::AddTask`],
-    /// [`AttentionResolution::Defer`], [`AttentionResolution::Cancel`]);
-    /// free text and approval verdicts are rejected. The `add_task`
-    /// directive additionally requires a task-bound attention and a
-    /// well-formed corrective contract.
+    /// [`AttentionResolution::RelaxRouting`], [`AttentionResolution::Defer`],
+    /// [`AttentionResolution::Cancel`]); free text and approval verdicts are
+    /// rejected. The `add_task` and `relax_routing` directives additionally
+    /// require a task-bound attention, and the corrective contract must be
+    /// well formed.
     pub fn resolve(&mut self, resolution: AttentionResolution) -> Result<(), AttentionError> {
         if self.state == AttentionState::Resolved {
             return Err(AttentionError::AlreadyResolved);
@@ -72,7 +73,8 @@ impl Attention {
             (AttentionKind::Approval, AttentionResolution::Approved) => true,
             (AttentionKind::Approval, AttentionResolution::Rejected(_)) => true,
             (AttentionKind::Failure, AttentionResolution::Retry)
-            | (AttentionKind::Failure, AttentionResolution::Defer) => true,
+            | (AttentionKind::Failure, AttentionResolution::Defer)
+            | (AttentionKind::Failure, AttentionResolution::RelaxRouting) => true,
             (AttentionKind::Failure, AttentionResolution::AddTask(corrective)) => {
                 self.task_id.is_some() && corrective.is_well_formed()
             }

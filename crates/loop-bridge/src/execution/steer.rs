@@ -1,12 +1,12 @@
 //! Steer commands: plain mid-run guidance and steer promotion into the goal
 //! graph (dependent task + criterion in one atomic append).
 
-use super::setup::{goal_criteria, GoalCriterionInput};
+use super::setup::{GoalCriterionInput, goal_criteria};
 use crate::commands::{
-    append, append_batch_and_notify, bridge_error, store, task_from_input, OperationOutput,
-    TaskSpecInput,
+    OperationOutput, TaskSpecInput, append, append_batch_and_notify, bridge_error, store,
+    task_from_input,
 };
-use loop_core::event::{steer_promotion_events, Event, EventKind, SteerPromotionError};
+use loop_core::event::{Event, EventKind, SteerPromotionError, steer_promotion_events};
 use loop_core::task::{Task, TaskId};
 use rustra::prelude::*;
 

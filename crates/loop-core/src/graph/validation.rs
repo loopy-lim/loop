@@ -200,18 +200,16 @@ fn validate_semantic_pair(
     // before pair checks, so these contracts are already guaranteed to
     // exist; a miss is reported through the same error instead of an
     // invariant panic.
-    let left_contract = left
-        .decomposition_contract
-        .as_ref()
-        .ok_or_else(|| GraphError::MissingDecompositionContract {
+    let left_contract = left.decomposition_contract.as_ref().ok_or_else(|| {
+        GraphError::MissingDecompositionContract {
             task: left.id.clone(),
-        })?;
-    let right_contract = right
-        .decomposition_contract
-        .as_ref()
-        .ok_or_else(|| GraphError::MissingDecompositionContract {
+        }
+    })?;
+    let right_contract = right.decomposition_contract.as_ref().ok_or_else(|| {
+        GraphError::MissingDecompositionContract {
             task: right.id.clone(),
-        })?;
+        }
+    })?;
     let left_touchpoints = &left_contract.semantic_touchpoints;
     let right_touchpoints = &right_contract.semantic_touchpoints;
     for left_touchpoint in left_touchpoints {

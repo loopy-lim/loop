@@ -10,6 +10,10 @@ import {
   toContextSummaryEvent,
 } from "../src/context-lifecycle";
 import { resolveContextPolicy } from "../src/config";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 function receipt(
   overrides: Partial<TaskContextOutput["previousChecks"][number]> = {},
@@ -91,20 +95,20 @@ test("fold replaces passed-check bodies with bounded heads and keeps every prese
   expect(folded.previousChecks.find((check) => check.id === "broken")).toEqual(failed);
 
   // Advisory bodies are folded to bounded heads.
-  const foldedPassed = folded.previousChecks.find((check) => check.id === "big")!;
+  const foldedPassed = must(folded.previousChecks.find((check) => check.id === "big"));
   expect(foldedPassed.stdout.length).toBeLessThanOrEqual(400);
   expect(foldedPassed.stdout).toBe("x".repeat(400));
-  expect(folded.resultSummary!.length).toBeLessThanOrEqual(400);
+  expect(folded.resultSummary?.length).toBeLessThanOrEqual(400);
 
   // The fold record counts honestly and never carries dropped content.
-  expect(fold!.summarizedEntryCount).toBe(2);
+  expect(fold?.summarizedEntryCount).toBe(2);
   // Preserved: 1 failed receipt + 1 guidance + 1 dependency result.
-  expect(fold!.preservedEntryCount).toBe(3);
-  expect(fold!.summary).toContain("check big");
-  expect(fold!.summary).toContain("previous attempt");
-  expect(fold!.reason).toBe("budgetThreshold");
-  expect(fold!.advisoryBytesAfter).toBeLessThan(fold!.advisoryBytesBefore);
-  expect(fold!.truncated).toBe(false);
+  expect(fold?.preservedEntryCount).toBe(3);
+  expect(fold?.summary).toContain("check big");
+  expect(fold?.summary).toContain("previous attempt");
+  expect(fold?.reason).toBe("budgetThreshold");
+  expect(fold?.advisoryBytesAfter).toBeLessThan(fold?.advisoryBytesBefore);
+  expect(fold?.truncated).toBe(false);
 });
 
 test("within-budget and disabled policies return the context unchanged", () => {
@@ -136,20 +140,20 @@ test("oversized summary text is cut at the byte cap and flagged", () => {
     summaryByteCap: 2_000,
   });
   expect(fold).toBeDefined();
-  expect(fold!.truncated).toBe(true);
-  for (const receipt of folded.previousChecks) {
-    expect(receipt.stdout.length).toBeLessThanOrEqual(100);
+  expect(fold?.truncated).toBe(true);
+  for (const foldedReceipt of folded.previousChecks) {
+    expect(foldedReceipt.stdout.length).toBeLessThanOrEqual(100);
   }
-  expect(toContextSummaryEvent(fold!, { runId: "run", taskId: "t1", attempt: 2 })).toEqual({
+  expect(toContextSummaryEvent(must(fold), { runId: "run", taskId: "t1", attempt: 2 })).toEqual({
     runId: "run",
     taskId: "t1",
     attempt: 2,
     reason: "budgetThreshold",
-    summarizedEntryCount: fold!.summarizedEntryCount,
-    preservedEntryCount: fold!.preservedEntryCount,
-    summary: fold!.summary,
+    summarizedEntryCount: fold?.summarizedEntryCount,
+    preservedEntryCount: fold?.preservedEntryCount,
+    summary: fold?.summary,
     truncated: true,
-    occurredAt: fold!.occurredAt,
+    occurredAt: fold?.occurredAt,
   });
 });
 

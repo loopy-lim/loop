@@ -93,18 +93,14 @@ impl Scheduler {
                     claimed.push(task);
                     serial_claimed = true;
                 } else {
-                    plan.skipped.push(ClaimSkip::new(
-                        task.id.clone(),
-                        ClaimSkipReason::SerialHeld,
-                    ));
+                    plan.skipped
+                        .push(ClaimSkip::new(task.id.clone(), ClaimSkipReason::SerialHeld));
                 }
                 continue;
             }
             if serial_claimed {
-                plan.skipped.push(ClaimSkip::new(
-                    task.id.clone(),
-                    ClaimSkipReason::SerialHeld,
-                ));
+                plan.skipped
+                    .push(ClaimSkip::new(task.id.clone(), ClaimSkipReason::SerialHeld));
                 continue;
             }
             if task.preferred_compute == ComputeClass::Frontier
@@ -264,12 +260,24 @@ mod tests {
     #[test]
     fn blank_scope_elements_are_inert_and_glob_leading_scopes_stay_conservative() {
         // A blank element asserts nothing, so it cannot prove overlap.
-        assert!(!write_scopes_overlap(&[String::new()], &["src/**".to_string()]));
-        assert!(!write_scopes_overlap(&["src/**".to_string()], &[String::new()]));
+        assert!(!write_scopes_overlap(
+            &[String::new()],
+            &["src/**".to_string()]
+        ));
+        assert!(!write_scopes_overlap(
+            &["src/**".to_string()],
+            &[String::new()]
+        ));
         // A glob-leading element has no provable prefix and stays
         // conservatively exclusive.
-        assert!(write_scopes_overlap(&["**".to_string()], &["src/a.rs".to_string()]));
-        assert!(write_scopes_overlap(&["src/**".to_string()], &["src/a.rs".to_string()]));
+        assert!(write_scopes_overlap(
+            &["**".to_string()],
+            &["src/a.rs".to_string()]
+        ));
+        assert!(write_scopes_overlap(
+            &["src/**".to_string()],
+            &["src/a.rs".to_string()]
+        ));
     }
 
     #[test]

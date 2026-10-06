@@ -11,13 +11,11 @@ fn source_receipt_only_binds_a_check_to_unchanged_source() {
         observed_outside_write_scope: Vec::new(),
     };
     assert!(!receipt.is_stable());
-    assert!(
-        SourceReceipt {
-            after_fingerprint: "before".into(),
-            ..receipt
-        }
-        .is_stable()
-    );
+    assert!(SourceReceipt {
+        after_fingerprint: "before".into(),
+        ..receipt
+    }
+    .is_stable());
 }
 
 #[test]
@@ -31,9 +29,7 @@ fn observed_paths_outside_write_scope_remain_unattributed() {
         ]),
         vec!["docs/other.md", "src2/user.rs"]
     );
-    assert!(
-        !WorkOwnership::new(Vec::<String>::new(), ["src/**"]).write_scope_contains("src2/a.rs")
-    );
+    assert!(!WorkOwnership::new(Vec::<String>::new(), ["src/**"]).write_scope_contains("src2/a.rs"));
 }
 
 #[test]

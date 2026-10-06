@@ -433,10 +433,10 @@ export class Orchestrator {
           // completion gate sees verified evidence instead of a dead-end
           // blocked-goal attention.
           const goalCriteria = snapshot.goalCriteria.map(
-            ({ id, description, taskId, checkIds }) => ({
+            ({ id, description, taskId: criterionTaskId, checkIds }) => ({
               id,
               description,
-              taskId,
+              taskId: criterionTaskId,
               checkIds,
             }),
           );
@@ -649,7 +649,7 @@ function runInput(request: ExistingRunRequest) {
   return { databasePath: request.databasePath, runId: request.runId };
 }
 function delay(milliseconds: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+  return new Promise<void>((fulfil) => setTimeout(fulfil, milliseconds));
 }
 
 async function selectWhileActive<T>(

@@ -18,7 +18,7 @@ export class ModelRegistry {
   forComputeClass(computeClass: ComputeClass): ModelProfile[] {
     return [...this.#models.values()]
       .filter((model) => model.computeClass === computeClass)
-      .sort(
+      .toSorted(
         (left, right) =>
           left.costWeight + left.latency - (right.costWeight + right.latency) ||
           left.id.localeCompare(right.id),

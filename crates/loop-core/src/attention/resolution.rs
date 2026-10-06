@@ -60,13 +60,24 @@ impl CorrectiveTask {
 /// - [`FailureDirective::AddTask`] records the corrective contract, inserts
 ///   the corrective task as a new prerequisite of the failed task, then
 ///   re-dispatches (`TaskCreated` + `TaskDependencyAdded` + `TaskReady`).
-/// - [`FailureDirective::Defer`] parks the task in `Attention` without
-///   re-dispatching; re-dispatch stays an explicit later decision.
+/// - [`FailureDirective::RelaxRouting`] grants one graduated, downgrade-only
+///   relaxation step from the core routing ladder
+///   ([`TaskRouting::relax_step`]), records it as a
+///   [`EventKind::TaskRoutingUpdated`] event, then re-dispatches — the
+///   programmatic recovery for a batch failure whose constraints no eligible
+///   compute candidate satisfies. Each step is durable evidence; when the
+///   ladder is spent the directive is refused and retry/defer/cancel remain.
+/// - [`FailureDirective::Defer`] records a no-escalation decision — no
+///   corrective contract, no routing change — and re-dispatches the parked
+///   task with its existing contract (`TaskState::Ready`). A resolution
+///   must never silently park the run: the deferral stays queryable as the
+///   durable resolution record while the task re-enters the dispatch lane.
 /// - [`FailureDirective::Cancel`] cancels execution.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FailureDirective {
     Retry,
     AddTask(CorrectiveTask),
+    RelaxRouting,
     Defer,
     Cancel,
 }
@@ -79,6 +90,7 @@ pub enum AttentionResolution {
     Rejected(String),
     Retry,
     AddTask(CorrectiveTask),
+    RelaxRouting,
     Defer,
     Cancel,
 }
@@ -91,6 +103,7 @@ impl AttentionResolution {
         match self {
             Self::Retry => Some(FailureDirective::Retry),
             Self::AddTask(corrective) => Some(FailureDirective::AddTask(corrective.clone())),
+            Self::RelaxRouting => Some(FailureDirective::RelaxRouting),
             Self::Defer => Some(FailureDirective::Defer),
             Self::Cancel => Some(FailureDirective::Cancel),
             Self::Answer(_) | Self::Approved | Self::Rejected(_) => None,

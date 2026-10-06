@@ -99,7 +99,7 @@ test("resolvePersona stays silent when personas are not configured at all", () =
 });
 
 test("KIND_DEFAULT_PERSONAS covers every task kind", () => {
-  expect(Object.keys(KIND_DEFAULT_PERSONAS).sort()).toEqual([
+  expect(Object.keys(KIND_DEFAULT_PERSONAS).toSorted()).toEqual([
     "decision",
     "implementation",
     "integration",

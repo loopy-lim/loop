@@ -9,7 +9,7 @@ use super::{
 use loop_core::attention::{Attention, AttentionKind};
 use loop_core::event::{Event, EventKind};
 use loop_core::graph::TaskGraph;
-use loop_core::policy::{ComputeClass, FailureClass, FailurePolicy};
+use loop_core::policy::{ComputeClass, ContextBudgetPolicy, FailureClass, FailurePolicy};
 use loop_core::run::WorkerState;
 use loop_core::scheduler::{Capacity, ClaimDecision, ClaimOutcome, DispatchGate, Scheduler};
 use loop_core::task::{
@@ -244,7 +244,10 @@ pub fn add_task(input: AddTaskInput) -> Result<OperationOutput> {
         _ => bridge_error("add_task_failed", error),
     })?;
     notify_run_changed(&input.run_id, sequence);
-    Ok(OperationOutput { accepted: true })
+    Ok(OperationOutput {
+        accepted: true,
+        ..OperationOutput::default()
+    })
 }
 
 #[command]
@@ -266,7 +269,10 @@ pub fn update_task(input: UpdateTaskInput) -> Result<OperationOutput> {
         .ok_or_else(|| bridge_error("task_not_found", &task_id))?
         .state;
     if current == TaskState::Ready {
-        return Ok(OperationOutput { accepted: true });
+        return Ok(OperationOutput {
+            accepted: true,
+            ..OperationOutput::default()
+        });
     }
     if matches!(
         current,
@@ -283,7 +289,10 @@ pub fn update_task(input: UpdateTaskInput) -> Result<OperationOutput> {
     }
     let event = Event::new(&input.run_id, EventKind::TaskReady(task_id));
     append_and_notify(&mut store, &event, "update_task_failed")?;
-    Ok(OperationOutput { accepted: true })
+    Ok(OperationOutput {
+        accepted: true,
+        ..OperationOutput::default()
+    })
 }
 
 #[command]
@@ -398,9 +407,15 @@ pub fn record_worker_result(input: WorkerResultInput) -> Result<OperationOutput>
             &input.run_id,
             if input.execution_owner.is_some() {
                 // Transport faults (connection errors, socket resets, request
-                // timeouts) take the Interrupted attention/retry path instead
-                // of burning the attempt ladder toward terminal failure.
+                // timeouts) classify as Interrupted, which retries inside the
+                // attempt ladder and only parks in Attention once the ladder
+                // is exhausted. Prompt-budget overflows (inventory R2) are
+                // the mirror case: they reproduce identically on every retry
+                // of the same context, so they classify deterministic-
+                // terminal (InvalidContract) after one attempt instead of as
+                // Environment retry fodder.
                 let failure_class = FailureClass::classify_transport(&failure_summary)
+                    .or_else(|| ContextBudgetPolicy::classify_limit_failure(&failure_summary))
                     .unwrap_or(FailureClass::Environment);
                 EventKind::VerificationClassifiedFailure {
                     task_id,
@@ -430,7 +445,10 @@ pub fn record_worker_result(input: WorkerResultInput) -> Result<OperationOutput>
             input.execution_owner.as_deref(),
         )?;
     }
-    Ok(OperationOutput { accepted: true })
+    Ok(OperationOutput {
+        accepted: true,
+        ..OperationOutput::default()
+    })
 }
 
 #[command]
@@ -509,7 +527,10 @@ pub fn record_verification(input: VerificationInput) -> Result<OperationOutput> 
             execution_owner.as_deref(),
         )?;
     }
-    Ok(OperationOutput { accepted: true })
+    Ok(OperationOutput {
+        accepted: true,
+        ..OperationOutput::default()
+    })
 }
 
 #[command]
@@ -772,5 +793,112 @@ mod claim_relay_tests {
             routing: None,
             max_attempts: 3,
         }
+    }
+}
+
+#[cfg(test)]
+mod prompt_limit_classification_tests {
+    //! Inventory R2 (docs/defects/limits-inventory.md): a prompt-budget
+    //! failure reproduces identically on every retry of the same context, so
+    //! it must classify as InvalidContract (deterministic, terminal) instead
+    //! of Environment (which burned the whole attempt ladder on a failure no
+    //! retry could repair).
+
+    use super::*;
+    use crate::commands::{CreateRunInput, create_run};
+    use crate::execution::{ExecutionLeaseInput, claim_execution};
+
+    fn task_spec(id: &str) -> TaskSpecInput {
+        TaskSpecInput {
+            id: id.into(),
+            title: id.into(),
+            kind: TaskKind::Implementation,
+            dependencies: vec![],
+            read_scope: vec![],
+            write_scope: vec!["src/**".into()],
+            requirements: vec![format!("requirement-{id}")],
+            persona: None,
+            completion_checks: vec![CompletionCheckInput {
+                id: "tests".into(),
+                command: "true".into(),
+                args: vec![],
+                working_directory: None,
+                timeout_ms: 1_000,
+            }],
+            preferred_compute: ComputeClass::Fast,
+            minimum_compute: ComputeClass::Tiny,
+            maximum_compute: ComputeClass::Strong,
+            routing: None,
+            max_attempts: 3,
+        }
+    }
+
+    #[test]
+    fn prompt_limit_failure_skips_the_retry_ladder_as_invalid_contract() {
+        let dir = tempfile::tempdir().unwrap();
+        let database_path = dir.path().join("loop.db").display().to_string();
+        let run_id = "prompt-limit";
+        create_run(CreateRunInput {
+            database_path: database_path.clone(),
+            run_id: run_id.into(),
+        })
+        .unwrap();
+        submit_plan(SubmitPlanInput {
+            database_path: database_path.clone(),
+            run_id: run_id.into(),
+            tasks: vec![task_spec("t1")],
+        })
+        .unwrap();
+        claim_execution(ExecutionLeaseInput {
+            database_path: database_path.clone(),
+            run_id: run_id.into(),
+            owner: "owner".into(),
+            now_ms: 0,
+            ttl_ms: 60_000,
+        })
+        .unwrap();
+        claim_runnable_tasks(ClaimRunnableTasksInput {
+            database_path: database_path.clone(),
+            run_id: run_id.into(),
+            running_task_ids: vec![],
+            max_workers: 1,
+            max_frontier_workers: 1,
+            execution_owner: Some("owner".into()),
+        })
+        .unwrap();
+        record_worker_started(WorkerInput {
+            database_path: database_path.clone(),
+            run_id: run_id.into(),
+            task_id: "t1".into(),
+            worker_id: "w-t1".into(),
+            execution_owner: Some("owner".into()),
+            state: None,
+        })
+        .unwrap();
+
+        // The exact reason text the provider's prompt assembler throws with.
+        record_worker_result(WorkerResultInput {
+            database_path: database_path.clone(),
+            run_id: run_id.into(),
+            task_id: "t1".into(),
+            worker_id: "w-t1".into(),
+            success: false,
+            summary: "Worker prompt essential contract field exceeds 6000 characters; split the task or shorten guidance before dispatch".into(),
+            execution_owner: Some("owner".into()),
+            state: None,
+        })
+        .unwrap();
+
+        let projection = store(&database_path)
+            .unwrap()
+            .projection(run_id)
+            .unwrap();
+        let task = projection.tasks.get(&TaskId::from("t1")).unwrap();
+        assert_eq!(
+            task.state,
+            TaskState::Failed,
+            "a deterministic prompt-limit failure must not re-enter the Ready retry ladder"
+        );
+        assert_eq!(task.attempt, 1, "exactly one attempt is consumed");
     }
 }

@@ -51,8 +51,21 @@ use crate::sandbox::SandboxCapabilityReport;
 use crate::usage::UsageRecordEvent;
 
 #[bridge_type]
+#[derive(Default)]
 pub struct OperationOutput {
     pub accepted: bool,
+    /// Directive evidence for attention resolutions: what the resolution
+    /// changed and where. Absent for plain accept/no-op operations.
+    #[serde(default)]
+    pub summary: Option<String>,
+    /// Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence
+    /// mirror of the `TaskRoutingUpdated` events committed by the resolve.
+    #[serde(default)]
+    pub routing_relaxations: Vec<String>,
+    /// Task that received a `TaskReady` re-dispatch in this resolution, if
+    /// any (already-queued work needs no re-dispatch).
+    #[serde(default)]
+    pub redispatched_task_id: Option<String>,
 }
 
 pub(crate) fn bridge_error(code: &'static str, error: impl std::fmt::Display) -> RustraError {
@@ -66,7 +79,10 @@ pub(crate) fn store(path: &str) -> Result<SqliteStore> {
 pub(crate) fn append(path: &str, event: Event) -> Result<OperationOutput> {
     let mut store = store(path)?;
     append_and_notify(&mut store, &event, "event_append_failed")?;
-    Ok(OperationOutput { accepted: true })
+    Ok(OperationOutput {
+        accepted: true,
+        ..OperationOutput::default()
+    })
 }
 
 pub(crate) fn append_owned(
@@ -76,7 +92,10 @@ pub(crate) fn append_owned(
 ) -> Result<OperationOutput> {
     let mut store = store(path)?;
     append_and_notify_owned(&mut store, &event, owner, "event_append_failed")?;
-    Ok(OperationOutput { accepted: true })
+    Ok(OperationOutput {
+        accepted: true,
+        ..OperationOutput::default()
+    })
 }
 
 fn append_and_notify(

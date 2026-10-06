@@ -91,7 +91,10 @@ mod tests {
             (ContextSummaryReason::BudgetThreshold, "budgetThreshold"),
             (ContextSummaryReason::Explicit, "explicit"),
         ] {
-            assert_eq!(serde_json::to_string(&variant).unwrap(), format!(r#""{wire}""#));
+            assert_eq!(
+                serde_json::to_string(&variant).unwrap(),
+                format!(r#""{wire}""#)
+            );
         }
     }
 
@@ -102,10 +105,7 @@ mod tests {
     fn package_schema_anchors_context_summary_event() {
         let schema = serde_json::to_string(&crate::loop_package().live_schema()).unwrap();
         assert!(schema.contains(r#""name":"loop.context_summary""#));
-        for definition in [
-            "ContextSummaryEvent",
-            "ContextSummaryReason",
-        ] {
+        for definition in ["ContextSummaryEvent", "ContextSummaryReason"] {
             assert!(
                 schema.contains(&format!(r#""{definition}""#)),
                 "missing definition {definition}"

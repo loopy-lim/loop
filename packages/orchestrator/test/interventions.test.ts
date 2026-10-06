@@ -7,6 +7,10 @@ import type { TaskSpecInput } from "@loop/protocol";
 import { FakeProvider, ProviderRegistry, type StartWorkerInput } from "@loop/providers";
 import { Orchestrator } from "../src/coordinator";
 import { CompletionVerifier } from "../src/completion";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 beforeAll(() => protocol.rustra.ready());
 const verifier = new CompletionVerifier({
@@ -64,7 +68,7 @@ test("quota failure releases the first worker and retries on another provider", 
     async release() {
       const snapshot = await protocol.getSnapshot(input);
       expect(snapshot.activeWorkers).toHaveLength(1);
-      owners.push(snapshot.activeWorkers[0]!.id);
+      owners.push(snapshot.activeWorkers[0]?.id);
       lifecycle.push("released");
     }
   }
@@ -73,7 +77,7 @@ test("quota failure releases the first worker and retries on another provider", 
       lifecycle.push("fallback");
       const snapshot = await protocol.getSnapshot(input);
       expect(snapshot.activeWorkers).toHaveLength(1);
-      owners.push(snapshot.activeWorkers[0]!.id);
+      owners.push(snapshot.activeWorkers[0]?.id);
       expect(startInput.attempt).toBe(0);
       return super.start(startInput);
     }
@@ -260,7 +264,7 @@ test("cancel during verification waits for its process to stop", async () => {
     run: async (_command, _args, options) => {
       verifying = true;
       await new Promise<void>((resolve) =>
-        options.signal!.addEventListener(
+        options.signal?.addEventListener(
           "abort",
           () =>
             setTimeout(() => {
@@ -501,7 +505,7 @@ test("a stale dispatcher cannot add attention to the replacement owner's run", a
     }
   });
   const previous = await protocol.getSnapshot(input);
-  await protocol.releaseExecution({ ...input, owner: previous.executionOwner! });
+  await protocol.releaseExecution({ ...input, owner: must(previous.executionOwner) });
   await protocol.claimExecution({ ...input, owner: "replacement", nowMs: Date.now(), ttlMs: 5000 });
   await pending;
   const current = await protocol.getSnapshot(input);

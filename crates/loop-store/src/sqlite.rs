@@ -529,7 +529,11 @@ fn apply_indexes(transaction: &Transaction<'_>, event: &Event) -> Result<(), Sto
         | EventKind::GuidanceDelivered { .. }
         | EventKind::TaskOutputRecorded { .. }
         | EventKind::CheckReceiptsRecorded { .. }
-        | EventKind::TaskActivityRecorded { .. } => {}
+        | EventKind::TaskActivityRecorded { .. }
+        // The routing change is already applied to the replayed projection,
+        // and sync_projection_indexes rewrites the task row (data_json) from
+        // it in the same transaction.
+        | EventKind::TaskRoutingUpdated { .. } => {}
         EventKind::RunCreated => {
             transaction.execute(
                 "INSERT INTO runs (id, state) VALUES (?1, 'active')",
@@ -618,11 +622,7 @@ fn apply_indexes(transaction: &Transaction<'_>, event: &Event) -> Result<(), Sto
             update_latest_attempt_state(transaction, &event.run_id, task_id.as_str(), "failed")?;
         }
         EventKind::AttentionCreated(attention) => {
-            let data = serde_json::to_string(attention)?;
-            transaction.execute(
-                "INSERT INTO attention (id, run_id, kind, state, data_json) VALUES (?1, ?2, ?3, 'open', ?4)",
-                params![attention.id, event.run_id, attention_kind_storage_word(attention.kind), data],
-            )?;
+            insert_attention(transaction, &event.run_id, attention)?;
             update_run_state(transaction, &event.run_id, "attention")?;
         }
         EventKind::AttentionResolved { attention_id, .. } => {
@@ -715,8 +715,18 @@ fn insert_attention(
     run_id: &str,
     attention: &loop_core::attention::Attention,
 ) -> Result<(), StoreError> {
+    // Attention ids are deterministic per (run, attempt/recovery) — a retry
+    // of a failed task re-emits the same id. The core reducer replaces the
+    // projection entry on re-creation (HashMap::insert), so the durable index
+    // must replace too: reopen the row with the latest payload instead of
+    // violating the (run_id, id) primary key.
     transaction.execute(
-        "INSERT INTO attention (id, run_id, kind, state, data_json) VALUES (?1, ?2, ?3, 'open', ?4)",
+        "INSERT INTO attention (id, run_id, kind, state, data_json) VALUES (?1, ?2, ?3, 'open', ?4)
+         ON CONFLICT(run_id, id) DO UPDATE SET
+             kind = excluded.kind,
+             state = 'open',
+             data_json = excluded.data_json,
+             updated_at = unixepoch()",
         params![
             attention.id,
             run_id,

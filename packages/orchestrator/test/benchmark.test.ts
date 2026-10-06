@@ -14,6 +14,10 @@ import {
   type BenchmarkConfig,
 } from "../src";
 import { ConfigError } from "../src/config";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 beforeAll(async () => {
   await protocol.rustra.ready();
@@ -39,12 +43,12 @@ test("every profile DAG keeps the same gate shape with a workflow-specific front
 
   for (const scenario of [plan, spike, tdd]) {
     expect(scenario.tasks).toHaveLength(3);
-    expect(scenario.tasks[0]!.kind).toBe("research");
-    expect(scenario.tasks[1]!.kind).toBe("implementation");
-    expect(scenario.tasks[1]!.dependencies).toEqual([scenario.tasks[0]!.id]);
-    expect(scenario.tasks[2]!.kind).toBe("verification");
-    expect(scenario.tasks[2]!.dependencies).toEqual([scenario.tasks[1]!.id]);
-    expect(scenario.tasks[2]!.writeScope).toEqual([]);
+    expect(scenario.tasks[0]?.kind).toBe("research");
+    expect(scenario.tasks[1]?.kind).toBe("implementation");
+    expect(scenario.tasks[1]?.dependencies).toEqual([scenario.tasks[0]?.id]);
+    expect(scenario.tasks[2]?.kind).toBe("verification");
+    expect(scenario.tasks[2]?.dependencies).toEqual([scenario.tasks[1]?.id]);
+    expect(scenario.tasks[2]?.writeScope).toEqual([]);
     for (const task of scenario.tasks) {
       expect(task.completionChecks).toHaveLength(1);
       expect(task.maxAttempts).toBe(3);
@@ -91,9 +95,9 @@ test("benchmark runs every profile and iteration and ranks all traces determinis
   const totals = report.comparison.rankings.map(
     (ranking) => ranking.score.reliability + ranking.score.autonomy + ranking.score.first_pass,
   );
-  expect([...totals].sort((a, b) => b - a)).toEqual(totals);
+  expect(totals.toSorted((a, b) => b - a)).toEqual(totals);
   const labels = report.comparison.rankings.map((ranking) => ranking.label);
-  expect([...labels].sort()).toEqual(labels);
+  expect(labels.toSorted()).toEqual(labels);
 });
 
 test("scripted worker failures surface in the trace and demote the ranking", async () => {
@@ -128,7 +132,7 @@ test("scripted worker failures surface in the trace and demote the ranking", asy
     maxWorkers: 1,
   });
 
-  const flakyRun = failed.runs[0]!;
+  const flakyRun = must(failed.runs[0]);
   expect(flakyRun.status).toBe("completed");
   expect(flakyRun.summary.worker_starts).toBe(4);
   expect(flakyRun.summary.verification_failures).toBe(1);
@@ -137,11 +141,21 @@ test("scripted worker failures surface in the trace and demote the ranking", asy
 
   const combined = await protocol.compareTraces({
     databasePath: shared,
-    runIds: [passed.runs[0]!.runId, flakyRun.runId],
+    runIds: [passed.runs[0]?.runId, flakyRun.runId],
   });
-  expect(combined.comparison.rankings[0]!.label).toBe(passed.runs[0]!.runId);
-  expect(combined.comparison.rankings[1]!.label).toBe(flakyRun.runId);
+  expect(combined.comparison.rankings[0]?.label).toBe(passed.runs[0]?.runId);
+  expect(combined.comparison.rankings[1]?.label).toBe(flakyRun.runId);
 });
+
+/** Parse helper that returns the thrown error (or undefined when valid). */
+const invalid = (text: string): unknown => {
+  try {
+    parseBenchmarkConfig(text);
+    return undefined;
+  } catch (error) {
+    return error;
+  }
+};
 
 test("benchmark config parsing validates names, profiles, and iterations", () => {
   expect(
@@ -165,24 +179,15 @@ profiles = ["plan-first"]
 `).iterations,
   ).toBe(1);
 
-  const invalid = (text: string) => {
-    try {
-      parseBenchmarkConfig(text);
-      return undefined;
-    } catch (error) {
-      return error;
-    }
-  };
-
   const malformed = invalid(`profiles = ["plan-first"`) as ConfigError | undefined;
   expect(malformed).toBeInstanceOf(ConfigError);
-  expect(malformed!.code).toBe("benchmark.parse_failed");
+  expect(malformed?.code).toBe("benchmark.parse_failed");
 
   const missingName = invalid(`intent = "y"\nprofiles = ["plan-first"]\n`) as
     | ConfigError
     | undefined;
   expect(missingName).toBeInstanceOf(ConfigError);
-  expect(missingName!.code).toBe("benchmark.invalid");
+  expect(missingName?.code).toBe("benchmark.invalid");
 
   expect((invalid(`name = "x"\nintent = "y"\nprofiles = []\n`) as ConfigError).code).toBe(
     "benchmark.invalid",

@@ -71,7 +71,7 @@ export async function captureSourceState(
         }),
     )
     .filter((path) => !scopes || scopes.length === 0 || scopeContainsPath(scopes, path))
-    .sort();
+    .toSorted();
   const files = new Map<string, string>();
   const total = createHash("sha256");
   for (const path of paths) {
@@ -104,7 +104,7 @@ export function changedSourcePaths(before: SourceState, after: SourceState): str
     throw new Error("source snapshots belong to different repositories");
   return [...new Set([...before.files.keys(), ...after.files.keys()])]
     .filter((path) => before.files.get(path) !== after.files.get(path))
-    .sort();
+    .toSorted();
 }
 
 export function scopeContainsPath(scopes: readonly string[], path: string): boolean {

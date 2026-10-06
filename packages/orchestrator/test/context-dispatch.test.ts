@@ -9,6 +9,10 @@ import { FakeProvider, type StartWorkerInput } from "@loop/providers";
 import { CompletionVerifier } from "../src/completion";
 import { executeTask } from "../src/task-execution";
 import { CODE_MAP_ENTRY_ID } from "../src/code-map";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 const verifier = new CompletionVerifier({
   run: async () => ({ exitCode: 0, stdout: "ok", stderr: "", timedOut: false }),
@@ -119,7 +123,7 @@ test("folding fires on oversized advisory context and preserved sets stay verbat
     contextPolicy: { advisoryByteBudget: 1_000, summaryEntryBytes: 400, summaryByteCap: 4_000 },
   });
 
-  const sent = startInputs[0]!.context!;
+  const sent = must(startInputs[0]?.context);
   // Preserved invariant sets pass through byte-identical.
   expect(sent.task.requirements).toEqual(context.task.requirements);
   expect(sent.guidance).toEqual(context.guidance);
@@ -128,9 +132,9 @@ test("folding fires on oversized advisory context and preserved sets stay verbat
     context.previousChecks[1],
   );
   // Advisory retry/activity history is folded.
-  const big = sent.previousChecks.find((check) => check.id === "big")!;
+  const big = must(sent.previousChecks.find((check) => check.id === "big"));
   expect(big.stdout.length).toBeLessThanOrEqual(400);
-  expect(sent.resultSummary!.length).toBeLessThanOrEqual(400);
+  expect(sent.resultSummary?.length).toBeLessThanOrEqual(400);
   // The fold is durably visible in the activity record.
   expect(activities.some((line) => line.startsWith("[context] folded 2 advisory entries"))).toBe(
     true,
@@ -143,7 +147,7 @@ test("disabled policy and small contexts dispatch the context unchanged", async 
   const { startInputs, activities } = await dispatch(provider, context, {
     contextPolicy: { advisoryByteBudget: 0, summaryEntryBytes: 400, summaryByteCap: 4_000 },
   });
-  expect(startInputs[0]!.context).toBe(context);
+  expect(startInputs[0]?.context).toBe(context);
   expect(activities.filter((line) => line.startsWith("[context]"))).toEqual([]);
 });
 
@@ -154,7 +158,7 @@ test("code map provider injects one bounded advisory entry into the start contex
     contextPolicy: { advisoryByteBudget: 0, summaryEntryBytes: 400, summaryByteCap: 4_000 },
     codeMap: () => "src/a.ts · Alpha",
   });
-  const sent = startInputs[0]!.context!;
+  const sent = must(startInputs[0]?.context);
   const entry = sent.dependencyResults.find((result) => result.taskId === CODE_MAP_ENTRY_ID);
   expect(entry?.summary).toBe("src/a.ts · Alpha");
   // Without a provider nothing is injected.
@@ -162,5 +166,29 @@ test("code map provider injects one bounded advisory entry into the start contex
   const plain = await dispatch(bare, context, {
     contextPolicy: { advisoryByteBudget: 0, summaryEntryBytes: 400, summaryByteCap: 4_000 },
   });
-  expect(plain.startInputs[0]!.context!.dependencyResults).toEqual(context.dependencyResults);
+  expect(plain.startInputs[0]?.context?.dependencyResults).toEqual(context.dependencyResults);
+});
+
+test("bridge-reported context reduction surfaces as one bounded activity line", async () => {
+  const provider = new CapturingProvider("fake", ["fast"]);
+  const context: TaskContextOutput = {
+    ...oversizedContext("/tmp/loop-source"),
+    contextReduction: {
+      fieldClamps: 1,
+      bodyCompactions: 2,
+      droppedChars: 24_100,
+      retryCompaction: true,
+      totalBudgetPasses: 0,
+      estimatedEssentialChars: 9_400,
+    },
+  };
+  const { activities } = await dispatch(provider, context, {
+    contextPolicy: { advisoryByteBudget: 0, summaryEntryBytes: 400, summaryByteCap: 4_000 },
+  });
+  const lines = activities.filter((line) => line.startsWith("[context] bounded dispatch"));
+  expect(lines).toHaveLength(1);
+  expect(lines[0]).toContain("1 field clamp(s)");
+  expect(lines[0]).toContain("24100 chars dropped");
+  expect(lines[0]).toContain("retry continues on compacted context");
+  expect(lines[0]?.length).toBeLessThanOrEqual(300);
 });

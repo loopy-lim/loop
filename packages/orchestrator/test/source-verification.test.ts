@@ -8,6 +8,10 @@ import * as protocol from "@loop/protocol";
 import { FakeProvider, ProviderRegistry } from "@loop/providers";
 import { CompletionVerifier } from "../src/completion";
 import { Orchestrator } from "../src/coordinator";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 beforeAll(() => protocol.rustra.ready());
 
@@ -107,5 +111,5 @@ test("large check output is reachable from the durable receipt after successful 
   const context = await protocol.getTaskContext({ ...input, taskId: "research" });
   const path = context.previousChecks[0]?.outputArtifact;
   expect(path).toContain("run.db.artifacts");
-  expect(readFileSync(path!, "utf8")).not.toContain("private-value");
+  expect(readFileSync(must(path), "utf8")).not.toContain("private-value");
 });

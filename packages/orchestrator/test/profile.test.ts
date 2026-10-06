@@ -165,25 +165,31 @@ command = "test-agent"
   }
 });
 
+/** Mixed-mode fixture task: same contract, different compute lane. */
+const task = (id: string, computeClass: ComputeClass): TaskSpecInput => ({
+  id,
+  title: id,
+  kind: "research",
+  dependencies: [],
+  readScope: [],
+  writeScope: [],
+  requirements: [],
+  completionChecks: [
+    { id: "check", command: "true", args: [], workingDirectory: null, timeoutMs: 1000 },
+  ],
+  preferredCompute: computeClass,
+  minimumCompute: computeClass,
+  maximumCompute: computeClass,
+  maxAttempts: 2,
+});
+
+/** Sorted event-shape keys for one lane's first matching event (byte-equality gate). */
+const keysOf = (taskId: string, events: Array<{ type: string; data: Record<string, unknown> }>) =>
+  Object.keys(events.find((event) => event.data.task_id === taskId) ?? {}).toSorted();
+
 test("mixed-mode runs share one event-log contract (WorkerStarted/WorkerResult/GuidanceDelivered)", async () => {
   const directory = mkdtempSync(join(tmpdir(), "loop-profile-mixed-"));
   const input = { databasePath: join(directory, "run.db"), runId: "mixed" };
-  const task = (id: string, computeClass: ComputeClass): TaskSpecInput => ({
-    id,
-    title: id,
-    kind: "research",
-    dependencies: [],
-    readScope: [],
-    writeScope: [],
-    requirements: [],
-    completionChecks: [
-      { id: "check", command: "true", args: [], workingDirectory: null, timeoutMs: 1000 },
-    ],
-    preferredCompute: computeClass,
-    minimumCompute: computeClass,
-    maximumCompute: computeClass,
-    maxAttempts: 2,
-  });
   const readEvents = async () => {
     const events = await protocol.subscribeEvents({ ...input, afterSequence: 0, limit: 1000 });
     return events.map((event) => {
@@ -223,13 +229,11 @@ test("mixed-mode runs share one event-log contract (WorkerStarted/WorkerResult/G
 
   const started = (await readEvents()).filter((event) => event.type === "worker_started");
   const finished = (await readEvents()).filter((event) => event.type === "worker_finished");
-  expect(started.map((event) => event.data.task_id).sort()).toEqual(["loop-task", "pi-task"]);
-  expect(finished.map((event) => event.data.task_id).sort()).toEqual(["loop-task", "pi-task"]);
+  expect(started.map((event) => event.data.task_id).toSorted()).toEqual(["loop-task", "pi-task"]);
+  expect(finished.map((event) => event.data.task_id).toSorted()).toEqual(["loop-task", "pi-task"]);
 
   // The contract is the event shape, not the adapter: pi and turnloop
   // workers produce byte-identical payload vocabularies.
-  const keysOf = (taskId: string, events: Array<{ type: string; data: Record<string, unknown> }>) =>
-    Object.keys(events.find((event) => event.data.task_id === taskId) ?? {}).sort();
   expect(keysOf("loop-task", started)).toEqual(keysOf("pi-task", started));
   expect(keysOf("loop-task", finished)).toEqual(keysOf("pi-task", finished));
 
@@ -242,7 +246,7 @@ test("mixed-mode runs share one event-log contract (WorkerStarted/WorkerResult/G
       if (
         delivered
           .map((event) => event.data.task_id)
-          .sort()
+          .toSorted()
           .join(",") === "loop-task,pi-task"
       ) {
         expect(keysOf("loop-task", delivered)).toEqual(keysOf("pi-task", delivered));

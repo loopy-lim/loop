@@ -33,6 +33,7 @@ impl TraceSummary {
             summary.total_events += 1;
             match &event.kind {
                 EventKind::TaskCreated(_) => summary.tasks_created += 1,
+                EventKind::TaskRoutingUpdated { .. } => {}
                 EventKind::TaskCompleted(_) => summary.tasks_completed += 1,
                 EventKind::WorkerStarted { .. } => summary.worker_starts += 1,
                 EventKind::WorkerFinished { .. } => summary.worker_finishes += 1,

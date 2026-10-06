@@ -76,7 +76,7 @@ test("owner startup failure raises an immediate durable failure attention and st
   expect(spawn?.summary).toContain("lease store unavailable");
   // Run-level: no task is blamed for the owner's own death.
   expect(spawn?.taskId ?? null).toBeNull();
-  expect(snapshot.openAttentionIds).toContain(spawn!.id);
+  expect(snapshot.openAttentionIds).toContain(spawn?.id);
 }, 30_000);
 
 test("a failed spawn on a missing run cannot record and must not mask the error", async () => {

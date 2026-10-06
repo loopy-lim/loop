@@ -15,6 +15,10 @@ import {
 import { Orchestrator } from "../src/coordinator";
 import { CompletionVerifier } from "../src/completion";
 import { GuidanceMailbox, guidanceBatchSize, resolveMailboxOptions } from "../src/mailbox";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 beforeAll(() => protocol.rustra.ready());
 
@@ -149,7 +153,7 @@ test("guidance already covered by the start-context watermark is not re-steered"
   });
   await addGuidance(input, "a", "already in context");
   const sequences = await guidanceSequences(input);
-  const watermark = sequences.get("already in context")!;
+  const watermark = must(sequences.get("already in context"));
   const steered: string[] = [];
   const mailbox = new GuidanceMailbox(protocol, input.databasePath, input.runId, {
     coalescingWindowMs: 40,

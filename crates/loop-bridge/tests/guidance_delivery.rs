@@ -136,9 +136,16 @@ fn out_of_order_and_duplicate_deliveries_are_rejected() {
 
     let duplicate =
         record_guidance_delivered(delivery_input(&database_path, "impl", "worker-1", 9));
-    assert!(duplicate.is_err(), "equal sequence must not pass the watermark");
-    let regression = record_guidance_delivered(delivery_input(&database_path, "impl", "worker-1", 5));
-    assert!(regression.is_err(), "lower sequence must not pass the watermark");
+    assert!(
+        duplicate.is_err(),
+        "equal sequence must not pass the watermark"
+    );
+    let regression =
+        record_guidance_delivered(delivery_input(&database_path, "impl", "worker-1", 5));
+    assert!(
+        regression.is_err(),
+        "lower sequence must not pass the watermark"
+    );
 
     // Both rejections left the watermark unchanged.
     assert_eq!(watermark(&database_path, "impl"), 9);
@@ -153,11 +160,16 @@ fn malformed_delivery_input_is_rejected() {
     let empty_worker = record_guidance_delivered(delivery_input(&database_path, "impl", "  ", 3));
     assert!(empty_worker.is_err(), "worker id is required");
 
-    let non_positive = record_guidance_delivered(delivery_input(&database_path, "impl", "worker-1", 0));
+    let non_positive =
+        record_guidance_delivered(delivery_input(&database_path, "impl", "worker-1", 0));
     assert!(non_positive.is_err(), "through_sequence must be positive");
 
-    let unknown_task =
-        record_guidance_delivered(delivery_input(&database_path, "no-such-task", "worker-1", 3));
+    let unknown_task = record_guidance_delivered(delivery_input(
+        &database_path,
+        "no-such-task",
+        "worker-1",
+        3,
+    ));
     assert!(unknown_task.is_err(), "delivery requires a known task");
 
     assert_eq!(watermark(&database_path, "impl"), 0);
@@ -183,7 +195,9 @@ fn delivery_replay_rebuilds_the_same_watermark() {
         projection.apply(event).unwrap();
     }
     assert_eq!(
-        projection.guidance_delivered_through.get(&TaskId::from("impl")),
+        projection
+            .guidance_delivered_through
+            .get(&TaskId::from("impl")),
         Some(&11)
     );
     assert_eq!(watermark(&database_path, "impl"), 11);

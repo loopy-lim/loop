@@ -106,7 +106,10 @@ mod tests {
             (UsageBasis::Observed, "observed"),
             (UsageBasis::Estimated, "estimated"),
         ] {
-            assert_eq!(serde_json::to_string(&variant).unwrap(), format!(r#""{wire}""#));
+            assert_eq!(
+                serde_json::to_string(&variant).unwrap(),
+                format!(r#""{wire}""#)
+            );
         }
     }
 

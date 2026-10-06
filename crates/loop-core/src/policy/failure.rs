@@ -240,18 +240,18 @@ impl FailurePolicy {
         // catch-all at runtime.
         for budget in &self.retry_budgets {
             let reason = match budget.failure_class {
-                FailureClass::Assertion => {
-                    Some("retry budgets cannot target assertion failures; the first \
-                          deterministic assertion failure is terminal")
-                }
-                FailureClass::InvalidContract => {
-                    Some("retry budgets cannot target invalid-contract failures; they are \
-                          deterministic and terminal on first occurrence")
-                }
-                FailureClass::ProcessStart => {
-                    Some("retry budgets cannot target process-start failures; they are \
-                          deterministic and terminal on first occurrence")
-                }
+                FailureClass::Assertion => Some(
+                    "retry budgets cannot target assertion failures; the first \
+                          deterministic assertion failure is terminal",
+                ),
+                FailureClass::InvalidContract => Some(
+                    "retry budgets cannot target invalid-contract failures; they are \
+                          deterministic and terminal on first occurrence",
+                ),
+                FailureClass::ProcessStart => Some(
+                    "retry budgets cannot target process-start failures; they are \
+                          deterministic and terminal on first occurrence",
+                ),
                 FailureClass::Timeout | FailureClass::Interrupted | FailureClass::Environment => {
                     None
                 }

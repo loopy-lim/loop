@@ -303,7 +303,7 @@ test("guidance on a task reaches the live workers of its descendant sub-tasks", 
   // Each live delivery watermarks its own receiving task.
   await until(async () => (await readEvents(input, "guidance_delivered")).length === 2);
   const delivered = await readEvents(input, "guidance_delivered");
-  expect(delivered.map((event) => event.data.task_id).sort()).toEqual(["child", "parent"]);
+  expect(delivered.map((event) => event.data.task_id).toSorted()).toEqual(["child", "parent"]);
   await mailbox.stop();
 });
 
@@ -466,6 +466,10 @@ test("a delivered-then-recorded guidance does not repeat in a retry attempt's st
   expect(provider.started[1]?.context?.guidance ?? []).toEqual([]);
 });
 
+/** User-role messages whose text carries the needle (steer assertions). */
+const steerTexts = (messages: ModelTurnRequest["messages"], needle: string) =>
+  messages.filter((entry) => entry.role === "user" && entry.text.includes(needle));
+
 test("end-to-end: mid-run guidance reaches a turn-loop worker at the very next fake-model turn and is recorded", async () => {
   const { directory, input } = workspace("turnloop-e2e");
   let parked: string | undefined;
@@ -524,9 +528,6 @@ test("end-to-end: mid-run guidance reaches a turn-loop worker at the very next f
     tasks: [fixture("a")],
     workingDirectory: directory,
   });
-  const steerTexts = (messages: ModelTurnRequest["messages"], needle: string) =>
-    messages.filter((entry) => entry.role === "user" && entry.text.includes(needle));
-
   await until(() => parked === "gate-1"); // turn 1 served; its tool parks the loop mid-run
   await addGuidance(input, "a", "steer: follow the recorded evidence");
   const firstSequence = await guidanceSequenceOf(input, "steer: follow the recorded evidence");

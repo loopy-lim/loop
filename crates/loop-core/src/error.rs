@@ -15,4 +15,3 @@ pub enum CoreError {
     #[error("cleanup refused: {0}")]
     CleanupRefused(#[from] crate::policy::CleanupRefusal),
 }
-

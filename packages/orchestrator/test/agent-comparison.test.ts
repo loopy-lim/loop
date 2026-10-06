@@ -84,7 +84,7 @@ test("agent comparison runs each provider against an isolated copy of one clean 
   expect(
     report.rows.every((row) => row.status === "completed" && row.scopeViolations.length === 0),
   ).toBe(true);
-  expect(report.rows[0]!.workspace).not.toBe(report.rows[1]!.workspace);
-  expect(report.rows[0]!.sourceCommit).toBe(report.rows[1]!.sourceCommit);
+  expect(report.rows[0]?.workspace).not.toBe(report.rows[1]?.workspace);
+  expect(report.rows[0]?.sourceCommit).toBe(report.rows[1]?.sourceCommit);
   expect(report.rows.every((row) => row.elapsedMs >= 0)).toBe(true);
 });

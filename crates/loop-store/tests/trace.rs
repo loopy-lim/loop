@@ -80,7 +80,10 @@ fn progress_and_attention_timestamps_survive_reopen() {
     }
     let connection = rusqlite::Connection::open(&path).unwrap();
     connection
-        .execute("UPDATE events SET created_at = 1000 + seq, created_at_ms = NULL", [])
+        .execute(
+            "UPDATE events SET created_at = 1000 + seq, created_at_ms = NULL",
+            [],
+        )
         .unwrap();
     drop(connection);
     let store = SqliteStore::open(&path).unwrap();
@@ -109,14 +112,24 @@ fn progress_milliseconds_persist_and_determine_freshness() {
         append_plan_run(&mut store);
     }
     let connection = rusqlite::Connection::open(&path).unwrap();
-    connection.execute("UPDATE events SET created_at = 1000, created_at_ms = NULL", []).unwrap();
-    connection.execute(
-        "UPDATE events SET created_at_ms = 1000750 WHERE seq = 14",
-        [],
-    ).unwrap();
+    connection
+        .execute(
+            "UPDATE events SET created_at = 1000, created_at_ms = NULL",
+            [],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE events SET created_at_ms = 1000750 WHERE seq = 14",
+            [],
+        )
+        .unwrap();
     drop(connection);
     let store = SqliteStore::open(&path).unwrap();
-    let progress = store.last_progress_ms("bench-plan-1", "impl").unwrap().unwrap();
+    let progress = store
+        .last_progress_ms("bench-plan-1", "impl")
+        .unwrap()
+        .unwrap();
     assert_eq!(progress, 1_000_750);
     assert_eq!(1_001_000_i64.saturating_sub(progress), 250);
 }

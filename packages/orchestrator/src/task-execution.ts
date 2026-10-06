@@ -230,6 +230,21 @@ async function run(
         activity: `[context] folded ${fold.summarizedEntryCount} advisory entries (${fold.advisoryBytesBefore} → ${fold.advisoryBytesAfter} bytes); preserved ${fold.preservedEntryCount} entries${fold.truncated ? "; summary truncated" : ""}`,
       });
     }
+    // Limit guards (docs/defects/limits-inventory.md R1·R2·R4): the bridge
+    // already clamped/compacted the assembled context under the prompt
+    // bounds; surface that record as one bounded activity line. The adapter
+    // only renders it — the policy and the reduction live in Rust.
+    const reduction = summarized.context.contextReduction;
+    if (reduction) {
+      await control.recordActivity({
+        ...input,
+        taskId,
+        activity: redact(
+          `[context] bounded dispatch: ${reduction.fieldClamps} field clamp(s), ${reduction.bodyCompactions} body compaction(s), ${reduction.droppedChars} chars dropped; full text in the run store${reduction.retryCompaction ? "; retry continues on compacted context" : ""} (essential estimate ${reduction.estimatedEssentialChars} chars)`,
+          300,
+        ),
+      });
+    }
     const startContext = withCodeMapEntry(
       summarized.context,
       codeMap?.({ task: context.task, workingDirectory: context.workingDirectory }),

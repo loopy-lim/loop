@@ -1,9 +1,9 @@
 use loop_bridge::{
     AddTaskInput, ClaimRunnableTasksInput, CompletionCheckInput, CreateRunInput, DecisionInput,
-    GraphOwnerHealth, RunGraphInput, RunInput, SubmitPlanInput, SubscribeEventsInput, TaskSpecInput, UpdateTaskInput, WorkerInput,
-    add_task, claim_runnable_tasks, confirm_paused, create_run, get_run, pause_run,
-    get_run_graph, record_decision, record_worker_started, record_worker_stopped, resume_run, submit_plan,
-    subscribe_events, update_task,
+    GraphOwnerHealth, RunGraphInput, RunInput, SubmitPlanInput, SubscribeEventsInput,
+    TaskSpecInput, UpdateTaskInput, WorkerInput, add_task, claim_runnable_tasks, confirm_paused,
+    create_run, get_run, get_run_graph, pause_run, record_decision, record_worker_started,
+    record_worker_stopped, resume_run, submit_plan, subscribe_events, update_task,
 };
 use loop_core::policy::ComputeClass;
 use loop_core::run::RunState;
@@ -53,14 +53,27 @@ fn task_state(snapshot: &loop_bridge::SnapshotOutput, task_id: &str) -> TaskStat
 fn graph_query_exposes_stage_dependencies_and_owner_health() {
     let dir = tempfile::tempdir().unwrap();
     let database_path = dir.path().join("graph.db").display().to_string();
-    create_run(CreateRunInput { database_path: database_path.clone(), run_id: "graph".into() }).unwrap();
+    create_run(CreateRunInput {
+        database_path: database_path.clone(),
+        run_id: "graph".into(),
+    })
+    .unwrap();
     submit_plan(SubmitPlanInput {
         database_path: database_path.clone(),
         run_id: "graph".into(),
-        tasks: vec![research("research"), research_with_dependencies("verify", vec!["research".into()])],
-    }).unwrap();
+        tasks: vec![
+            research("research"),
+            research_with_dependencies("verify", vec!["research".into()]),
+        ],
+    })
+    .unwrap();
 
-    let graph = get_run_graph(RunGraphInput { database_path, run_id: "graph".into(), now_ms: 1_000 }).unwrap();
+    let graph = get_run_graph(RunGraphInput {
+        database_path,
+        run_id: "graph".into(),
+        now_ms: 1_000,
+    })
+    .unwrap();
     assert_eq!(graph.run_id, "graph");
     assert!(matches!(graph.owner_health, GraphOwnerHealth::Missing));
     assert_eq!(graph.nodes.len(), 2);

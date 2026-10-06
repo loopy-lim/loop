@@ -325,6 +325,19 @@ export type SourceReceipt = {
   observedOutsideWriteScope: string[];
 };
 
+/**
+ * What the context-budget policy changed while assembling one dispatch context. Counts are UTF-16 code units dropped, matching the unit the worker prompt renderer measures its limits in.
+ */
+export type ContextReductionRecord = {
+  fieldClamps: number;
+  bodyCompactions: number;
+  droppedChars: number;
+  /** True when this dispatch continues a retry after a stall/limit failure, so the prior attempt's bulky context was compacted. */
+  retryCompaction: boolean;
+  totalBudgetPasses: number;
+  estimatedEssentialChars: number;
+};
+
 export type RunListOutput = {
   runId: string;
   state: RunState;
@@ -423,6 +436,12 @@ export type AddGoalTaskInput = {
 
 export type OperationOutput = {
   accepted: boolean;
+  /** Directive evidence for attention resolutions: what the resolution changed and where. Absent for plain accept/no-op operations. */
+  summary?: string | null;
+  /** Granted relaxation steps (e.g. `tools 1→0`) — the durable-evidence mirror of the `TaskRoutingUpdated` events committed by the resolve. */
+  routingRelaxations?: string[];
+  /** Task that received a `TaskReady` re-dispatch in this resolution, if any (already-queued work needs no re-dispatch). */
+  redispatchedTaskId?: string | null;
 };
 
 export type AddTaskInput = {
@@ -600,6 +619,8 @@ export type TaskContextOutput = {
   previousFailure?: string | null;
   previousChecks: CheckReceipt[];
   guidance: string[];
+  /** Present when the context-budget policy had to shrink anything (docs/defects/limits-inventory.md R1·R2·R4). The full text of every shrunk field stays in the run store; this record is observability for the dispatch surface. */
+  contextReduction?: ContextReductionRecord | null;
 };
 
 export type GetTraceInput = {

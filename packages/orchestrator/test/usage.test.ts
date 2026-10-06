@@ -2,6 +2,10 @@ import { expect, test } from "bun:test";
 
 import type { UsageRecord } from "../src/usage";
 import { UsageLedger, addDecimalStrings } from "../src/usage";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 function record(overrides: Partial<UsageRecord> = {}): UsageRecord {
   return {
@@ -84,8 +88,8 @@ test("totals stay basis-separated; observed figures are never merged with estima
 
   const summary = ledger.summary("run-1");
   expect(summary.recordCount).toBe(3);
-  const observed = summary.bases.find((basis) => basis.basis === "observed")!;
-  const estimated = summary.bases.find((basis) => basis.basis === "estimated")!;
+  const observed = must(summary.bases.find((basis) => basis.basis === "observed"));
+  const estimated = must(summary.bases.find((basis) => basis.basis === "estimated"));
   expect(observed.totals.inputTokens).toBe(300);
   expect(observed.totals.outputTokens).toBe(50);
   expect(observed.totals.cost).toEqual({ USD: "0.03" });
@@ -113,8 +117,8 @@ test("per-task views omit unreported tasks and keep the same basis discipline", 
   ledger.record(record({ taskId: null, workerId: null }));
 
   const byTask = ledger.summaryByTask("run-1");
-  expect(byTask.map((entry) => entry.taskId).sort()).toEqual(["t1", "t2"]);
-  const t2 = byTask.find((entry) => entry.taskId === "t2")!;
-  expect(t2.summary.bases[0]!.basis).toBe("estimated");
-  expect(t2.summary.bases[0]!.totals.inputTokens).toBe(5);
+  expect(byTask.map((entry) => entry.taskId).toSorted()).toEqual(["t1", "t2"]);
+  const t2 = must(byTask.find((entry) => entry.taskId === "t2"));
+  expect(t2.summary.bases[0]?.basis).toBe("estimated");
+  expect(t2.summary.bases[0]?.totals.inputTokens).toBe(5);
 });

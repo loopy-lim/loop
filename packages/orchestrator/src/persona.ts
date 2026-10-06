@@ -87,7 +87,7 @@ export function derivePersonaVocabulary(
 ): PersonaVocabulary {
   const defaultIds = Object.values(kindDefaults);
   const base = Object.keys(registry).length > 0 ? Object.keys(registry) : PERSONA_IDS;
-  const explicitOnly = [...new Set(base)].filter((id) => !defaultIds.includes(id)).sort();
+  const explicitOnly = [...new Set(base)].filter((id) => !defaultIds.includes(id)).toSorted();
   return { ids: [...new Set(defaultIds), ...explicitOnly], kindDefaults, explicitOnly };
 }
 

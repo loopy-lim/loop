@@ -71,9 +71,9 @@ mod tests {
     use crate::policy::{FailurePolicy, OnExhaustion};
     use crate::scheduler::{Capacity, Scheduler};
     use crate::task::{
-        Assumption, CompletionCheck, CompletionContract, CompletionCoverage,
-        DecompositionContract, SemanticAccess, SemanticConflictResolution, SemanticTouchpoint,
-        Task, TaskKind, WorkOwnership,
+        Assumption, CompletionCheck, CompletionContract, CompletionCoverage, DecompositionContract,
+        SemanticAccess, SemanticConflictResolution, SemanticTouchpoint, Task, TaskKind,
+        WorkOwnership,
     };
 
     fn task(id: &str, write_scope: &str) -> Task {

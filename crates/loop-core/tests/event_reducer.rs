@@ -170,6 +170,94 @@ fn exhausted_verification_moves_the_task_to_human_attention() {
 }
 
 #[test]
+fn interrupted_transport_failure_retries_within_the_attempt_ladder() {
+    let mut projection = RunProjection::default();
+    for event in [
+        Event::new("run-1", EventKind::RunCreated),
+        Event::new("run-1", EventKind::TaskCreated(implementation_task())),
+        Event::new("run-1", EventKind::TaskReady(TaskId::from("impl"))),
+        Event::new(
+            "run-1",
+            EventKind::WorkerStarted {
+                task_id: TaskId::from("impl"),
+                worker_id: "worker-1".into(),
+            },
+        ),
+        Event::new(
+            "run-1",
+            EventKind::WorkerFinished {
+                task_id: TaskId::from("impl"),
+                worker_id: "worker-1".into(),
+            },
+        ),
+        Event::new(
+            "run-1",
+            EventKind::VerificationClassifiedFailure {
+                task_id: TaskId::from("impl"),
+                failure_class: loop_core::policy::FailureClass::Interrupted,
+                reason: "Error: Connection error.".into(),
+            },
+        ),
+    ] {
+        projection.apply(&event).unwrap();
+    }
+    // Below the retry limit a transport fault re-enters the dispatch lane:
+    // the run stays dispatchable and no attention is raised.
+    assert_eq!(projection.run_state, Some(RunState::Active));
+    assert_eq!(
+        projection.tasks[&TaskId::from("impl")].state,
+        TaskState::Ready
+    );
+    assert_eq!(projection.tasks[&TaskId::from("impl")].attempt, 1);
+    assert!(projection.attention.is_empty());
+    assert!(!projection.has_open_attention());
+}
+
+#[test]
+fn exhausted_ladder_parks_an_interrupted_transport_failure_in_attention() {
+    let mut task = implementation_task();
+    task.max_attempts = 1;
+    let mut projection = RunProjection::default();
+    for event in [
+        Event::new("run-1", EventKind::RunCreated),
+        Event::new("run-1", EventKind::TaskCreated(task)),
+        Event::new("run-1", EventKind::TaskReady(TaskId::from("impl"))),
+        Event::new(
+            "run-1",
+            EventKind::WorkerStarted {
+                task_id: TaskId::from("impl"),
+                worker_id: "worker-1".into(),
+            },
+        ),
+        Event::new(
+            "run-1",
+            EventKind::WorkerFinished {
+                task_id: TaskId::from("impl"),
+                worker_id: "worker-1".into(),
+            },
+        ),
+        Event::new(
+            "run-1",
+            EventKind::VerificationClassifiedFailure {
+                task_id: TaskId::from("impl"),
+                failure_class: loop_core::policy::FailureClass::Interrupted,
+                reason: "Error: Connection error.".into(),
+            },
+        ),
+    ] {
+        projection.apply(&event).unwrap();
+    }
+    // With the ladder spent, the transport fault holds the task for a human
+    // decision (the bridge then appends the failure AttentionCreated).
+    assert_eq!(
+        projection.tasks[&TaskId::from("impl")].state,
+        TaskState::Attention
+    );
+    assert_eq!(projection.tasks[&TaskId::from("impl")].attempt, 1);
+    assert!(projection.attention.is_empty());
+}
+
+#[test]
 fn stopped_work_outside_cancellation_becomes_recovery_attention() {
     let mut projection = RunProjection::default();
     for event in [
@@ -455,4 +543,138 @@ fn add_task_directive_wiring_is_rejected_for_dispatched_or_terminal_work() {
             "{task_state:?} work must not accept new prerequisites"
         );
     }
+}
+
+fn routed_task() -> Task {
+    Task::builder(
+        TaskId::from("impl"),
+        "implementation",
+        TaskKind::Implementation,
+    )
+    .ownership(WorkOwnership::new(std::iter::empty::<&str>(), ["src/**"]))
+    .routing(loop_core::policy::TaskRouting {
+        risk: loop_core::policy::Risk::High,
+        required: loop_core::policy::ComputeCapabilities::new(0, 2, 1, 0, 0),
+    })
+    .completion_contract(CompletionContract::new([CompletionCheck::new("tests")]))
+    .build()
+    .unwrap()
+}
+
+/// The batch-candidate-absence recovery: a `relax_routing` resolution lands
+/// as a TaskRoutingUpdated event, and replaying the event lowers exactly the
+/// recorded constraint (durable evidence in the log, deterministic replay).
+#[test]
+fn routing_update_applies_only_the_recorded_downgrade_to_parked_work() {
+    use loop_core::policy::{CapabilityKind, RoutingRelaxation};
+    let mut projection = RunProjection::default();
+    projection
+        .apply(&Event::new("run-1", EventKind::RunCreated))
+        .unwrap();
+    projection
+        .apply(&Event::new("run-1", EventKind::TaskCreated(routed_task())))
+        .unwrap();
+    projection
+        .apply(&Event::new(
+            "run-1",
+            EventKind::TaskReady(TaskId::from("impl")),
+        ))
+        .unwrap();
+    projection
+        .apply(&Event::new(
+            "run-1",
+            EventKind::AttentionCreated(loop_core::attention::Attention::for_task(
+                "provider-run-1-impl-0",
+                loop_core::attention::AttentionKind::Failure,
+                "no eligible compute candidate satisfies task constraints",
+                TaskId::from("impl"),
+            )),
+        ))
+        .unwrap();
+    projection
+        .apply(&Event::new(
+            "run-1",
+            EventKind::TaskRoutingUpdated {
+                task_id: TaskId::from("impl"),
+                relaxation: RoutingRelaxation::Capability {
+                    capability: CapabilityKind::Tools,
+                    from: 1,
+                    to: 0,
+                },
+                reason: "attention:provider-run-1-impl-0 relax_routing".into(),
+            },
+        ))
+        .unwrap();
+    let routing = &projection.tasks[&TaskId::from("impl")].routing;
+    assert_eq!(routing.required.tools, 0);
+    assert_eq!(routing.required.reasoning, 2, "one step only");
+    assert_eq!(routing.risk, loop_core::policy::Risk::High);
+}
+
+#[test]
+fn routing_update_is_rejected_for_running_work_and_forged_upgrades() {
+    use loop_core::policy::{CapabilityKind, RoutingRelaxation};
+    let mut projection = RunProjection::default();
+    projection
+        .apply(&Event::new("run-1", EventKind::RunCreated))
+        .unwrap();
+    projection
+        .apply(&Event::new("run-1", EventKind::TaskCreated(routed_task())))
+        .unwrap();
+    projection
+        .apply(&Event::new(
+            "run-1",
+            EventKind::TaskReady(TaskId::from("impl")),
+        ))
+        .unwrap();
+    projection
+        .apply(&Event::new(
+            "run-1",
+            EventKind::WorkerStarted {
+                task_id: TaskId::from("impl"),
+                worker_id: "worker-1".into(),
+            },
+        ))
+        .unwrap();
+    let running = projection.apply(&Event::new(
+        "run-1",
+        EventKind::TaskRoutingUpdated {
+            task_id: TaskId::from("impl"),
+            relaxation: RoutingRelaxation::Capability {
+                capability: CapabilityKind::Tools,
+                from: 1,
+                to: 0,
+            },
+            reason: "mid-execution".into(),
+        },
+    ));
+    assert!(matches!(
+        running,
+        Err(ProjectionError::RoutingUpdateState(_))
+    ));
+
+    projection.run_state = Some(RunState::Attention);
+    projection
+        .tasks
+        .get_mut(&TaskId::from("impl"))
+        .unwrap()
+        .state = TaskState::Attention;
+    let forged = projection.apply(&Event::new(
+        "run-1",
+        EventKind::TaskRoutingUpdated {
+            task_id: TaskId::from("impl"),
+            relaxation: RoutingRelaxation::Capability {
+                capability: CapabilityKind::Reasoning,
+                from: 2,
+                to: 3,
+            },
+            reason: "forged upgrade".into(),
+        },
+    ));
+    assert!(matches!(
+        forged,
+        Err(ProjectionError::Routing(
+            loop_core::policy::RoutingError::RelaxationNotDowngrade
+        ))
+    ));
 }

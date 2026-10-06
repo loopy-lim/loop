@@ -16,6 +16,10 @@ import {
 import { CompletionVerifier } from "../src/completion";
 import { Orchestrator } from "../src/coordinator";
 import { executeTask } from "../src/task-execution";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 const verifier = new CompletionVerifier({
   run: async () => ({ exitCode: 0, stdout: "ok", stderr: "", timedOut: false }),
@@ -149,7 +153,7 @@ test("the stall watchdog fails a silent attempt with a stalled worker result", a
   });
   // The attempt fails durably through the existing worker-result path.
   expect(workerResults).toHaveLength(1);
-  const summary = String(workerResults[0]!.summary);
+  const summary = String(workerResults[0]?.summary);
   expect(workerResults[0]).toMatchObject({ success: false, taskId: "t1" });
   expect(summary).toContain("stalled");
   // Wording stays retry-class (no transport markers), so the Rust failure
@@ -167,10 +171,10 @@ test("fresh worker activity resets the stall watchdog", async () => {
   // All five beats (150ms of activity) outlived the 150ms silence threshold,
   // so the watchdog was reset by the stream events rather than firing early.
   expect(provider.emittedAt.length).toBeGreaterThanOrEqual(5);
-  const lastEmit = provider.emittedAt.at(-1)!;
-  expect(recordedAt[0]! - lastEmit).toBeGreaterThanOrEqual(110);
+  const lastEmit = must(provider.emittedAt.at(-1));
+  expect(must(recordedAt[0]) - lastEmit).toBeGreaterThanOrEqual(110);
   expect(workerResults[0]).toMatchObject({ success: false });
-  expect(String(workerResults[0]!.summary)).toContain("stalled");
+  expect(String(workerResults[0]?.summary)).toContain("stalled");
 });
 
 test("check runs emit persisted progress around verification", async () => {

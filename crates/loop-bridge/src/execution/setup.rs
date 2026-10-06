@@ -2,8 +2,8 @@
 //! goal-task corrections, preflight preparation, and run configuration.
 
 use crate::commands::{
-    append, append_batch_and_notify, bridge_error, store, task_from_input,
-    task_from_preflight_input, OperationOutput, PreflightTaskSpecInput, TaskSpecInput,
+    OperationOutput, PreflightTaskSpecInput, TaskSpecInput, append, append_batch_and_notify,
+    bridge_error, store, task_from_input, task_from_preflight_input,
 };
 use loop_core::event::{Event, EventKind, GoalCriterion};
 use loop_core::task::{Task, TaskId};
@@ -100,9 +100,7 @@ fn ensure_goal_coverage(tasks: &[Task], criteria: &[GoalCriterionInput]) -> Resu
     Ok(())
 }
 
-pub(crate) fn register_run_setup(
-    builder: rustra::PackageBuilder,
-) -> rustra::PackageBuilder {
+pub(crate) fn register_run_setup(builder: rustra::PackageBuilder) -> rustra::PackageBuilder {
     register!(
         builder,
         prepare_run,
@@ -155,7 +153,10 @@ pub fn prepare_run(input: PrepareRunInput) -> Result<OperationOutput> {
         &events,
         "prepare_run_failed",
     )?;
-    Ok(OperationOutput { accepted: true })
+    Ok(OperationOutput {
+        accepted: true,
+        ..OperationOutput::default()
+    })
 }
 
 #[command]
@@ -207,7 +208,10 @@ pub fn prepare_goal_run(input: PrepareGoalRunInput) -> Result<OperationOutput> {
         &events,
         "prepare_goal_run_failed",
     )?;
-    Ok(OperationOutput { accepted: true })
+    Ok(OperationOutput {
+        accepted: true,
+        ..OperationOutput::default()
+    })
 }
 
 #[command]
@@ -243,7 +247,10 @@ pub fn add_goal_task(input: AddGoalTaskInput) -> Result<OperationOutput> {
         &events,
         "add_goal_task_failed",
     )?;
-    Ok(OperationOutput { accepted: true })
+    Ok(OperationOutput {
+        accepted: true,
+        ..OperationOutput::default()
+    })
 }
 
 #[command]
@@ -284,7 +291,10 @@ pub fn prepare_run_preflight(input: PrepareRunPreflightInput) -> Result<Operatio
         &events,
         "prepare_run_failed",
     )?;
-    Ok(OperationOutput { accepted: true })
+    Ok(OperationOutput {
+        accepted: true,
+        ..OperationOutput::default()
+    })
 }
 
 #[command]

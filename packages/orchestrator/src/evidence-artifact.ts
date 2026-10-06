@@ -44,9 +44,9 @@ export async function storeCheckOutput(
     }
     const existing = await lstat(path);
     if (!existing.isFile() || (existing.mode & 0o077) !== 0)
-      throw new Error("check artifact path is not a private regular file");
+      throw new Error("check artifact path is not a private regular file", { cause: error });
     if ((await readFile(path, "utf8")) !== content)
-      throw new Error("check artifact path exists with different content");
+      throw new Error("check artifact path exists with different content", { cause: error });
   }
   return { path, preview: `Redacted output artifact saved: ${path}` };
 }
