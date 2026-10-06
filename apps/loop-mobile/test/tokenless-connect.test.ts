@@ -13,6 +13,10 @@ import { decodeStoredCredentials } from "../src/auth/credentialStore";
 import { probeGateway } from "../src/gateway-client/probe";
 import type { FetchLike } from "../src/gateway-client/client";
 
+/** A bearer-only listener that rejects the tokenless probe with 401. */
+const unauthorizedFetchImpl: FetchLike = async () =>
+  new Response(JSON.stringify({ code: "unauthorized", status: 401 }), { status: 401 });
+
 describe("tokenless connection config", () => {
   test("an empty bearer is valid and normalizes to the tokenless empty string", () => {
     const config = createConnectionConfig("gw.tailnet.ts.net", "18477", "");
@@ -50,9 +54,7 @@ describe("tokenless probe (no Authorization header)", () => {
 
   test("a 401 from a bearer-only listener still fails the tokenless probe", async () => {
     const config = createConnectionConfig("gw.tailnet.ts.net", "18477", "");
-    const fetchImpl: FetchLike = async () =>
-      new Response(JSON.stringify({ code: "unauthorized", status: 401 }), { status: 401 });
-    await expect(probeGateway(config, fetchImpl)).rejects.toMatchObject({
+    await expect(probeGateway(config, unauthorizedFetchImpl)).rejects.toMatchObject({
       problem: { status: 401 },
     });
   });

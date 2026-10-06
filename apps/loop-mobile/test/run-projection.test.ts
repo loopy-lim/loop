@@ -7,10 +7,12 @@
 import { describe, expect, test } from "bun:test";
 
 import { RunProjection } from "../src/state/runProjection";
+import type { RemoteRunStatusEvent } from "../src/gateway-client/wire";
 import {
   OUTPUT_FRAME_1,
   OUTPUT_FRAME_2,
   RESET_FRAME,
+  RUN,
   RUN_ID,
   STATUS_FRAME,
   TERMINAL_FRAME,
@@ -35,7 +37,7 @@ describe("RunProjection", () => {
 
     const outputs = projection.snapshot().outputs;
     expect(outputs.map((o) => o.activityId)).toEqual(["57:gateway-app:3", "57:gateway-app:4"]);
-    expect(outputs[0]!.text).toBe("gateway listening on tailnet");
+    expect(outputs[0]?.text).toBe("gateway listening on tailnet");
   });
 
   test("reset replaces the run and marks prior output as a previous observation", () => {
@@ -55,6 +57,29 @@ describe("RunProjection", () => {
     projection.applyReset(RESET_FRAME);
     projection.applyStatus(STATUS_FRAME);
     expect(projection.snapshot().stale).toBe(false);
+  });
+
+  test("a status frame carrying attention null releases the open attention", () => {
+    // Gateway release contract: resolving attention is announced on the same
+    // stream as a `status` frame whose run projection has `attention: null`.
+    const openFrame: RemoteRunStatusEvent = { ...STATUS_FRAME, run: RUN };
+    const releasedFrame: RemoteRunStatusEvent = {
+      ...STATUS_FRAME,
+      run: {
+        ...RUN,
+        status: "running",
+        taskCounts: { ...RUN.taskCounts, attention: 0 },
+        attention: null,
+      },
+    };
+
+    const projection = new RunProjection(RUN_ID);
+    projection.applyStatus(openFrame);
+    expect(projection.snapshot().run?.attention?.attentionId).toBe("attn_01JMOBILEFIXTURE0001");
+
+    projection.applyStatus(releasedFrame);
+    expect(projection.snapshot().run?.attention).toBeNull();
+    expect(projection.snapshot().run?.status).toBe("running");
   });
 
   test("terminal replaces the run and marks the projection terminal", () => {

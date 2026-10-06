@@ -77,11 +77,11 @@ export function RunSplitScreen(props: {
     <View style={styles.column}>
       {left}
       <TouchableOpacity
-        style={styles.filesPill}
+        style={styles.filesButton}
         onPress={() => setSheetOpen(true)}
         activeOpacity={press.activeOpacity}
       >
-        <DynText style={styles.filesPillText}>Files &amp; reports</DynText>
+        <DynText style={styles.filesButtonText}>Files &amp; reports</DynText>
       </TouchableOpacity>
       <ViewerBottomSheet
         open={sheetOpen}
@@ -105,18 +105,20 @@ const styles = StyleSheet.create({
   // The one hairline between the panes (§3: separation is one quiet rule).
   divider: { width: 1, backgroundColor: colors.hairline },
   viewerPane: { flex: 1, paddingLeft: space.m },
-  filesPill: {
+  // Secondary button tier (canon §3): surface fill + hairline, radius.m —
+  // opens the viewer sheet in the narrow layout.
+  filesButton: {
     alignSelf: "flex-start",
     marginVertical: space.m,
     minHeight: 44,
     justifyContent: "center",
     borderWidth: 1,
     borderColor: colors.hairline,
-    borderRadius: radius.pill,
+    borderRadius: radius.m,
     paddingVertical: space.s,
     paddingHorizontal: space.l,
     backgroundColor: colors.surface,
   },
-  filesPillText: { ...type.captionStrong, color: colors.inkMute },
+  filesButtonText: { ...type.captionStrong, color: colors.inkMute },
   sheetBody: { flex: 1 },
 });

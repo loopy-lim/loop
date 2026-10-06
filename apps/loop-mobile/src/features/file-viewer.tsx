@@ -31,7 +31,9 @@ import {
 import { VIEWER_TARGETS } from "./split-layout";
 import { parseMarkdown } from "./markdown";
 import { DynText } from "../ui/DynText";
+import { Icon } from "../ui/Icon";
 import { glyph } from "../ui/glyphs";
+import { EMPTY_DIRECTORY_NOTICE } from "../ui/copy";
 import { colors, press, radius, space, type } from "../ui/tokens";
 
 const ERROR_COPY: Record<string, string> = {
@@ -43,6 +45,14 @@ const ERROR_COPY: Record<string, string> = {
   unavailable: "Could not reach the gateway.",
 };
 
+const VIEWER_SIZES = [12, 15, 17, 22, type.display.fontSize] as const;
+function normalizeViewerSize(size: number): (typeof VIEWER_SIZES)[number] {
+  return VIEWER_SIZES.reduce((nearest, candidate) => Math.abs(candidate - size) < Math.abs(nearest - size) ? candidate : nearest);
+}
+function viewerBodyType(size: number) {
+  return size >= type.display.fontSize ? type.display : size >= type.title.fontSize ? type.title : size >= type.body.fontSize ? type.body : type.caption;
+}
+
 /** Markdown blocks scaled off the settings' viewer base font size (§B). */
 function MarkdownBody(props: { text: string; baseSize: number }) {
   const blocks = useMemo(() => parseMarkdown(props.text), [props.text]);
@@ -51,11 +61,11 @@ function MarkdownBody(props: { text: string; baseSize: number }) {
     <View>
       {blocks.map((block, index) => {
         if (block.kind === "header") {
-          const size = block.level === 1 ? base + 4 : block.level === 2 ? base + 2 : base + 1;
+          const size = block.level === 1 ? type.display.fontSize : block.level === 2 ? type.title.fontSize : type.bodyStrong.fontSize;
           return (
             <DynText
               key={index}
-              style={[styles.mdHeader, { fontSize: size, lineHeight: size + 7 }]}
+              style={[styles.mdHeader, size === type.display.fontSize ? type.display : size === type.title.fontSize ? type.title : type.bodyStrong]}
             >
               {block.text}
             </DynText>
@@ -63,7 +73,7 @@ function MarkdownBody(props: { text: string; baseSize: number }) {
         }
         if (block.kind === "bullet") {
           return (
-            <DynText key={index} style={[styles.mdBody, { fontSize: base, lineHeight: base + 7 }]}>
+            <DynText key={index} style={[styles.mdBody, viewerBodyType(base)]}>
               {glyph.foldClosed} {block.text}
             </DynText>
           );
@@ -71,14 +81,14 @@ function MarkdownBody(props: { text: string; baseSize: number }) {
         if (block.kind === "code") {
           return (
             <View key={index} style={styles.mdCodeCard}>
-              <DynText style={[styles.mdCode, { fontSize: Math.max(11, base - 2) }]}>
+              <DynText style={styles.mdCode}>
                 {block.text}
               </DynText>
             </View>
           );
         }
         return (
-          <DynText key={index} style={[styles.mdBody, { fontSize: base, lineHeight: base + 7 }]}>
+          <DynText key={index} style={[styles.mdBody, viewerBodyType(base)]}>
             {block.text}
           </DynText>
         );
@@ -95,7 +105,7 @@ function EntryRow(props: { label: string; detail: string; isDir: boolean; onPres
       activeOpacity={press.activeOpacity}
     >
       <DynText style={styles.rowText} numberOfLines={1}>
-        {props.isDir ? glyph.foldClosed : "▭"} {props.label}
+        {props.isDir ? glyph.foldClosed : glyph.file} {props.label}
       </DynText>
       <DynText style={styles.rowDetail} numberOfLines={1}>
         {props.detail}
@@ -115,7 +125,7 @@ export function FileViewerPane(props: {
 }) {
   const [model] = useState(() => new FileViewerModel(props.api));
   const [snap, setSnap] = useState(model.snapshot());
-  const base = props.viewerFontSize ?? 15;
+  const base = normalizeViewerSize(props.viewerFontSize ?? 15);
   const publish = () => setSnap(model.snapshot());
 
   const place = snap.place;
@@ -137,7 +147,7 @@ export function FileViewerPane(props: {
             activeOpacity={press.activeOpacity}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <DynText style={styles.backGlyph}>{glyph.back}</DynText>
+            <Icon role="back" size={type.title.fontSize} color={colors.inkMute} />
           </TouchableOpacity>
         ) : null}
         <DynText style={styles.title} numberOfLines={1}>
@@ -172,14 +182,14 @@ export function FileViewerPane(props: {
               onPress={() => openEntry(place.dir, item)}
             />
           )}
-          ListEmptyComponent={<DynText style={styles.empty}>Empty directory.</DynText>}
+          ListEmptyComponent={<DynText style={styles.empty}>{EMPTY_DIRECTORY_NOTICE}</DynText>}
         />
       ) : (
         <ScrollView style={styles.contentScroll} contentContainerStyle={styles.content}>
           {place.isMarkdown ? (
             <MarkdownBody text={place.text} baseSize={base} />
           ) : (
-            <DynText style={[styles.plainText, { fontSize: Math.max(11, base - 3) }]}>
+            <DynText style={styles.plainText}>
               {place.text}
             </DynText>
           )}
@@ -201,7 +211,6 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   backButton: { minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" },
-  backGlyph: { ...type.title, color: colors.inkMute },
   title: { ...type.title, color: colors.ink, flex: 1 },
   error: { ...type.caption, color: colors.warn, marginBottom: space.s },
   loading: { ...type.caption, color: colors.inkFaint, marginTop: space.xs },

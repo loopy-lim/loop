@@ -23,6 +23,11 @@ function fakeClient(options: {
   } as unknown as GatewayClient;
 }
 
+/** onSuccess must not run when the send failed (the draft is preserved). */
+const draftClearingOnSuccess = (_result: { runId: string | null }): never => {
+  throw new Error("onSuccess must not run when the send failed");
+};
+
 describe("retry shares the submit path (C10, AC10-3)", () => {
   test("steer failure → onFailure once, onSuccess never (draft preserved); retry hits the same steer endpoint with the same text", async () => {
     const steerCalls: Array<[string, string]> = [];
@@ -40,9 +45,6 @@ describe("retry shares the submit path (C10, AC10-3)", () => {
       },
     });
 
-    const draftClearingOnSuccess = (_result: { runId: string | null }) => {
-      throw new Error("onSuccess must not run when the send failed");
-    };
     void draftClearingOnSuccess;
 
     const failures: string[] = [];

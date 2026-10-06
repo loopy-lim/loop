@@ -30,7 +30,7 @@ export function isActiveSession(session: Pick<RemoteSessionSummary, "state">): b
  * loop that is running right now is the first (emphasized) row. Stable for
  * equal timestamps; never mutates the input. */
 export function activeFirst(runs: RemoteRunSummary[]): RemoteRunSummary[] {
-  return [...runs].sort((a, b) => {
+  return runs.toSorted((a, b) => {
     if (a.updatedAt === b.updatedAt) return 0;
     return a.updatedAt < b.updatedAt ? 1 : -1;
   });

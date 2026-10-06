@@ -27,9 +27,29 @@ export const SESSION_ENDED_NOTICE = "session ended";
 /** Stream failures render as a one-line state summary — never a raw
  * transport dump (C10). */
 export const STREAM_DISCONNECTED_NOTICE = "stream disconnected — the client keeps retrying";
+export const WAITING_FOR_PROJECTION_NOTICE = "Waiting for run projection…";
+export const NO_PANES_NOTICE = "No terminals are available.";
+export const PANE_LOADING_NOTICE = "Loading terminals…";
+export const LIFECYCLE_ONLY_SUFFIX = " (lifecycle only)";
+export const EMPTY_DIRECTORY_NOTICE = "Empty directory.";
+export const FILES_REPORTS_LABEL = "Files & reports";
+export const TERMINALS_HEADING = "Terminals";
+/** Run-screen copy (task `redesign-implement`, S-11): the run id is an
+ * internal identifier — the screen's heading is the human word; the id
+ * rides a quiet caption line for the operator. */
+export const RUN_TITLE = "Task";
+export const RUN_FINISHED_TITLE = "Task finished";
+export const RUN_FAILED_TITLE = "Task failed";
+export const RUN_ENDED_TITLE = "Task ended";
+export const RUN_SUMMARY_HINT = "Continue this task from its chat in the Chats tab.";
+export const ATTENTION_RESPONSE_PLACEHOLDER = "Your response";
+export const SUBMITTING_LABEL = "Submitting…";
+export const SUBMIT_RESPONSE_LABEL = "Submit response";
+export const TERMINAL_SUFFIX = " (terminal)";
 
 /** Submit-failure affordance (C10): same submit route, preserved draft. */
 export const RESEND_BUTTON_LABEL = "Resend";
+export const READOUT_STYLE = { letterSpacing: 0.6 } as const;
 
 /** Visible steer affordance (visibility contract): the one-word mark shown
  * above the composer input while the turn is running and sends route to
@@ -64,13 +84,26 @@ export const ATTACH_SESSION_REQUIRED_NOTICE =
 /** Chats-list surface phrases (§7: phrases are owned constants, never
  * composed inline at call sites). Values are display-stable — the section
  * label styles render them uppercase; the copy stays sentence case. */
-/** The app title in the status-bar-substitute header (chats home, task
- * `header-statusbar-redesign`). */
-export const APP_TITLE = "Loop";
 export const CHATS_HEADING = "Chats";
-export const SESSIONS_HEADING = "Sessions";
+/** Detail-screen header titles (task `redesign-implement`): the raw-pane
+ * and settings surfaces carry their title in the header chrome — the tab
+ * destinations keep their labels in the tab bar. */
+export const TERMINAL_TITLE = "Terminal";
+export const SETTINGS_TITLE = "Settings";
+/** Chats-list section labels (task `main-screen-polish`): the list reads
+ * as three sections — in-progress work (attention included), what landed
+ * today, and everything before. Rendered uppercase by the readout label
+ * style; the copy stays sentence case. */
+export const ACTIVE_HEADING = "In progress";
+export const TODAY_HEADING = "Today";
+export const EARLIER_HEADING = "Earlier";
 export const EMPTY_RUNS_NOTICE = "No runs yet — submit a prompt to start one.";
 
+/** Row swipe action (task `mobile-ux-patterns`, iOS HIG row actions):
+ * the one verb the list rows own — the mobile client contract has no
+ * cancel/delete surface, so the swipe reveals exactly this and nothing
+ * invented. */
+export const ROW_OPEN_ACTION_LABEL = "Open";
 /** Session-focus toggle (task `session-focus`): the list shows only active
  * work by default; the full inventory exists exclusively behind this
  * explicit toggle, and the toggle is the only way back to the quiet view. */
@@ -79,6 +112,12 @@ export const ACTIVE_ONLY_LABEL = "Active only";
 /** Quiet default-view empty state: runs exist but none are active — the
  * honest mark (the generic "No runs yet" would be false here). */
 export const EMPTY_ACTIVE_NOTICE = "No active loops.";
+/** Row-title empty states (task `main-screen-polish`): an entry without
+ * an honest name says what is missing — an internal identifier (run id,
+ * session id) never fronts a row (brief S-11). "Untitled" names the
+ * absence; it does not fabricate a title. */
+export const UNTITLED_RUN_LABEL = "Untitled task";
+export const UNNAMED_SESSION_LABEL = "Unnamed session";
 
 /** Header-corner logout (task `header-statusbar-redesign`, superseding the
  * list-footer placement): the destructive, low-frequency action is a small

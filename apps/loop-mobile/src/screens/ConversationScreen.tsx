@@ -49,10 +49,14 @@ import {
   SESSION_ENDED_NOTICE,
   STREAM_DISCONNECTED_NOTICE,
   WAITING_FOR_SESSION_NOTICE,
+  TERMINALS_HEADING,
+  READOUT_STYLE,
 } from "../ui/copy";
 import { DynText } from "../ui/DynText";
 import { AppHeader } from "../ui/AppHeader";
+import { BackSwipeZone } from "../ui/BackSwipeZone";
 import { Entrance, configureCardFold, useBlink } from "../ui/motion";
+import { Icon } from "../ui/Icon";
 import { glyph } from "../ui/glyphs";
 import { COLUMN_MAX_WIDTH } from "../ui/Screen";
 import { colors, elevation, motion, press, radius, space, type } from "../ui/tokens";
@@ -105,6 +109,10 @@ export function ConversationScreen(props: {
   onOpenRun?: (runId: string) => void;
   /** Returns to the chats list (omitted: no back control). */
   onBack?: () => void;
+  /** Opens the app's side menu (task `mobile-ux-patterns`): detail
+   * surfaces hide the tab bar, so this header button is the one path to
+   * the Settings/Files destinations from inside a conversation. */
+  onOpenMenu?: () => void;
   /** App-local naming evidence fold; observed frames feed it and the
    *  header applies the operator-approved session title rule. */
   naming?: SessionNamingIndex;
@@ -186,8 +194,8 @@ export function ConversationScreen(props: {
   // a cache change re-renders via a reducer bump (no external store).
   const attachmentCache = useMemo(
     () =>
-      new AttachmentCache((sessionId, attachmentId) =>
-        props.client.fetchSessionAttachment(sessionId, attachmentId),
+      new AttachmentCache((fetchedSessionId, attachmentId) =>
+        props.client.fetchSessionAttachment(fetchedSessionId, attachmentId),
       ),
     [props.client],
   );
@@ -554,7 +562,7 @@ export function ConversationScreen(props: {
   if (view?.ended === true || view?.sessionEnded === true)
     notices.push({ key: "ended", text: SESSION_ENDED_NOTICE, warn: false });
 
-  return (
+  const body = (
     <KeyboardAvoidingView behavior="padding" style={styles.root}>
       {/* Status-bar-substitute header (task `header-statusbar-redesign`):
        * back chevron + title in the LEFT flank, running signal + Raw/Chat
@@ -571,12 +579,26 @@ export function ConversationScreen(props: {
               style={styles.backButton}
               activeOpacity={press.activeOpacity}
             >
-              <DynText style={styles.backText}>{glyph.back}</DynText>
+              <Icon role="back" size={type.title.fontSize} color={colors.inkMute} />
             </TouchableOpacity>
           ) : undefined
         }
         actions={
           <>
+            {/* Side-menu hamburger (task `mobile-ux-patterns`): the
+             * auxiliary surface for screens whose tab bar is hidden. */}
+            {props.onOpenMenu !== undefined ? (
+              <TouchableOpacity
+                onPress={props.onOpenMenu}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={styles.menuButton}
+                activeOpacity={press.activeOpacity}
+                accessibilityRole="button"
+                accessibilityLabel="Menu"
+              >
+                <Icon role="menu" size={type.title.fontSize} color={colors.inkMute} />
+              </TouchableOpacity>
+            ) : null}
             {running ? (
               <View style={styles.runningBadge}>
                 <RunningDot />
@@ -587,8 +609,14 @@ export function ConversationScreen(props: {
               onPress={() => setMode(mode === "chat" ? "raw" : "chat")}
               hitSlop={{ top: 14, bottom: 14, left: 16, right: 16 }}
               activeOpacity={press.activeOpacity}
+              accessibilityRole="button"
+              accessibilityState={{ selected: mode === "raw" }}
             >
-              <DynText style={styles.toggle}>{mode === "chat" ? "Raw" : "Chat"}</DynText>
+              {/* S-08: the toggle is a chip — hairline-bordered surface fill
+               * marks it as a control, and the label names the DESTINATION. */}
+              <View style={styles.toggleChip}>
+                <DynText style={styles.toggle}>{mode === "chat" ? "Raw" : "Chat"}</DynText>
+              </View>
             </TouchableOpacity>
           </>
         }
@@ -619,7 +647,7 @@ export function ConversationScreen(props: {
 
         {mode === "raw" ? (
           <ScrollView style={styles.timeline} contentContainerStyle={styles.timelineContent}>
-            <DynText style={styles.rawHeading}>Terminals</DynText>
+            <DynText style={styles.rawHeading}>{TERMINALS_HEADING}</DynText>
             <PaneList panes={panes} onOpenPane={props.onOpenPane} />
           </ScrollView>
         ) : (
@@ -675,7 +703,7 @@ export function ConversationScreen(props: {
                * action; copy owned by ui/copy.ts. */}
               {shouldRenderEmptyState(view?.items.length ?? 0) && sessionId !== null ? (
                 <View style={styles.emptyState}>
-                  <DynText style={styles.emptyGlyph}>{glyph.busy}</DynText>
+                  <Icon role="busy" size={type.display.fontSize} color={colors.inkFaint} />
                   <DynText style={styles.emptyTitle}>{EMPTY_TIMELINE_TITLE}</DynText>
                   <DynText style={styles.emptyHint}>{EMPTY_TIMELINE_HINT}</DynText>
                 </View>
@@ -726,6 +754,14 @@ export function ConversationScreen(props: {
       </View>
     </KeyboardAvoidingView>
   );
+  // Edge-back gesture (task `mobile-ux-patterns`, iOS HIG interactive
+  // pop): the swipe fires the SAME onBack the header chevron fires —
+  // one verb, two paths. No back handler, no gesture (nothing to do).
+  return props.onBack !== undefined ? (
+    <BackSwipeZone onBack={props.onBack}>{body}</BackSwipeZone>
+  ) : (
+    body
+  );
 }
 
 /** Raw-toggle pane list: loading, honest empty state, or the tappable
@@ -764,9 +800,7 @@ function PaneList(props: {
  * the mechanism is the shared useBlink, not a bespoke timer. */
 function RunningDot() {
   const opacity = useBlink(motion.pulse, 1, 0.35);
-  return (
-    <DynText style={[styles.runningDot, { color: colors.ok, opacity }]}>{glyph.statusDot}</DynText>
-  );
+  return <Icon role="statusDot" size={type.glyph.fontSize} color={colors.ok} style={{ opacity }} />;
 }
 
 const styles = StyleSheet.create({
@@ -779,10 +813,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.l,
   },
   backButton: { minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" },
-  backText: { ...type.title, color: colors.inkMute },
+  // Side-menu hamburger (task `mobile-ux-patterns`): same header-corner
+  // grammar as the back chevron — quiet glyph on the 44pt touch floor.
+  menuButton: { minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" },
   runningBadge: { flexDirection: "row", alignItems: "center", gap: space.xs, flexShrink: 0 },
-  runningDot: { ...type.glyph },
   runningText: { ...type.captionStrong },
+  // S-08: a chip affordance (surface fill + hairline, radius.m) — visible
+  // control, not bare text.
+  toggleChip: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    borderRadius: radius.m,
+    paddingHorizontal: space.s,
+    paddingVertical: space.xxs,
+  },
   toggle: { ...type.captionStrong, color: colors.inkMute },
   notice: { ...type.caption, color: colors.inkMute, marginBottom: space.xxs },
   timeline: { flex: 1 },
@@ -794,7 +839,7 @@ const styles = StyleSheet.create({
     ...type.captionStrong,
     color: colors.inkFaint,
     textTransform: "uppercase",
-    letterSpacing: 0.6,
+    ...READOUT_STYLE,
     marginBottom: space.s,
     marginTop: space.m,
   },
@@ -831,9 +876,12 @@ const styles = StyleSheet.create({
     ...elevation.float,
     borderWidth: 1,
     borderColor: colors.hairline,
-    borderRadius: radius.pill,
+    // Radius.m: the pill radius is reserved for the send circle, status
+    // badges, and the sheet handle (canon §3 pill 재판정) — floating
+    // chrome is still a button.
+    borderRadius: radius.m,
     paddingHorizontal: space.m,
-    paddingVertical: space.s + space.xxs,
+    paddingVertical: space.m,
     minHeight: 44,
   },
   jumpPillText: { ...type.captionStrong, color: colors.ink },
@@ -845,7 +893,6 @@ const styles = StyleSheet.create({
     gap: space.xs,
     paddingVertical: space.xxl,
   },
-  emptyGlyph: { ...type.display, color: colors.inkFaint },
   emptyTitle: { ...type.bodyStrong, color: colors.ink },
   emptyHint: { ...type.caption, color: colors.inkMute, textAlign: "center" },
 });

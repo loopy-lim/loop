@@ -40,6 +40,10 @@ import {
   SESSION_LIST,
 } from "./conversation-fixtures";
 import type { GatewayProblem } from "../src/gateway-client/wire";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 export type RecordedRequest = {
   method: string;
@@ -229,7 +233,7 @@ export function createMockGateway(): MockGateway {
       const steerMatch = url.pathname.match(/^\/v1\/runs\/([^/]+)\/steer$/);
       if (request.method === "POST" && steerMatch !== null) {
         const entry = await record();
-        if (decodeURIComponent(steerMatch[1]!) !== RUN_ID) {
+        if (decodeURIComponent(must(steerMatch[1])) !== RUN_ID) {
           const body = problem(
             404,
             "run_not_found",
@@ -300,7 +304,7 @@ export function createMockGateway(): MockGateway {
       const attachmentMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/attachments\/([^/]+)$/);
       if (request.method === "GET" && attachmentMatch !== null) {
         await record();
-        const attachmentId = decodeURIComponent(attachmentMatch[2]!);
+        const attachmentId = decodeURIComponent(must(attachmentMatch[2]));
         if (attachmentId === ATTACHMENT_ID) {
           return new Response(new Uint8Array(Buffer.from(ATTACHMENT_PNG_BASE64, "base64")), {
             status: 200,
@@ -337,7 +341,7 @@ export function createMockGateway(): MockGateway {
           accept: request.headers.get("Accept"),
           body: `(${bytes.byteLength} binary bytes)`,
         });
-        const sessionId = decodeURIComponent(uploadMatch[1]!);
+        const sessionId = decodeURIComponent(must(uploadMatch[1]));
         if (sessionId !== SESSION_ID && sessionId !== ORPHAN_SESSION_ID) {
           const body = problem(
             404,
@@ -399,7 +403,7 @@ export function createMockGateway(): MockGateway {
       const inputMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/input$/);
       if (request.method === "POST" && inputMatch !== null) {
         const entry = await record();
-        const sessionId = decodeURIComponent(inputMatch[1]!);
+        const sessionId = decodeURIComponent(must(inputMatch[1]));
         if (sessionId !== SESSION_ID && sessionId !== ORPHAN_SESSION_ID) {
           const body = problem(
             404,
@@ -499,6 +503,36 @@ export function createMockGateway(): MockGateway {
         );
       }
 
+      // ── POST /v1/runs/{id}/attention/resolve ─────────────────────────
+      const resolveMatch = url.pathname.match(/^\/v1\/runs\/([^/]+)\/attention\/resolve$/);
+      if (request.method === "POST" && resolveMatch !== null) {
+        const entry = await record();
+        // Mirror the gateway resolve handler's fail-closed order: content-type,
+        // JSON object, then attentionId, then resolution (same field messages).
+        const resolveProblem = (fields: Record<string, string>): Response =>
+          Response.json(problem(400, "invalid_request", "Invalid request", "Schema validation failed.", serverRequestId, false, fields), { status: 400, headers: { "Content-Type": "application/problem+json", ...reflectId } });
+        if (!(request.headers.get("content-type") ?? "").toLowerCase().includes("application/json")) {
+          return resolveProblem({ "content-type": "application/json is required" });
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(entry.body ?? "");
+        } catch {
+          return resolveProblem({ body: "must be valid JSON" });
+        }
+        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+          return resolveProblem({ body: "must be a JSON object" });
+        }
+        const body = parsed as { attentionId?: unknown; resolution?: unknown };
+        if (typeof body.attentionId !== "string" || body.attentionId.trim() === "") {
+          return resolveProblem({ attentionId: "must be a non-empty string" });
+        }
+        if (typeof body.resolution !== "string" || body.resolution.trim() === "") {
+          return resolveProblem({ resolution: "must be a non-empty string" });
+        }
+        return Response.json({ runId: decodeURIComponent(must(resolveMatch[1])), attentionId: body.attentionId, resolved: true }, { headers: reflectId });
+      }
+
       // ── GET /v1/runs and /v1/runs/{id} ───────────────────────────────
       if (request.method === "GET" && url.pathname === "/v1/runs") {
         await record();
@@ -572,7 +606,7 @@ export function createMockGateway(): MockGateway {
       const runMatch = url.pathname.match(/^\/v1\/runs\/([^/]+)$/);
       if (request.method === "GET" && runMatch !== null) {
         await record();
-        if (decodeURIComponent(runMatch[1]!) !== RUN_ID && runMatch[1] !== OLD_RUN_ID) {
+        if (decodeURIComponent(must(runMatch[1])) !== RUN_ID && runMatch[1] !== OLD_RUN_ID) {
           const body = problem(
             404,
             "run_not_found",
@@ -608,7 +642,7 @@ export function createMockGateway(): MockGateway {
             headers: { "Content-Type": "application/problem+json", ...reflectId },
           });
         }
-        const paneId = decodeURIComponent(paneEventsMatch[1]!);
+        const paneId = decodeURIComponent(must(paneEventsMatch[1]));
         if (paneId !== PANE_FRAMES.list.panes[0]?.paneId) {
           const body = problem(
             404,
@@ -693,7 +727,7 @@ export function createMockGateway(): MockGateway {
             headers: { "Content-Type": "application/problem+json", ...reflectId },
           });
         }
-        if (decodeURIComponent(eventsMatch[1]!) !== RUN_ID) {
+        if (decodeURIComponent(must(eventsMatch[1])) !== RUN_ID) {
           const body = problem(
             404,
             "run_not_found",
@@ -775,7 +809,7 @@ export function createMockGateway(): MockGateway {
             headers: { "Content-Type": "application/problem+json", ...reflectId },
           });
         }
-        const sessionId = decodeURIComponent(sessionEventsMatch[1]!);
+        const sessionId = decodeURIComponent(must(sessionEventsMatch[1]));
         if (sessionId !== SESSION_ID && sessionId !== ORPHAN_SESSION_ID) {
           const body = problem(
             404,

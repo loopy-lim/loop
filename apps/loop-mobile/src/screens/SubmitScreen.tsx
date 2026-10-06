@@ -4,7 +4,7 @@ import { KeyboardAvoidingView, StyleSheet, TextInput, TouchableOpacity, View } f
 import type { GatewayClient } from "../gateway-client/client";
 import type { SubmitPromptAccepted } from "../gateway-client/wire";
 import type { SessionNamingIndex } from "../state/sessionsView";
-import { SpawnSessionCard } from "../features/spawn-card";
+import { SpawnFab } from "../features/spawn-fab";
 import { DynText } from "../ui/DynText";
 import { colors, press, radius, space, type } from "../ui/tokens";
 import { RunsList } from "../features/run-list";
@@ -43,6 +43,9 @@ export function SubmitScreen(props: {
   const [prompt, setPrompt] = useState(props.initialPrompt ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Focus ring (canon §4): the composer card's border rides the accent
+  // while the prompt input is focused — the card is the input's surface.
+  const [inputFocused, setInputFocused] = useState(false);
   const autoSubmitFired = useRef(false);
 
   const submit = () => {
@@ -76,7 +79,7 @@ export function SubmitScreen(props: {
 
   return (
     <KeyboardAvoidingView behavior="padding" style={styles.screenRoot}>
-      <View style={styles.composerCard}>
+      <View style={[styles.composerCard, inputFocused && styles.composerCardFocused]}>
         <TextInput
           style={styles.input}
           multiline
@@ -84,6 +87,8 @@ export function SubmitScreen(props: {
           onChangeText={setPrompt}
           placeholder="Describe the task for Loop"
           placeholderTextColor={colors.inkFaint}
+          onFocus={() => setInputFocused(true)}
+          onBlur={() => setInputFocused(false)}
         />
         <View style={styles.composerFooter}>
           {error !== null ? <DynText style={styles.error}>{error}</DynText> : <View />}
@@ -104,16 +109,6 @@ export function SubmitScreen(props: {
           </TouchableOpacity>
         </View>
       </View>
-      {/* Remote spawn (decision 2026-xx-session-spawn §D-D): a quiet
-       * labeled action between the composer and the list — it never
-       * competes with Submit, and its inline status line owns the whole
-       * flow's feedback (spawning → waiting → problem) without a modal. */}
-      <SpawnSessionCard
-        client={props.client}
-        blocked={props.spawnBlocked ?? false}
-        onBlocked={() => props.onSpawnBlocked?.()}
-        onOpened={(sessionId) => props.onOpenSession?.(sessionId)}
-      />
       {/* Real runs on the gateway (durable + transient), same list `loop runs` shows. */}
       <View style={styles.listSection}>
         <RunsList
@@ -123,6 +118,17 @@ export function SubmitScreen(props: {
           onOpenSession={props.onOpenSession}
         />
       </View>
+      {/* Remote spawn (task `fab-icons`, superseding the inline card):
+       * a floating "+" action button anchored bottom-right — the flow's
+       * spawning/waiting/problem states stay visible in the status pill
+       * directly above the button, without a modal. Last child: the FAB
+       * floats OVER the list (touch + z-order). */}
+      <SpawnFab
+        client={props.client}
+        blocked={props.spawnBlocked ?? false}
+        onBlocked={() => props.onSpawnBlocked?.()}
+        onOpened={(sessionId) => props.onOpenSession?.(sessionId)}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -132,14 +138,19 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.hairline,
-    borderRadius: radius.l,
+    borderRadius: radius.m,
     padding: space.m,
   },
+  // Focus ring (canon §4): the accent marks the focused composer only.
+  composerCardFocused: { borderColor: colors.accent },
   input: {
     color: colors.ink,
     fontSize: type.body.fontSize,
     lineHeight: type.body.lineHeight,
-    minHeight: 72,
+    // Two visible lines at rest (restyle pass; was 72 — a 150pt card whose
+    // empty state showed one placeholder line over 50pt of dead air).
+    // Multiline growth is unchanged.
+    minHeight: 48,
     textAlignVertical: "top",
     padding: 0,
   },
@@ -152,10 +163,11 @@ const styles = StyleSheet.create({
   },
   error: { ...type.caption, color: colors.danger, flexShrink: 1 },
   cta: {
+    // Primary tier: white fill, radius.m — the pill radius is retired for
+    // buttons (task `redesign-implement`, canon §3 버튼 위계).
     backgroundColor: colors.cta,
-    borderRadius: radius.pill,
-    // 44pt touch floor: paddingVertical m puts the pill at ~46pt tall
-    // (was 10 → 42pt, under the floor in ui-ux-guidance §8).
+    borderRadius: radius.m,
+    // 44pt touch floor: paddingVertical m puts the button at ~46pt tall.
     paddingVertical: space.m,
     paddingHorizontal: space.l,
   },

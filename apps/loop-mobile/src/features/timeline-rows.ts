@@ -7,7 +7,7 @@
  */
 
 import type { ConversationItem } from "../state/conversationProjection";
-import { dayKey, dayLabel } from "./time-format";
+import { clockTime, dayKey, dayLabel } from "./time-format";
 
 export type TimelineRow =
   | { kind: "dateHeader"; rowKey: string; label: string }
@@ -46,13 +46,17 @@ function itemKey(item: ConversationItem, index: number): string {
  * adjacent items (C8). The first item gets no header (nothing changed
  * before it): yesterday 23:50 → today 00:05 yields exactly one boundary,
  * ten same-day items yield none. Steer markers carry no occurredAt — they
- * never move the day cursor and never get clock captions (C6: captions sit
- * on the first row of a consecutive same-role run).
+ * never move the day cursor and never get clock captions.
+ *
+ * Clock captions are MINUTE groups (task `redesign-implement`, S-6 — the
+ * chat-app convention): one caption per wall-clock minute, not one per
+ * role change. 22:27 assistant → 22:27 tool → 22:27 assistant shows one
+ * caption; the 22:28 message opens a new group.
  */
 export function timelineRows(items: readonly ConversationItem[]): TimelineRow[] {
   const rows: TimelineRow[] = [];
   let lastDay: string | null = null;
-  let lastCaptionKind: ConversationItem["kind"] | null = null;
+  let lastClock: string | null = null;
   items.forEach((item, index) => {
     if ("occurredAt" in item) {
       const day = dayKey(item.occurredAt);
@@ -64,13 +68,14 @@ export function timelineRows(items: readonly ConversationItem[]): TimelineRow[] 
         });
       }
       lastDay = day;
+      const clock = clockTime(item.occurredAt);
       rows.push({
         kind: "item",
         rowKey: itemKey(item, index),
         item,
-        showOccurredAt: item.kind !== lastCaptionKind,
+        showOccurredAt: clock !== lastClock,
       });
-      lastCaptionKind = item.kind;
+      lastClock = clock;
       return;
     }
     rows.push({ kind: "item", rowKey: itemKey(item, index), item, showOccurredAt: false });

@@ -31,7 +31,7 @@ export async function probeGateway(
     await new GatewayClient(config, probingFetch).listRuns(1);
   } catch (error) {
     if (controller.signal.aborted) {
-      throw new Error("gateway probe timed out");
+      throw new Error("gateway probe timed out", { cause: error });
     }
     throw error;
   } finally {

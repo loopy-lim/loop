@@ -87,10 +87,16 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: COLUMN_MAX_WIDTH,
   },
+  // The non-scrollable column carries the same 16pt gutter as the
+  // scrollable one (restyle pass): chats-home cards/labels and the files
+  // screen previously ran edge-to-edge — the horizontal collapse the
+  // scrollable variant never had. Same compounding with the device's
+  // landscape insets as the scrollable container above.
   columnFixed: {
     flex: 1,
     width: "100%",
     maxWidth: COLUMN_MAX_WIDTH,
+    paddingHorizontal: COLUMN_GUTTER,
   },
   // Below a header the column needs no status-bar clearance — just the
   // small breathing gap under the header's hairline.

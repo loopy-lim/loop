@@ -17,9 +17,6 @@
 
 export class ConnectionConfigError extends Error {
   override readonly name = "ConnectionConfigError";
-  constructor(message: string) {
-    super(message);
-  }
 }
 
 export type ConnectionConfig = {

@@ -130,13 +130,15 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   topBar: { paddingHorizontal: space.l },
+  // Secondary button tier (canon §3): radius.m — the camera overlay's
+  // cancel is still a button, not a pill.
   cancel: {
     alignSelf: "flex-start",
     minHeight: 44,
     justifyContent: "center",
     borderWidth: 1,
     borderColor: colors.hairline,
-    borderRadius: radius.pill,
+    borderRadius: radius.m,
     paddingVertical: space.s,
     paddingHorizontal: space.l,
     backgroundColor: colors.bg,

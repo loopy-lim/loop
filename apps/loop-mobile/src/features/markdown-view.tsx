@@ -8,8 +8,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Clipboard, StyleSheet, TouchableOpacity, View } from "react-native";
 import type { TextStyle } from "react-native";
 
-import { COPY_CODE_LABEL, COPIED_CODE_LABEL } from "../ui/copy";
+import { COPY_CODE_LABEL, COPIED_CODE_LABEL, READOUT_STYLE } from "../ui/copy";
 import { DynText } from "../ui/DynText";
+import { Icon } from "../ui/Icon";
 import { glyph } from "../ui/glyphs";
 import { colors, press, radius, space, type } from "../ui/tokens";
 import { parseInline, parseMarkdown, type MarkdownInline } from "./markdown";
@@ -86,9 +87,8 @@ function CodeBlock(props: { code: string; lang: string }) {
           style={styles.codeCopy}
           accessibilityLabel={copied ? COPIED_CODE_LABEL : COPY_CODE_LABEL}
         >
-          <DynText style={styles.codeCopyText}>
-            {glyph.copy} {copied ? COPIED_CODE_LABEL : COPY_CODE_LABEL}
-          </DynText>
+          <Icon role="copy" size={type.caption.fontSize} color={colors.inkMute} />
+          <DynText style={styles.codeCopyText}>{copied ? COPIED_CODE_LABEL : COPY_CODE_LABEL}</DynText>
         </TouchableOpacity>
       </View>
       {spans === null ? (
@@ -133,7 +133,7 @@ export function MarkdownView(props: { text: string; style?: TextStyle }) {
         if (block.kind === "bullet") {
           return (
             <View key={index} style={styles.bulletRow}>
-              <DynText style={styles.bulletGlyph}>{"•  "}</DynText>
+              <DynText style={styles.bulletGlyph}>{`${glyph.bullet}  `}</DynText>
               <InlineLine text={block.text} style={styles.prose} />
             </View>
           );
@@ -194,10 +194,11 @@ const styles = StyleSheet.create({
     ...type.caption,
     color: colors.inkFaint,
     textTransform: "uppercase",
-    letterSpacing: 0.6,
+    ...READOUT_STYLE,
     flexShrink: 1,
   },
-  codeCopy: { minWidth: 32, alignItems: "center" },
+  // Copy control: the icon mark and the label ride one quiet row.
+  codeCopy: { minWidth: 32, flexDirection: "row", alignItems: "center", gap: space.xxs },
   codeCopyText: { ...type.caption, color: colors.inkMute },
   codeText: { ...type.mono, fontFamily: "Menlo", color: colors.ink, marginTop: space.xs },
 });

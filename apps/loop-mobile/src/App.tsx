@@ -21,16 +21,20 @@ import { SettingsScreen } from "./screens/SettingsScreen";
 import { SubmitScreen } from "./screens/SubmitScreen";
 import { Screen } from "./ui/Screen";
 import { AppHeader } from "./ui/AppHeader";
-import { DynText } from "./ui/DynText";
-import { glyph } from "./ui/glyphs";
+import { BackSwipeZone } from "./ui/BackSwipeZone";
+import { DrawerMenu, type DrawerKey } from "./ui/DrawerMenu";
+import { TabBar, type TabKey } from "./ui/TabBar";
+import { Icon } from "./ui/Icon";
 import {
-  APP_TITLE,
   LOGOUT_CONFIRM_CANCEL,
   LOGOUT_CONFIRM_MESSAGE,
   LOGOUT_CONFIRM_TITLE,
   LOGOUT_LABEL,
+  FILES_REPORTS_LABEL,
+  SETTINGS_TITLE,
+  TERMINAL_TITLE,
 } from "./ui/copy";
-import { colors, press, radius, space, type } from "./ui/tokens";
+import { colors, press, type } from "./ui/tokens";
 import { showcaseFromProps, type ShowcaseConfig } from "./showcase";
 
 /**
@@ -45,11 +49,11 @@ import { showcaseFromProps, type ShowcaseConfig } from "./showcase";
  * auto-connect falls back to the manual Connect screen WITHOUT deleting the
  * stored entry; a successful connect (manual or restored) is what persists
  * the credential; "Log out" deletes it immediately and returns to the manual
- * screen — it lives as the chats header's right-corner icon behind a
- * confirmation alert (task `header-statusbar-redesign`; the bottom row it
- * briefly occupied rode the home-indicator corner). The bearer and base URL
- * exist only inside GatewayClient's in-memory config between connects; the
- * token is never logged or rendered.
+ * screen — it lives on the bottom Settings tab as a confirmation-gated row
+ * (task `main-screen-polish`; the chats home is chrome-free, and the header
+ * corner it briefly occupied went away with the LOOP header). The bearer and
+ * base URL exist only inside GatewayClient's in-memory config between
+ * connects; the token is never logged or rendered.
  *
  * Safe area (task `ui-codex-redesign`): the root is a SafeAreaProvider; the
  * shared Screen wrapper and ConversationScreen consume the insets (status
@@ -72,8 +76,16 @@ export function App(props: { showcase?: ShowcaseConfig } | undefined) {
   // the settings screen, persisted through the keychain-backed store.
   const settingsStore = useMemo(() => createSettingsStore(settingsKeychainStorage), []);
   const [settings, setSettings] = useState<AppSettings>(defaultSettings);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showFiles, setShowFiles] = useState(false);
+  // Tab navigation (task `redesign-implement`, direction A): the three
+  // destinations live in one bottom tab bar; detail surfaces (conversation,
+  // raw pane, scanner) hide it and carry the header back chevron instead
+  // (brief §4 재판정 — 하단은 옳고, pill은 틀렸다).
+  const [tab, setTab] = useState<TabKey>("chats");
+  // Side menu (task `mobile-ux-patterns`): the drawer is the one
+  // auxiliary surface reachable from every chrome screen — headers open
+  // it, and its destination rows jump the tab bar's SAME three keys
+  // (a second access path, never a third destination).
+  const [menuOpen, setMenuOpen] = useState(false);
   /** Most recently opened run — the split viewer's left tree survives a
    * trip back to the chats list (the chat itself is closed there). */
   const [lastRunId, setLastRunId] = useState<string | null>(null);
@@ -249,7 +261,6 @@ export function App(props: { showcase?: ShowcaseConfig } | undefined) {
     (next: AppSettings) => {
       setSettings(next);
       settingsStore.save(next).catch(() => undefined);
-      setShowSettings(false);
     },
     [settingsStore],
   );
@@ -291,6 +302,24 @@ export function App(props: { showcase?: ShowcaseConfig } | undefined) {
   }, [client, autoLogout, autoLogoutDelayMs, logout]);
 
   function renderScreen(): ReactElement {
+    // Every CONNECTED surface rides the drawer overlay (task
+    // `mobile-ux-patterns`): the menu must open from detail screens too,
+    // where the tab bar is hidden — that is its reason to exist.
+    const withDrawer = (screen: ReactElement): ReactElement => (
+      <>
+        {screen}
+        <DrawerMenu
+          open={menuOpen}
+          active={tab}
+          gatewayLine={gatewayLine(settings)}
+          onSelect={(key: DrawerKey) => {
+            setMenuOpen(false);
+            setTab(key);
+          }}
+          onClose={() => setMenuOpen(false)}
+        />
+      </>
+    );
     if (client === null) {
       if (scanOpen) {
         // Full-bleed camera: applies its own safe-area insets to the chrome
@@ -334,38 +363,28 @@ export function App(props: { showcase?: ShowcaseConfig } | undefined) {
       );
     }
     if (openPaneId !== null) {
-      return (
-        <Screen>
-          <PaneScreen client={client} paneId={openPaneId} />
-          <QuietButton label="Back to chat" onPress={() => setOpenPaneId(null)} />
-        </Screen>
-      );
-    }
-    if (showSettings) {
-      return (
-        <Screen>
-          <SettingsScreen settings={settings} onSave={saveSettings} />
-          <QuietButton label="Back" onPress={() => setShowSettings(false)} />
-        </Screen>
-      );
-    }
-    if (showFiles) {
-      return (
-        <Screen scrollable={false}>
-          {/* Split-viewer design §B: the container is responsive — wide =
-           * persistent two-pane, narrow = tree + viewer bottom sheet. */}
-          <RunSplitScreen
-            client={client}
-            runId={chat?.runId ?? lastRunId}
-            viewerFontSize={settings.viewerFontSize}
-            refreshIntervalMs={settings.refreshIntervalMs}
-          />
-          <QuietButton label="Back to chats" onPress={() => setShowFiles(false)} />
-        </Screen>
+      // Detail surface: the tab bar hides; the header owns the back chevron
+      // (brief §4: 액션 알약은 헤더 back과 제스처로 흡수한다) — and the
+      // left-edge swipe fires the SAME back (mobile-ux-patterns).
+      return withDrawer(
+        <Screen
+          scrollable={false}
+          header={
+            <AppHeader
+              title={TERMINAL_TITLE}
+              leading={<HeaderBack onPress={() => setOpenPaneId(null)} />}
+              actions={<DrawerButton onPress={() => setMenuOpen(true)} />}
+            />
+          }
+        >
+          <BackSwipeZone onBack={() => setOpenPaneId(null)}>
+            <PaneScreen client={client} paneId={openPaneId} />
+          </BackSwipeZone>
+        </Screen>,
       );
     }
     if (chat !== null) {
-      return (
+      return withDrawer(
         <ConversationScreen
           client={client}
           runId={chat.runId}
@@ -373,6 +392,7 @@ export function App(props: { showcase?: ShowcaseConfig } | undefined) {
           onOpenPane={setOpenPaneId}
           onOpenRun={openRunChat}
           onBack={() => setChat(null)}
+          onOpenMenu={() => setMenuOpen(true)}
           naming={naming}
           autoSteerText={showcase?.autoSteerText}
           autoSteerDelayMs={showcase?.autoSteerDelayMs}
@@ -382,35 +402,65 @@ export function App(props: { showcase?: ShowcaseConfig } | undefined) {
           autoAttachDelayMs={showcase?.attachDelayMs}
           autoAttachSendDelayMs={showcase?.attachSendDelayMs}
           autoBackDelayMs={showcase?.autoBackDelayMs}
-        />
+        />,
       );
     }
-    return (
-      <Screen
-        scrollable={false}
-        header={<AppHeader title={APP_TITLE} actions={<LogoutButton onPress={logout} />} />}
-      >
-        <SubmitScreen
-          client={client}
-          onAccepted={(accepted) => openRunChat(accepted.run.runId)}
-          initialPrompt={showcase?.prompt}
-          autoSubmit={showcase?.autoSubmit}
-          submitDelayMs={showcase?.submitDelayMs}
-          onOpenRun={openRunChat}
-          onOpenSession={openSessionChat}
-          naming={naming}
-          spawnBlocked={spawnBlocked}
-          onSpawnBlocked={() => setSpawnBlocked(true)}
-        />
-        {/* Split-viewer design §B entries (chats footer): the viewer is a
-         * screen, not a modal over the conversation; settings lives beside
-         * it. Quiet pills, same pattern as the raw-pane back button — one
-         * row so the footer stays a single quiet band. */}
-        <View style={styles.footerRow}>
-          <QuietButton label="Files & reports" onPress={() => setShowFiles(true)} />
-          <QuietButton label="Settings" onPress={() => setShowSettings(true)} />
-        </View>
-      </Screen>
+    // Tab shell (direction A): the three destinations over one tab bar —
+    // icon + label + accent active state. Files keeps the split-viewer §B
+    // responsive container; the tab bar replaces the old footer pills.
+    const content =
+      tab === "files" ? (
+        <Screen
+          scrollable={false}
+          key="files"
+          header={<AppHeader title={FILES_REPORTS_LABEL} />}
+        >
+          {/* Split-viewer design §B: the container is responsive — wide =
+           * persistent two-pane, narrow = tree + viewer bottom sheet. */}
+          <RunSplitScreen
+            client={client}
+            runId={lastRunId}
+            viewerFontSize={settings.viewerFontSize}
+            refreshIntervalMs={settings.refreshIntervalMs}
+          />
+        </Screen>
+      ) : tab === "settings" ? (
+        <Screen key="settings" header={<AppHeader title={SETTINGS_TITLE} />}>
+          {/* Logout rides the bottom Settings path (task `main-screen-polish`):
+           * the handler is handed over ALREADY wrapped in the confirmation
+           * alert — the settings row is the only control that fires it. */}
+          <SettingsScreen
+            settings={settings}
+            onSave={saveSettings}
+            onLogout={confirmLogout(logout)}
+          />
+        </Screen>
+      ) : (
+        // Chrome-free chats home (task `main-screen-polish`): no AppHeader —
+        // the list starts directly under the status zone (the shared Screen
+        // clears the inset when no header is present). No destructive
+        // control lives on this high-frequency surface; logout moved to the
+        // Settings tab, and the drawer stays reachable from detail screens.
+        <Screen scrollable={false} key="chats">
+          <SubmitScreen
+            client={client}
+            onAccepted={(accepted) => openRunChat(accepted.run.runId)}
+            initialPrompt={showcase?.prompt}
+            autoSubmit={showcase?.autoSubmit}
+            submitDelayMs={showcase?.submitDelayMs}
+            onOpenRun={openRunChat}
+            onOpenSession={openSessionChat}
+            naming={naming}
+            spawnBlocked={spawnBlocked}
+            onSpawnBlocked={() => setSpawnBlocked(true)}
+          />
+        </Screen>
+      );
+    return withDrawer(
+      <View style={styles.shell}>
+        {content}
+        <TabBar active={tab} onSelect={setTab} />
+      </View>,
     );
   }
 
@@ -433,8 +483,18 @@ function prefillOf(config: ConnectionConfig): { host: string; port: string } {
   return { host, port: String(port) };
 }
 
-/** Logout confirmation (mis-tap guard): the header corner icon only OPENS
- * the alert; the destructive button is the sole path to the App-owned
+/** The drawer footer's gateway display line (§B display row): a read-only
+ * echo of the recorded settings — never the bearer, which lives only in
+ * the in-memory client config between connects. */
+function gatewayLine(settings: AppSettings): string | null {
+  if (settings.gatewayHost === null) return null;
+  return settings.gatewayPort === null
+    ? settings.gatewayHost
+    : `${settings.gatewayHost}:${settings.gatewayPort}`;
+}
+
+/** Logout confirmation (mis-tap guard): the Settings row only OPENS the
+ * alert; the destructive button is the sole path to the App-owned
  * handler — an accidental tap deletes nothing. */
 function confirmLogout(logout: () => void): () => void {
   return () => {
@@ -445,62 +505,50 @@ function confirmLogout(logout: () => void): () => void {
   };
 }
 
-/** The chats header's right-corner logout (task
- * `header-statusbar-redesign`): a small quiet glyph, sized to the 44pt
- * touch floor inside the status-bar-substitute zone. Confirmation-gated
- * (mis-tap safe); the handler stays App-owned (credential D2-4). */
-function LogoutButton(props: { onPress: () => void }) {
+/** Header back chevron (brief §4): the action-pill replacement — detail
+ * screens navigate back through the header, never through a bottom pill.
+ * The 44pt touch floor keeps the chevron honest. */
+function HeaderBack(props: { onPress: () => void }) {
   return (
     <TouchableOpacity
-      style={styles.logoutButton}
-      onPress={confirmLogout(props.onPress)}
-      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      onPress={props.onPress}
+      hitSlop={12}
+      style={styles.headerBack}
       activeOpacity={press.activeOpacity}
     >
-      <DynText style={styles.logoutGlyph}>{glyph.logout}</DynText>
+      <Icon role="back" size={type.title.fontSize} color={colors.inkMute} />
     </TouchableOpacity>
   );
 }
 
-/** Quiet nav affordance (raw-pane back): bordered pill, muted ink — never
- * competes with the screen's single strong CTA (guidance §4). The 44pt
- * min height keeps it a real touch target while staying quiet. Logout is
- * NOT rendered here: it lives in the chats header's right corner. */
-function QuietButton(props: { label: string; onPress: () => void }) {
+/** Header hamburger (task `mobile-ux-patterns`): opens the side menu —
+ * the auxiliary surface for reaching Settings/Files from screens whose
+ * tab bar is hidden. Same header-corner grammar as the logout icon:
+ * quiet glyph on the 44pt touch floor. */
+function DrawerButton(props: { onPress: () => void }) {
   return (
     <TouchableOpacity
-      style={styles.quietButton}
+      style={styles.drawerButton}
       onPress={props.onPress}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       activeOpacity={press.activeOpacity}
+      accessibilityRole="button"
+      accessibilityLabel="Menu"
     >
-      <Text style={styles.quietButtonText}>{props.label}</Text>
+      <Icon role="menu" size={type.title.fontSize} color={colors.inkMute} />
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
+  // Tab shell: the tab surface fills the space above the tab bar.
+  shell: { flex: 1 },
   restoring: { ...type.body, color: colors.inkMute },
-  footerRow: { flexDirection: "row", gap: space.s },
-  quietButton: {
-    alignSelf: "flex-start",
-    marginTop: space.l,
-    minHeight: 44,
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: colors.hairline,
-    borderRadius: radius.pill,
-    paddingVertical: space.s,
-    paddingHorizontal: space.l,
-  },
-  quietButtonText: { ...type.captionStrong, color: colors.inkMute, marginTop: 0 },
-  logoutButton: {
-    minWidth: 44,
-    minHeight: 44,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  logoutGlyph: { ...type.title, color: colors.inkMute },
+  headerBack: { minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" },
+  // Side-menu hamburger (mobile-ux-patterns): opens the drawer from
+  // detail screens (the chats home is chrome-free and rides the tab bar).
+  drawerButton: { minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" },
 });
 
 export default App;

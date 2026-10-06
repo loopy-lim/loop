@@ -1,32 +1,29 @@
 /**
- * Logout placement contract (task `header-statusbar-redesign`, superseding
- * the `logout-relocation-polish` list-footer): logout is a destructive,
- * low-frequency action, so its UI placement is machine-pinned the same way
- * the visibility and design-spec contracts are — by source inspection
- * (react-native does not load under the test runtime, same rule as every
- * other suite here).
+ * Logout placement contract (task `main-screen-polish`, superseding the
+ * chats-header corner): the main list is chrome-free — no LOOP header and
+ * no destructive control on the high-frequency surface — and logout lives
+ * on the bottom Settings tab as a confirmation-gated row. Machine-pinned
+ * by source inspection (react-native does not load under the test runtime,
+ * same rule as every other suite here).
  *
- * Operator directive: the bottom row rode the home-indicator corner, where
- * the rounded screen edges clip it, so the control moved to the chats
- * header's right corner (the status-bar-substitute zone).
- *
- * Three gates:
- * 1. No bottom row: run-list renders no logout control at all — the list
- *    is high-frequency surface and carries no destructive control.
- * 2. Header corner: App composes the chats header (ui/AppHeader via the
- *    shared Screen's header slot) and the logout icon is the header's
- *    right-corner action — a small glyph on the 44pt touch floor.
- * 3. Mis-tap safe: the icon only opens the confirmation Alert; the
- *    handler is reachable exclusively through the destructive alert
- *    button, and it stays App-owned (credential decision D2-4: keychain
- *    deletion + disconnect).
+ * Gates:
+ * 1. No destructive control on the list: run-list and SubmitScreen render
+ *    no logout plumbing at all.
+ * 2. Chrome-free chats home: App composes the chats Screen WITHOUT an
+ *    AppHeader (the LOOP title is gone; the shared Screen clears the top
+ *    inset itself, so the list starts under the status zone).
+ * 3. Settings path: App passes the confirmation-wrapped handler to
+ *    SettingsScreen as `onLogout`, and the settings row is the only
+ *    control that fires it (quiet destructive row, danger ink, 44pt floor).
+ * 4. Mis-tap safe: the row press only OPENS the confirmation Alert; the
+ *    destructive alert button is the sole path to the App-owned handler
+ *    (credential decision D2-4: keychain deletion + disconnect).
  */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
-  APP_TITLE,
   LOGOUT_CONFIRM_CANCEL,
   LOGOUT_CONFIRM_MESSAGE,
   LOGOUT_CONFIRM_TITLE,
@@ -37,8 +34,9 @@ const mobileRoot = join(import.meta.dir, "..");
 const appSource = readFileSync(join(mobileRoot, "src/App.tsx"), "utf8");
 const runListSource = readFileSync(join(mobileRoot, "src/features/run-list.tsx"), "utf8");
 const submitSource = readFileSync(join(mobileRoot, "src/screens/SubmitScreen.tsx"), "utf8");
+const settingsSource = readFileSync(join(mobileRoot, "src/screens/SettingsScreen.tsx"), "utf8");
 
-describe("no bottom row — the list surface carries no destructive control", () => {
+describe("no destructive control on the list surface", () => {
   test("run-list renders no logout row, prop, or confirmation plumbing", () => {
     expect(runListSource).not.toContain("LOGOUT_");
     expect(runListSource).not.toContain("onLogout");
@@ -57,26 +55,33 @@ describe("no bottom row — the list surface carries no destructive control", ()
   });
 });
 
-describe("header corner — the icon lives in the status-bar-substitute zone", () => {
-  test("App composes the chats header (AppHeader) with the logout icon as its action", () => {
-    expect(appSource).toContain("<AppHeader");
-    expect(appSource).toContain("title={APP_TITLE}");
-    expect(appSource).toContain("actions={<LogoutButton onPress={logout} />}");
-    // the header rides the shared Screen's header slot (top inset owner)
-    expect(appSource).toContain("header={");
+describe("chrome-free chats home — the LOOP header is gone", () => {
+  test("the chats Screen composes no AppHeader (the list starts under the status zone)", () => {
+    expect(appSource).toContain('<Screen scrollable={false} key="chats">');
+    // the header title left the codebase with the header itself
+    expect(appSource).not.toContain("APP_TITLE");
+    expect(appSource).not.toContain("LogoutButton");
+  });
+});
+
+describe("settings path — the row is the only control that logs out", () => {
+  test("App hands the confirmation-wrapped handler to SettingsScreen", () => {
+    expect(appSource).toContain("<SettingsScreen");
+    expect(appSource).toContain("onLogout={confirmLogout(logout)}");
+    // the raw handler is handed over exactly once — inside the confirm
+    // wrapper; no other call site passes it along
+    expect((appSource.match(/confirmLogout\(logout\)/g) ?? []).length).toBe(1);
   });
 
-  test("the icon is a small quiet glyph on the 44pt touch floor", () => {
-    expect(appSource).toContain("{glyph.logout}");
-    expect(appSource).toMatch(/logoutButton:\s*\{[^}]*minWidth: 44/);
-    expect(appSource).toMatch(/logoutButton:\s*\{[^}]*minHeight: 44/);
-    expect(appSource).toMatch(
-      /logoutGlyph:\s*\{\s*\.\.\.type\.title,\s*color: colors\.inkMute\s*\}/,
-    );
+  test("the settings row is a quiet destructive control on the 44pt floor", () => {
+    expect(settingsSource).toContain('<Icon role="logout"');
+    expect(settingsSource).toContain("onPress={props.onLogout}");
+    expect(settingsSource).toContain("accessibilityLabel={LOGOUT_LABEL}");
+    expect(settingsSource).toMatch(/logoutRow:\s*\{[^}]*minHeight: 44/);
+    expect(settingsSource).toMatch(/logoutText:\s*\{\s*\.\.\.type\.bodyStrong,\s*color:\s*colors\.danger\s*\}/);
   });
 
   test("phrases are owned copy constants (ui-ux-guidance §7)", () => {
-    expect(APP_TITLE.length).toBeGreaterThan(0);
     expect(LOGOUT_LABEL.length).toBeGreaterThan(0);
     expect(LOGOUT_CONFIRM_TITLE.length).toBeGreaterThan(0);
     expect(LOGOUT_CONFIRM_MESSAGE.length).toBeGreaterThan(0);
@@ -85,19 +90,16 @@ describe("header corner — the icon lives in the status-bar-substitute zone", (
 });
 
 describe("mis-tap safe — the handler is reachable only through the confirmation", () => {
-  test("the icon press opens Alert.alert; no direct pass-through of the handler", () => {
+  test("the row press opens Alert.alert; no direct pass-through of the handler", () => {
     expect(appSource).toContain("Alert.alert(");
-    // the raw handler is handed over exactly once — as LogoutButton's prop;
-    // no TouchableOpacity presses it directly
-    expect((appSource.match(/onPress=\{logout\}/g) ?? []).length).toBe(1);
     expect(appSource).toContain('style: "destructive"');
     expect(appSource).toContain('style: "cancel"');
+    // the settings row receives the WRAPPED handler, never the raw one
+    expect(settingsSource).not.toMatch(/onPress=\{logout\}/);
   });
 
   test("the destructive button is the sole onPress path to the handler", () => {
     const alert = appSource.slice(appSource.indexOf("Alert.alert("));
     expect(alert).toContain("onPress: logout");
-    // the icon's TouchableOpacity presses confirmLogout, not the handler
-    expect(appSource).toContain("onPress={confirmLogout(props.onPress)}");
   });
 });

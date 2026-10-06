@@ -9,6 +9,10 @@
 import { describe, expect, test } from "bun:test";
 
 import { canonicalLanguage, highlightSyntax, type SyntaxSpan } from "../src/features/syntax";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 /** Spans must tile the whole string in order — the renderer's slicing
  * contract (it reconstructs the exact code from span boundaries). */
@@ -62,7 +66,7 @@ describe("determinism and tiling", () => {
   });
 
   test("spans cover the whole input exactly (render slice contract)", () => {
-    expectTiling(code, highlightSyntax(code, "ts")!);
+    expectTiling(code, must(highlightSyntax(code, "ts")));
   });
 
   test("empty code yields zero spans for supported languages", () => {
@@ -74,7 +78,7 @@ describe("determinism and tiling", () => {
 describe("ts / js / tsx profile", () => {
   test("keyword, number, comment, string, template literal", () => {
     const code = 'const n = 42; // answer\nconst s = "hi";\nconst t = `a${1}b`;';
-    const spans = highlightSyntax(code, "ts")!;
+    const spans = must(highlightSyntax(code, "ts"));
     expectTiling(code, spans);
     expect(textOfKind(code, spans, "keyword")).toEqual(["const", "const", "const"]);
     expect(textOfKind(code, spans, "number")).toEqual(["42"]);
@@ -84,14 +88,14 @@ describe("ts / js / tsx profile", () => {
 
   test("literals (true/false/null/undefined) and numbers with exponent/hex", () => {
     const code = "let ok = true; let gone = null; let big = 0xff; let e = 1e-10;";
-    const spans = highlightSyntax(code, "js")!;
+    const spans = must(highlightSyntax(code, "js"));
     expect(textOfKind(code, spans, "literal")).toEqual(["true", "null"]);
     expect(textOfKind(code, spans, "number")).toEqual(["0xff", "1e-10"]);
   });
 
   test("escaped quote stays inside the string; block comment spans lines", () => {
     const code = 'const s = "a\\"b"; /* multi\nline */ let x;';
-    const spans = highlightSyntax(code, "ts")!;
+    const spans = must(highlightSyntax(code, "ts"));
     expect(textOfKind(code, spans, "string")).toEqual(['"a\\"b"']);
     expect(textOfKind(code, spans, "comment")).toEqual(["/* multi\nline */"]);
     expect(textOfKind(code, spans, "keyword")).toEqual(["const", "let"]);
@@ -99,14 +103,14 @@ describe("ts / js / tsx profile", () => {
 
   test("unterminated string ends honestly at end of line (streaming cut)", () => {
     const code = 'const s = "unterminated\nlet after = 1;';
-    const spans = highlightSyntax(code, "ts")!;
+    const spans = must(highlightSyntax(code, "ts"));
     expect(textOfKind(code, spans, "string")).toEqual(['"unterminated']);
     expect(textOfKind(code, spans, "keyword")).toEqual(["const", "let"]);
   });
 
   test("unterminated template string runs to end of input (streaming cut)", () => {
     const code = "const t = `still going";
-    const spans = highlightSyntax(code, "ts")!;
+    const spans = must(highlightSyntax(code, "ts"));
     expect(textOfKind(code, spans, "string")).toEqual(["`still going"]);
   });
 });
@@ -114,7 +118,7 @@ describe("ts / js / tsx profile", () => {
 describe("rust profile", () => {
   test("fn/let/mut keywords, numbers, strings, block comment", () => {
     const code = "pub fn main() {\n    let mut n: u64 = 1_000; // count\n    /* block */\n}";
-    const spans = highlightSyntax(code, "rust")!;
+    const spans = must(highlightSyntax(code, "rust"));
     expectTiling(code, spans);
     expect(textOfKind(code, spans, "keyword")).toEqual(["pub", "fn", "let", "mut"]);
     expect(textOfKind(code, spans, "number")).toEqual(["1_000"]);
@@ -123,7 +127,7 @@ describe("rust profile", () => {
 
   test("lifetime 'a stays plain while char 'x' is a string", () => {
     const code = "fn f<'a>(c: char) -> &'a str { 'x' }";
-    const spans = highlightSyntax(code, "rust")!;
+    const spans = must(highlightSyntax(code, "rust"));
     expect(textOfKind(code, spans, "string")).toEqual(["'x'"]);
     const plain = textOfKind(code, spans, "plain").join("|");
     expect(plain).toContain("'a");
@@ -131,7 +135,7 @@ describe("rust profile", () => {
 
   test("true/false literals", () => {
     const code = "let flag = true; let off = false;";
-    const spans = highlightSyntax(code, "rust")!;
+    const spans = must(highlightSyntax(code, "rust"));
     expect(textOfKind(code, spans, "literal")).toEqual(["true", "false"]);
   });
 });
@@ -139,7 +143,7 @@ describe("rust profile", () => {
 describe("python profile", () => {
   test("def/return keywords, None/True literals, # comment", () => {
     const code = "def greet(name):\n    return None  # nothing yet\nflag = True";
-    const spans = highlightSyntax(code, "py")!;
+    const spans = must(highlightSyntax(code, "py"));
     expectTiling(code, spans);
     expect(textOfKind(code, spans, "keyword")).toEqual(["def", "return"]);
     expect(textOfKind(code, spans, "literal")).toEqual(["None", "True"]);
@@ -148,14 +152,14 @@ describe("python profile", () => {
 
   test("triple-quoted docstring spans lines as one string", () => {
     const code = '"""Doc\nstring"""\nx = 1';
-    const spans = highlightSyntax(code, "python")!;
+    const spans = must(highlightSyntax(code, "python"));
     expect(textOfKind(code, spans, "string")).toEqual(['"""Doc\nstring"""']);
     expect(textOfKind(code, spans, "number")).toEqual(["1"]);
   });
 
   test("single-quoted strings and escaped quotes", () => {
     const code = "s = 'it\\'s'";
-    const spans = highlightSyntax(code, "python")!;
+    const spans = must(highlightSyntax(code, "python"));
     expect(textOfKind(code, spans, "string")).toEqual(["'it\\'s'"]);
   });
 });
@@ -163,7 +167,7 @@ describe("python profile", () => {
 describe("json profile", () => {
   test("keys/values are strings; true/false/null literals; numbers", () => {
     const code = '{"ok": true, "count": 3, "none": null, "off": false}';
-    const spans = highlightSyntax(code, "json")!;
+    const spans = must(highlightSyntax(code, "json"));
     expectTiling(code, spans);
     expect(textOfKind(code, spans, "string")).toEqual(['"ok"', '"count"', '"none"', '"off"']);
     expect(textOfKind(code, spans, "literal")).toEqual(["true", "null", "false"]);
@@ -172,7 +176,7 @@ describe("json profile", () => {
 
   test("unterminated string (streaming cut) runs to end of input", () => {
     const code = '{"key": "value';
-    const spans = highlightSyntax(code, "json")!;
+    const spans = must(highlightSyntax(code, "json"));
     expect(textOfKind(code, spans, "string")).toEqual(['"key"', '"value']);
   });
 });
@@ -180,7 +184,7 @@ describe("json profile", () => {
 describe("bash profile", () => {
   test("keywords, # comment, double and single quoted strings", () => {
     const code = "if [ -n \"$x\" ]; then\n  echo 'literal'  # done\nfi";
-    const spans = highlightSyntax(code, "bash")!;
+    const spans = must(highlightSyntax(code, "bash"));
     expectTiling(code, spans);
     expect(textOfKind(code, spans, "keyword")).toEqual(["if", "then", "fi"]);
     expect(textOfKind(code, spans, "comment")).toEqual(["# done"]);
@@ -189,13 +193,13 @@ describe("bash profile", () => {
 
   test("$variables highlight as literals", () => {
     const code = "echo $HOME ${CACHE_DIR} $1";
-    const spans = highlightSyntax(code, "bash")!;
+    const spans = must(highlightSyntax(code, "bash"));
     expect(textOfKind(code, spans, "literal")).toEqual(["$HOME", "${CACHE_DIR}", "$1"]);
   });
 
   test("shebang line is a comment", () => {
     const code = "#!/usr/bin/env bash\necho hi";
-    const spans = highlightSyntax(code, "bash")!;
+    const spans = must(highlightSyntax(code, "bash"));
     expect(textOfKind(code, spans, "comment")).toEqual(["#!/usr/bin/env bash"]);
   });
 });

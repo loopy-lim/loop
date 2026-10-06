@@ -12,6 +12,10 @@ import { GatewayError } from "../src/gateway-client/problem";
 import { createConnectionConfig } from "../src/auth/connection";
 import { createMockGateway, type MockGateway } from "./mock-gateway";
 import { TOKEN } from "./fixtures";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 let gateway: MockGateway;
 let client: GatewayClient;
@@ -19,7 +23,7 @@ let anonymous: GatewayClient;
 
 beforeAll(() => {
   gateway = createMockGateway();
-  const port = gateway.url.split(":")[2]!;
+  const port = must(gateway.url.split(":")[2]);
   client = new GatewayClient(createConnectionConfig("127.0.0.1", port, TOKEN));
   anonymous = new GatewayClient(createConnectionConfig("127.0.0.1", port, "wrong-token"));
 });

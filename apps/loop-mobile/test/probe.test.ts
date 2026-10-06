@@ -13,6 +13,23 @@ import { createConnectionConfig } from "../src/auth/connection";
 
 const CONFIG = createConnectionConfig("gw.tailnet.ts.net", "18477", "tok_test_bearer");
 
+/** A listener that answers every probe with a 401 problem document. */
+const unauthorizedFetchImpl: FetchLike = async () =>
+  new Response(JSON.stringify({ code: "unauthorized", status: 401 }), { status: 401 });
+
+/** A fetch that always throws (transport-level failure). */
+const networkFailureFetchImpl: FetchLike = async () => {
+  throw new Error("network request failed");
+};
+
+/** A fetch that never settles until the probe's abort signal fires. */
+const hangingFetchImpl: FetchLike = (_input, init) =>
+  new Promise((_, reject) => {
+    init?.signal?.addEventListener("abort", () =>
+      reject(new DOMException("Aborted", "AbortError")),
+    );
+  });
+
 describe("probeGateway", () => {
   test("probes GET /v1/runs with bearer auth and resolves on 200", async () => {
     const seen: { url: string; auth: string | undefined }[] = [];
@@ -30,25 +47,14 @@ describe("probeGateway", () => {
   });
 
   test("non-200 becomes GatewayError with the problem contract", async () => {
-    const fetchImpl: FetchLike = async () =>
-      new Response(JSON.stringify({ code: "unauthorized", status: 401 }), { status: 401 });
-    expect(probeGateway(CONFIG, fetchImpl)).rejects.toBeInstanceOf(GatewayError);
+    expect(probeGateway(CONFIG, unauthorizedFetchImpl)).rejects.toBeInstanceOf(GatewayError);
   });
 
   test("network failure propagates", async () => {
-    const fetchImpl: FetchLike = async () => {
-      throw new Error("network request failed");
-    };
-    expect(probeGateway(CONFIG, fetchImpl)).rejects.toThrow("network request failed");
+    expect(probeGateway(CONFIG, networkFailureFetchImpl)).rejects.toThrow("network request failed");
   });
 
   test("a hanging gateway aborts into a timeout error", async () => {
-    const fetchImpl: FetchLike = (input, init) =>
-      new Promise((_, reject) => {
-        init?.signal?.addEventListener("abort", () =>
-          reject(new DOMException("Aborted", "AbortError")),
-        );
-      });
-    expect(probeGateway(CONFIG, fetchImpl, 10)).rejects.toThrow("gateway probe timed out");
+    expect(probeGateway(CONFIG, hangingFetchImpl, 10)).rejects.toThrow("gateway probe timed out");
   });
 });

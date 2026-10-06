@@ -19,6 +19,10 @@ import {
   sendComposerWithAttachments,
   type PendingAttachment,
 } from "../src/state/attachFlow";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 const PHOTO_A = { uri: "file:///tmp/a.png", mimeType: "image/png", byteLen: 70 };
 const PHOTO_B = { uri: "file:///tmp/b.jpeg", mimeType: "image/jpeg", byteLen: 140 };
@@ -61,7 +65,7 @@ describe("appendPendingAttachment", () => {
     for (let i = 0; i < MAX_ATTACHMENTS_PER_INPUT; i += 1) {
       const next = appendPendingAttachment(full, PHOTO_A, `l${i}`);
       expect(next).not.toBeNull();
-      full.push(next![i]!);
+      full.push(must(next?.[i]));
     }
     expect(full).toHaveLength(MAX_ATTACHMENTS_PER_INPUT);
     expect(appendPendingAttachment(full, PHOTO_B, "overflow")).toBeNull();

@@ -14,9 +14,10 @@
  * 2. Chrome row: a registered bar height below the cleared zone; the
  *    leading slot is flexible with minWidth 0 and the title truncates
  *    (numberOfLines 1 + shrink); the action slot never shrinks.
- * 3. Every header screen uses it: the chats home rides the shared Screen's
- *    header slot (the header then owns the top inset) and the conversation
- *    renders AppHeader directly; no bespoke header row remains.
+ * 3. Every header screen uses it: the Files/Settings tabs and the raw pane
+ *    ride the shared Screen's header slot and the conversation renders
+ *    AppHeader directly; no bespoke header row remains. The chats home is
+ *    chrome-free (task `main-screen-polish`) and clears the inset itself.
  * 4. One quiet separation rule: the zone's single hairline separates
  *    chrome from content (minimal-design-spec S5).
  */
@@ -76,8 +77,9 @@ describe("chrome row — title truncates before the actions are ever squeezed", 
 });
 
 describe("every header screen uses the one header", () => {
-  test("chats home: App hands the AppHeader to the shared Screen's header slot", () => {
+  test("chats home is chrome-free (task `main-screen-polish`): no AppHeader — the shared Screen clears the inset itself; the remaining header screens keep the slot", () => {
     expect(appSource).toContain("<AppHeader");
+    expect(appSource).not.toContain('title={APP_TITLE}');
     expect(screenSource).toContain("header?: ReactNode");
     expect(screenSource).toContain("{props.header}");
   });

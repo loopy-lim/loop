@@ -25,20 +25,22 @@ import { MarkdownView } from "./markdown-view";
 import { toolArgsSummary, toolResultView } from "./tool-summary";
 import { DynText } from "../ui/DynText";
 import { useBlink } from "../ui/motion";
-import { glyph } from "../ui/glyphs";
+import { Icon } from "../ui/Icon";
+import { glyph, type IconRole } from "../ui/glyphs";
 import { EMPTY_RESULT_NOTICE, TRUNCATED_NOTICE } from "../ui/copy";
 import { colors, motion, press, radius, space, type } from "../ui/tokens";
 
-/** Closed status vocabulary (D4 §3): glyph + text + color role. The state
- * word carries the same color as the glyph (C4) — color removal still
- * leaves the word (ui-ux-guidance §5, color-independence). */
+/** Closed status vocabulary (D4 §3): role + text + color role. The state
+ * word carries the same color as the mark (C4) — color removal still
+ * leaves the word (ui-ux-guidance §5, color-independence). Marks render
+ * through ui/Icon (task `fab-icons`); the word stays DynText. */
 const TOOL_STATUS: Record<
   Extract<ConversationItem, { kind: "tool" }>["state"],
-  { glyph: string; text: string; color: string }
+  { role: IconRole; text: string; color: string }
 > = {
-  running: { glyph: glyph.statusRunning, text: "running…", color: colors.warn },
-  done: { glyph: glyph.statusDone, text: "done", color: colors.ok },
-  error: { glyph: glyph.statusError, text: "error", color: colors.danger },
+  running: { role: "statusRunning", text: "running…", color: colors.warn },
+  done: { role: "statusDone", text: "done", color: colors.ok },
+  error: { role: "statusError", text: "error", color: colors.danger },
 };
 
 const STEER_STATUS_TEXT = {
@@ -72,7 +74,7 @@ function ToolCard(props: {
       activeOpacity={press.activeOpacity}
     >
       <View style={styles.cardHeaderRow}>
-        <DynText style={[styles.cardStatus, { color: status.color }]}>{status.glyph}</DynText>
+        <Icon role={status.role} size={type.captionStrong.fontSize} color={status.color} />
         <DynText style={styles.cardName} numberOfLines={1}>
           {item.toolName.length > 0 ? item.toolName : "(tool)"}
         </DynText>
@@ -85,7 +87,11 @@ function ToolCard(props: {
           {status.text}
           {item.interrupted ? " · interrupted" : ""}
         </DynText>
-        <DynText style={styles.cardChevron}>{expanded ? glyph.foldOpen : glyph.foldClosed}</DynText>
+        <Icon
+          role={expanded ? "foldOpen" : "foldClosed"}
+          size={type.caption.fontSize}
+          color={colors.inkFaint}
+        />
       </View>
       {expanded ? (
         <View style={styles.cardBody}>
@@ -218,8 +224,9 @@ function UserAttachments(props: {
 
 /** One conversation timeline row: user bubble (+ inline attachments),
  * assistant text, collapsible tool card, or steer delivery marker (D4).
- * `showOccurredAt` (C6) is computed by the screen — first row only of a
- * consecutive same-role run. */
+ * `showOccurredAt` (C6; S-06 minute groups in task `redesign-implement`)
+ * is computed by the screen — first row only of a wall-clock minute
+ * group. */
 export function TimelineItem(props: {
   item: ConversationItem;
   expanded: boolean;
@@ -261,7 +268,7 @@ export function TimelineItem(props: {
          * buffer mid-stream shows the busy glyph, a non-empty one trails
          * the cursor; the final frame clears both. */}
         {item.final === false && item.text.length === 0 ? (
-          <DynText style={styles.streamBusy}>{glyph.busy}</DynText>
+          <Icon role="busy" size={type.caption.fontSize} color={colors.inkFaint} />
         ) : (
           <View style={styles.assistantTextWrap}>
             <MarkdownView text={item.text} />
@@ -306,7 +313,7 @@ const styles = StyleSheet.create({
     // its direction — a composite corner, not a new shape family.
     borderBottomRightRadius: radius.xxs,
     paddingHorizontal: space.l,
-    paddingVertical: space.s + space.xxs,
+    paddingVertical: space.m,
   },
   userText: { ...type.body, color: colors.ink, flexShrink: 1 },
   timeCaption: {
@@ -316,7 +323,6 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
   },
   itemMeta: { ...type.caption, color: colors.inkMute, marginTop: space.xxs },
-  streamBusy: { ...type.caption, color: colors.inkFaint },
   cursor: { ...type.body, color: colors.ink },
   // M2 attachments (D5): inline images + metadata-only file cards.
   attachmentList: { marginTop: space.s, gap: space.s },
@@ -357,15 +363,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.hairline,
     borderRadius: radius.m,
-    paddingVertical: space.s + space.xxs,
+    paddingVertical: space.m,
     paddingHorizontal: space.m,
   },
   cardHeaderRow: { flexDirection: "row", alignItems: "center", gap: space.s },
-  cardStatus: { ...type.captionStrong, flexShrink: 0 },
   cardName: { ...type.bodyStrong, color: colors.ink, flexShrink: 1 },
   cardSummary: { ...type.caption, color: colors.inkMute, flexShrink: 1 },
   cardState: { ...type.caption, flexShrink: 0 },
-  cardChevron: { ...type.caption, color: colors.inkFaint, flexShrink: 0 },
   cardBody: {
     marginTop: space.s,
     backgroundColor: colors.surfaceAlt,

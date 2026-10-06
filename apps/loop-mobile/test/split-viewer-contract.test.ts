@@ -142,13 +142,20 @@ describe("settings screen (§B)", () => {
 });
 
 describe("app wiring (§B entry points)", () => {
-  test("the chats footer opens the split viewer and the settings screen", () => {
-    expect(appSource).toContain('label="Files & reports"');
-    expect(appSource).toContain('label="Settings"');
+  test("the Files tab opens the split viewer and the Settings tab the settings screen", () => {
+    // Tab navigation (task `redesign-implement`): the two destinations are
+    // tabs over the bottom tab bar — Files' header title and the settings
+    // screen wiring stay the §B contract.
+    expect(appSource).toContain("title={FILES_REPORTS_LABEL}");
+    expect(appSource).toContain("title={SETTINGS_TITLE}");
+    expect(appSource).toContain("<TabBar");
     expect(appSource).toContain("<RunSplitScreen");
   });
 
   test("the split viewer keeps the last run's tree across a chats detour", () => {
-    expect(appSource).toContain("runId={chat?.runId ?? lastRunId}");
+    // Tab navigation (task `redesign-implement`): an open chat renders the
+    // conversation (earlier return), so the Files tab always rides the
+    // App-owned last-run id.
+    expect(appSource).toContain("runId={lastRunId}");
   });
 });

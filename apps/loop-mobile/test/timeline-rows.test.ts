@@ -92,12 +92,12 @@ describe("row keys stay idempotent and header-free (C8, AC8-2)", () => {
   });
 });
 
-describe("clock captions on the first row of a same-role run (C6, AC6-2)", () => {
-  test("consecutive same-kind rows show the caption only on the first", () => {
+describe("clock captions are minute groups (S-06, task `redesign-implement`)", () => {
+  test("consecutive rows in the SAME minute show the caption only on the first — even across roles", () => {
     const items = [
+      user("m1", localIso(2026, 9, 26, 9, 0)),
+      tool("t1", localIso(2026, 9, 26, 9, 0)),
       assistant("a1", localIso(2026, 9, 26, 9, 0)),
-      assistant("a2", localIso(2026, 9, 26, 9, 1)),
-      assistant("a3", localIso(2026, 9, 26, 9, 2)),
     ];
     const rows = timelineRows(items).filter((row) => row.kind === "item");
     expect(rows.map((row) => (row.kind === "item" ? row.showOccurredAt : null))).toEqual([
@@ -107,20 +107,25 @@ describe("clock captions on the first row of a same-role run (C6, AC6-2)", () =>
     ]);
   });
 
-  test("a role change re-shows the caption", () => {
-    const rows = timelineRows([
-      user("m1", localIso(2026, 9, 26, 9, 0)),
-      tool("t1", localIso(2026, 9, 26, 9, 1)),
+  test("a new minute opens a new caption group — even within the same role", () => {
+    const items = [
+      assistant("a1", localIso(2026, 9, 26, 9, 0)),
+      assistant("a2", localIso(2026, 9, 26, 9, 1)),
+      assistant("a3", localIso(2026, 9, 26, 9, 2)),
+    ];
+    const rows = timelineRows(items).filter((row) => row.kind === "item");
+    expect(rows.map((row) => (row.kind === "item" ? row.showOccurredAt : null))).toEqual([
+      true,
+      true,
+      true,
     ]);
-    const flags = rows.map((row) => (row.kind === "item" ? row.showOccurredAt : null));
-    expect(flags).toEqual([true, true]);
   });
 
-  test("steer markers never get captions and never reset the caption cursor", () => {
+  test("steer markers never get captions and never reset the minute cursor", () => {
     const rows = timelineRows([
       assistant("a1", localIso(2026, 9, 26, 9, 0)),
       steer(),
-      assistant("a2", localIso(2026, 9, 26, 9, 2)),
+      assistant("a2", localIso(2026, 9, 26, 9, 0)),
     ]);
     const flags = rows.map((row) => (row.kind === "item" ? row.showOccurredAt : null));
     expect(flags).toEqual([true, false, false]);

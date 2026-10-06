@@ -14,12 +14,16 @@
 import { describe, expect, test } from "bun:test";
 
 import { colors } from "../src/ui/tokens";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 /** sRGB hex string → linear-light triple. */
 function hexRgb(hex: string): [number, number, number] {
   const m = hex.match(/^#([0-9a-fA-F]{6})$/);
   if (m === null) throw new Error(`not a 6-digit hex color: ${hex}`);
-  const n = Number.parseInt(m[1]!, 16);
+  const n = Number.parseInt(must(m[1]), 16);
   return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
 }
 
@@ -33,19 +37,26 @@ function rgbaValue(value: string): { rgb: [number, number, number]; alpha: numbe
   };
 }
 
+/** sRGB channel → linear light (WCAG 2.x). */
+function linearSrgb(c: number): number {
+  const s = c / 255;
+  return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+}
+
+/** 8-bit channel → two-digit hex. */
+function hexPart(c: number): string {
+  return Math.round(c).toString(16).padStart(2, "0");
+}
+
 /** WCAG 2.x relative luminance. */
 function luminance([r, g, b]: [number, number, number]): number {
-  const lin = (c: number): number => {
-    const s = c / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  return 0.2126 * linearSrgb(r) + 0.7152 * linearSrgb(g) + 0.0722 * linearSrgb(b);
 }
 
 /** WCAG 2.x contrast ratio between two effective colors. */
 function contrast(a: [number, number, number], b: [number, number, number]): number {
-  const ratios = [luminance(a), luminance(b)].sort((x, y) => y - x);
-  return (ratios[0]! + 0.05) / (ratios[1]! + 0.05);
+  const ratios = [luminance(a), luminance(b)].toSorted((x, y) => y - x);
+  return (must(ratios[0]) + 0.05) / (must(ratios[1]) + 0.05);
 }
 
 /** Effective color of an ink (solid or rgba) composited over a surface. */
@@ -58,6 +69,11 @@ function over(ink: string, surface: string): [number, number, number] {
     alpha * rgb[1] + (1 - alpha) * bg[1],
     alpha * rgb[2] + (1 - alpha) * bg[2],
   ];
+}
+
+/** 8-bit triple → hex string (inverse of over() for nested composites). */
+function rgbHex([r, g, b]: [number, number, number]): string {
+  return `#${hexPart(r)}${hexPart(g)}${hexPart(b)}`;
 }
 
 /** Every surface the app paints text on (the closed neutral set). */
@@ -92,13 +108,41 @@ describe("WCAG AA — status triad as text accents", () => {
   for (const role of ["ok", "warn", "danger"] as const) {
     test(`${role} ≥ ${AA_TEXT}:1 on the surfaces that carry status text`, () => {
       for (const name of textSurfaces) {
-        const ratio = contrast(over(colors[role], SURFACES[name]!), hexRgb(SURFACES[name]!));
+        const ratio = contrast(over(colors[role], must(SURFACES[name])), hexRgb(must(SURFACES[name])));
         expect(ratio, `${role} on ${name} is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(
           AA_TEXT,
         );
       }
     });
   }
+});
+
+describe("WCAG AA — the accent is a text-grade state color", () => {
+  // The accent (direction A) rides active-tab labels, selected chips, and
+  // focus marks on the same surfaces the status triad texts sit on.
+  const textSurfaces = ["bg", "surface", "surfaceAlt"] as const;
+  test(`accent ≥ ${AA_TEXT}:1 on the surfaces that carry accent text`, () => {
+    for (const name of textSurfaces) {
+      const ratio = contrast(over(colors.accent, must(SURFACES[name])), hexRgb(must(SURFACES[name])));
+      expect(ratio, `accent on ${name} is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(AA_TEXT);
+    }
+  });
+
+  test(`accent ≥ ${AA_TEXT}:1 on its own accentSoft selected wash (over bg)`, () => {
+    const wash = over(colors.accentSoft, colors.bg);
+    const ratio = contrast(hexRgb(colors.accent), wash);
+    expect(ratio, `accent on accentSoft-over-bg is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(
+      AA_TEXT,
+    );
+  });
+
+  test(`ink ≥ ${AA_TEXT}:1 over the accentSoft wash (over surface)`, () => {
+    const wash = over(colors.accentSoft, colors.surface);
+    const ratio = contrast(over(colors.ink, rgbHex(wash)), wash);
+    expect(ratio, `ink on accentSoft-over-surface is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(
+      AA_TEXT,
+    );
+  });
 });
 
 describe("WCAG AA — CTA pairing", () => {
@@ -128,8 +172,10 @@ describe("WCAG AA — non-text ink floor (glyphs, icons)", () => {
   // the faint ink glyphs ride the same roles as text, so the text gate
   // above already covers them; this asserts the floor explicitly so a
   // future role re-map cannot quietly split text and icon behavior.
+  // inkGhost (v2) is the DECORATIVE tier — inactive tab icons, idle dots —
+  // pinned here at the non-text floor, never used for prose (canon §2).
   test("status triad ≥ 3:1 as glyphs on every surface it may mark", () => {
-    for (const role of ["ok", "warn", "danger", "inkFaint"] as const) {
+    for (const role of ["ok", "warn", "danger", "inkFaint", "inkGhost"] as const) {
       for (const [, surfaceHex] of Object.entries(SURFACES)) {
         const ratio = contrast(over(colors[role], surfaceHex), hexRgb(surfaceHex));
         expect(ratio, `${role} glyph is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(3);
@@ -138,11 +184,22 @@ describe("WCAG AA — non-text ink floor (glyphs, icons)", () => {
   });
 });
 
-describe("the faint tier keeps its hierarchy step", () => {
-  // The AA fix raised the faint alpha; it must remain DISTINCTLY dimmer
-  // than the mute tier (§5: the tiers are the hierarchy), and its
-  // effective color must stay the ink hue (a tint, not a new color).
-  test("inkFaint renders dimmer than inkMute on every surface", () => {
+describe("the ink ladder keeps its steps", () => {
+  // Each tier must render STRICTLY dimmer than the one above on every
+  // surface (§5: the tiers are the hierarchy), and every tier's effective
+  // color must stay the ink hue (a tint, not a new color).
+  const LADDER = ["ink", "inkMute", "inkFaint", "inkGhost"] as const;
+  test("each tier renders dimmer than the previous on every surface", () => {
+    for (const [, surfaceHex] of Object.entries(SURFACES)) {
+      for (let i = 1; i < LADDER.length; i += 1) {
+        const brighter = luminance(over(colors[must(LADDER[i - 1])], surfaceHex));
+        const dimmer = luminance(over(colors[must(LADDER[i])], surfaceHex));
+        expect(dimmer, `${must(LADDER[i])} on ${surfaceHex}`).toBeLessThan(brighter);
+      }
+    }
+  });
+
+  test("the faint tier keeps its legacy step over inkMute (regression)", () => {
     for (const [, surfaceHex] of Object.entries(SURFACES)) {
       const faint = luminance(over(colors.inkFaint, surfaceHex));
       const mute = luminance(over(colors.inkMute, surfaceHex));

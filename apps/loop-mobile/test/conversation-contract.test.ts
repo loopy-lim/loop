@@ -37,6 +37,10 @@ import {
   STEER,
 } from "./conversation-fixtures";
 import type { ConversationStreamEvent } from "../src/gateway-client/conversation";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 let gateway: MockGateway;
 let client: GatewayClient;
@@ -44,7 +48,7 @@ let client: GatewayClient;
 beforeAll(() => {
   gateway = createMockGateway();
   client = new GatewayClient(
-    createConnectionConfig("127.0.0.1", gateway.url.split(":")[2]!, TOKEN),
+    createConnectionConfig("127.0.0.1", must(gateway.url.split(":")[2]), TOKEN),
   );
 });
 
@@ -295,38 +299,34 @@ describe("ConversationProjection — D4 rendering contract", () => {
     const projection = new ConversationProjection(SESSION_ID);
     const events = recordedEvents();
 
-    projection.apply(events[1]!); // user m-1
-    projection.apply(events[3]!); // delta "I'll check the test "
+    projection.apply(must(events[1])); // user m-1
+    projection.apply(must(events[3])); // delta "I'll check the test "
     let view = projection.snapshot();
     let assistant = view.items[1] as Extract<ConversationItem, { kind: "assistant" }>;
     expect(assistant).toMatchObject({ text: "I'll check the test ", final: false });
 
-    projection.apply(events[4]!); // delta "first."
+    projection.apply(must(events[4])); // delta "first."
     view = projection.snapshot();
     assistant = view.items[1] as Extract<ConversationItem, { kind: "assistant" }>;
     expect(assistant.text).toBe("I'll check the test first.");
 
-    projection.apply(events[5]!); // assistant_message final (different text)
+    projection.apply(must(events[5])); // assistant_message final (different text)
     view = projection.snapshot();
     assistant = view.items[1] as Extract<ConversationItem, { kind: "assistant" }>;
     expect(assistant.text).toBe("I'll check the test first, then fix the flake.");
     expect(assistant.final).toBe(true);
 
-    projection.apply(events[3]!); // a late duplicate delta must not corrupt the final
+    projection.apply(must(events[3])); // a late duplicate delta must not corrupt the final
     expect(
       (projection.snapshot().items[1] as Extract<ConversationItem, { kind: "assistant" }>).text,
     ).toBe("I'll check the test first, then fix the flake.");
   });
 
   test("started-less ended synthesizes a closed card without a running phase", () => {
-    const ended = CONVERSATION_FRAMES.find((frame) => frame.id === "conv-n10")!;
+    const ended = must(CONVERSATION_FRAMES.find((frame) => frame.id === "conv-n10"));
     const projection = new ConversationProjection(SESSION_ID);
     projection.apply(
-      decodeConversationFrame({
-        id: ended.id,
-        event: ended.event,
-        data: JSON.stringify(ended.payload),
-      })!,
+      must(decodeConversationFrame({ id: ended.id, event: ended.event, data: JSON.stringify(ended.payload), })),
     );
     const view = projection.snapshot();
     expect(view.items).toHaveLength(1);
@@ -338,14 +338,10 @@ describe("ConversationProjection — D4 rendering contract", () => {
       interrupted: false,
     });
 
-    const doneEnded = CONVERSATION_FRAMES.find((frame) => frame.id === "conv-n8")!;
+    const doneEnded = must(CONVERSATION_FRAMES.find((frame) => frame.id === "conv-n8"));
     const fresh = new ConversationProjection(SESSION_ID);
     fresh.apply(
-      decodeConversationFrame({
-        id: doneEnded.id,
-        event: doneEnded.event,
-        data: JSON.stringify(doneEnded.payload),
-      })!,
+      must(decodeConversationFrame({ id: doneEnded.id, event: doneEnded.event, data: JSON.stringify(doneEnded.payload), })),
     );
     expect((fresh.snapshot().items[0] as Extract<ConversationItem, { kind: "tool" }>).state).toBe(
       "done",
@@ -361,10 +357,10 @@ describe("ConversationProjection — D4 rendering contract", () => {
       { kind: "steer", steerId: null, text: STEER.text, status: "pending", foldedMessageId: null },
     ]);
 
-    projection.apply(events[11]!); // steer_queued st-1
+    projection.apply(must(events[11])); // steer_queued st-1
     expect(projection.snapshot().items[0]).toMatchObject({ steerId: "st-1", status: "queued" });
 
-    projection.apply(events[13]!); // user_message m-2 source=steer
+    projection.apply(must(events[13])); // user_message m-2 source=steer
     const view = projection.snapshot();
     expect(view.items).toHaveLength(1); // folded: no separate user bubble
     expect(view.items[0]).toMatchObject({
@@ -379,13 +375,13 @@ describe("ConversationProjection — D4 rendering contract", () => {
     const projection = new ConversationProjection(SESSION_ID);
     const events = recordedEvents();
 
-    projection.apply(events[11]!); // steer_queued with no pending marker
+    projection.apply(must(events[11])); // steer_queued with no pending marker
     expect(projection.snapshot().items).toEqual([
       { kind: "steer", steerId: "st-1", text: STEER.text, status: "queued", foldedMessageId: null },
     ]);
 
     const fresh = new ConversationProjection(SESSION_ID);
-    fresh.apply(events[13]!); // user_message source=steer, no marker at all
+    fresh.apply(must(events[13])); // user_message source=steer, no marker at all
     const view = fresh.snapshot();
     const user = view.items[0] as Extract<ConversationItem, { kind: "user" }>;
     expect(view.items).toHaveLength(1);
@@ -396,24 +392,20 @@ describe("ConversationProjection — D4 rendering contract", () => {
     const projection = new ConversationProjection(SESSION_ID);
     const events = recordedEvents();
 
-    projection.apply(events[2]!); // turnStarted
+    projection.apply(must(events[2])); // turnStarted
     expect(projection.snapshot().running).toBe(true);
-    projection.apply(events[3]!); // a delta arrives mid-turn
-    projection.apply(events[10]!); // turnEnded
+    projection.apply(must(events[3])); // a delta arrives mid-turn
+    projection.apply(must(events[10])); // turnEnded
     expect(projection.snapshot().running).toBe(false);
 
     const midTurn = new ConversationProjection(SESSION_ID);
-    midTurn.apply(events[2]!); // turnStarted
-    midTurn.apply(events[6]!); // tool_call_started (never ends)
-    midTurn.apply(events[3]!); // streaming assistant buffer (no final)
+    midTurn.apply(must(events[2])); // turnStarted
+    midTurn.apply(must(events[6])); // tool_call_started (never ends)
+    midTurn.apply(must(events[3])); // streaming assistant buffer (no final)
     // The recorded stream ends via the sessionGone reset; a sessionEnded
     // lifecycle arrives when the tap observes the pi session shutdown:
     midTurn.apply(
-      decodeConversationFrame({
-        id: "conv-end",
-        event: "lifecycle",
-        data: JSON.stringify({ phase: "sessionEnded", occurredAt: "2026-09-25T09:02:00.000Z" }),
-      })!,
+      must(decodeConversationFrame({ id: "conv-end", event: "lifecycle", data: JSON.stringify({ phase: "sessionEnded", occurredAt: "2026-09-25T09:02:00.000Z" }), })),
     );
     const ended = midTurn.snapshot();
     expect(ended.sessionEnded).toBe(true);
@@ -434,24 +426,16 @@ describe("ConversationProjection — D4 rendering contract", () => {
     const projection = new ConversationProjection(SESSION_ID);
     const events = recordedEvents();
 
-    projection.apply(events[0]!); // lifecycle sessionStarted
+    projection.apply(must(events[0])); // lifecycle sessionStarted
     projection.apply(
-      decodeConversationFrame({
-        id: "reset",
-        event: "conversation_reset",
-        data: JSON.stringify(CURSOR_RESET),
-      })!,
+      must(decodeConversationFrame({ id: "reset", event: "conversation_reset", data: JSON.stringify(CURSOR_RESET), })),
     );
     expect(projection.snapshot().stale).toBe(true);
-    projection.apply(events[1]!); // any decoded frame proves continuity
+    projection.apply(must(events[1])); // any decoded frame proves continuity
     expect(projection.snapshot().stale).toBe(false);
 
     projection.apply(
-      decodeConversationFrame({
-        id: "gone",
-        event: "conversation_reset",
-        data: JSON.stringify(SESSION_GONE),
-      })!,
+      must(decodeConversationFrame({ id: "gone", event: "conversation_reset", data: JSON.stringify(SESSION_GONE), })),
     );
     const view = projection.snapshot();
     expect(view.ended).toBe(true);

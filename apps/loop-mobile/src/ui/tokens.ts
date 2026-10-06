@@ -1,14 +1,17 @@
 /**
  * Design tokens — the closed vocabulary for the mobile GUI (task
- * `ui-codex-redesign`). Role names own meaning; hex values are theme
- * mappings (docs/design/ui-ux-guidance.md §5: 역할은 테마가 바뀌어도
- * 불변). v1 ships the dark mapping — the Codex-app-like default — and a
- * light mapping can be added later without touching call sites.
+ * `ui-codex-redesign`; v2 remapping in task `redesign-implement`, direction
+ * A "Quiet Accent" — docs/design/audits/redesign-brief.md §5.0, revision
+ * recorded in docs/design/design-system.md). Role names own meaning; hex
+ * values are theme mappings (docs/design/ui-ux-guidance.md §5: 역할은
+ * 테마가 바뀌어도 불변). The dark mapping is the default; a light mapping
+ * can be added later without touching call sites.
  *
- * Rules applied from docs/design/ui-ux-guidance.md:
+ * Rules applied from docs/design/ui-ux-guidance.md + canon §2/§4:
  * - §1/§4: status color is a closed triad (ok/warn/danger) used only as
  *   glyph + text accents, never as large surface fills; the CTA color is
- *   the only strong emphasis per viewport.
+ *   the only strong emphasis per viewport; the accent is a STATE color
+ *   (active/selected/focus) — never a second emphasis.
  * - §2: hierarchy comes from position and weight first (ink tiers), color
  *   last.
  * - §5: colors are referenced by role name only; no hex at call sites.
@@ -16,30 +19,41 @@
 
 export const colors = {
   /** Screen background (near-black, GitHub-dark family so the terminal
-   * mirror surface stays cohesive with ui/terminalLayout.ts). */
-  bg: "#0D1117",
+   * mirror surface stays cohesive with ui/terminalLayout.ts). v2: one step
+   * deeper than v1 so the surface ladder reads (brief C-1). */
+  bg: "#0B0E13",
   /** Elevated surfaces: cards, list rows, inputs, the composer. */
-  surface: "#161C26",
+  surface: "#12161E",
   /** Nested surfaces inside cards: code blocks, expanded tool output. */
-  surfaceAlt: "#1D2530",
+  surfaceAlt: "#181D27",
   /** User bubble fill — one step brighter than surface, quiet. */
-  userBubble: "#242E3C",
-  hairline: "rgba(230, 237, 243, 0.12)",
+  userBubble: "#202734",
+  hairline: "rgba(242, 245, 249, 0.16)",
 
-  /** Ink tiers (§5: 무색 텍스트 계층이 위계를 먼저 만든다). The faint
-   * tier rides the WCAG AA floor (4.5:1) — 0.54 is the minimum alpha of
-   * this ink over the brightest surface (userBubble) that still passes;
-   * the tier stays a distinct step below inkMute while every caption,
-   * label, and glyph rendered with it stays legible on all four surfaces
-   * (task `visibility-touch-ergonomics`; test/contrast.test.ts pins it). */
-  ink: "#E6EDF3",
-  inkMute: "rgba(230, 237, 243, 0.64)",
-  inkFaint: "rgba(230, 237, 243, 0.54)",
+  /** Ink tiers (§5: 무색 텍스트 계층이 위계를 먼저 만든다) — v2 is the
+   * Linear-style four-step ladder. ink/inkMute/inkFaint are TEXT tiers:
+   * faint rides the WCAG AA floor (4.5:1; 0.54 is the minimum alpha over
+   * the brightest surface, userBubble, that still passes — pinned by
+   * test/contrast.test.ts). inkGhost is the DECORATIVE tier: glyphs,
+   * inactive icons, and other non-essential marks only — prose on it is
+   * drift; it is pinned to the WCAG 1.4.11 non-text floor (3:1). */
+  ink: "#F2F5F9",
+  inkMute: "rgba(242, 245, 249, 0.72)",
+  inkFaint: "rgba(242, 245, 249, 0.54)",
+  inkGhost: "rgba(242, 245, 249, 0.40)",
 
   /** Primary CTA — the single strong emphasis per viewport (§4). */
-  cta: "#F0F6FC",
-  ctaInk: "#0D1117",
-  ctaDisabled: "rgba(240, 246, 252, 0.16)",
+  cta: "#F2F5F9",
+  ctaInk: "#0B0E13",
+  ctaDisabled: "rgba(242, 245, 249, 0.16)",
+
+  /** The single accent (brief C-2, direction A): an on-dark indigo in the
+   * Linear-lavender family. STATE color only — active tab, selection,
+   * focus ring — never a second emphasis (canon §4; the CTA stays the one
+   * strong emphasis). accentSoft is its registered wash: the selected
+   * background behind accent marks, never a large surface fill. */
+  accent: "#7C89E8",
+  accentSoft: "rgba(124, 137, 232, 0.16)",
 
   /** Closed status triad (§1): glyph/text accents only. */
   ok: "#3FB950",

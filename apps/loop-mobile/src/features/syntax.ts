@@ -311,6 +311,13 @@ function isDigit(ch: string): boolean {
   return ch >= "0" && ch <= "9";
 }
 
+/** Bounds-checked character read (callers guarantee the index is in range). */
+function codeCharAt(code: string, index: number): string {
+  const value = code[index];
+  if (value === undefined) throw new RangeError(`index ${index} out of range`);
+  return value;
+}
+
 /** One profile-driven scan pass. Spans are contiguous and cover the input. */
 function scanProfile(code: string, profile: LanguageProfile): SyntaxSpan[] {
   const spans: SyntaxSpan[] = [];
@@ -331,7 +338,7 @@ function scanProfile(code: string, profile: LanguageProfile): SyntaxSpan[] {
   };
 
   while (i < n) {
-    const ch = code[i]!;
+    const ch = codeCharAt(code, i);
     let matched = false;
     for (const [open, close] of profile.blockComments) {
       if (code.startsWith(open, i)) {
@@ -384,7 +391,7 @@ function scanProfile(code: string, profile: LanguageProfile): SyntaxSpan[] {
         const close = code.indexOf("}", j);
         j = close < 0 ? n : close + 1;
       } else {
-        while (j < n && isIdentifierContinue(code[j]!)) j += 1;
+        while (j < n && isIdentifierContinue(codeCharAt(code, j))) j += 1;
       }
       push(i, j, "literal");
       i = j;
@@ -393,13 +400,13 @@ function scanProfile(code: string, profile: LanguageProfile): SyntaxSpan[] {
     if (isDigit(ch)) {
       let j = i + 1;
       while (j < n) {
-        const c = code[j]!;
+        const c = codeCharAt(code, j);
         if (isIdentifierContinue(c) || c === ".") {
           j += 1;
           continue;
         }
         // Exponent sign: 1e-10 / 1E+10 — the sign belongs to the number.
-        if ((c === "+" || c === "-") && code[j - 1]!.toLowerCase() === "e") {
+        if ((c === "+" || c === "-") && codeCharAt(code, j - 1).toLowerCase() === "e") {
           j += 1;
           continue;
         }
@@ -411,7 +418,7 @@ function scanProfile(code: string, profile: LanguageProfile): SyntaxSpan[] {
     }
     if (isIdentifierStart(ch) && ch !== "$") {
       let j = i + 1;
-      while (j < n && isIdentifierContinue(code[j]!)) j += 1;
+      while (j < n && isIdentifierContinue(codeCharAt(code, j))) j += 1;
       const word = code.slice(i, j);
       let kind: SyntaxTokenKind = "plain";
       if (profile.keywords.has(word)) kind = "keyword";

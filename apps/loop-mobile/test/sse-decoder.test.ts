@@ -73,14 +73,14 @@ describe("sseFrames over a chunked stream", () => {
       frames.push(frame);
     }
     expect(frames).toHaveLength(1);
-    expect(frames[0]!.event).toBe("message");
-    expect(JSON.parse(frames[0]!.data).text).toBe("연구 결과 ✓");
+    expect(frames[0]?.event).toBe("message");
+    expect(JSON.parse(frames[0]?.data).text).toBe("연구 결과 ✓");
   });
 
   test("parser keeps ignoring keepalive comments (existing contract)", () => {
     const parser = new SseParser();
     const frames = parser.push(": keepalive\n\nid: 1\nevent: status\ndata: {}\n\n");
     expect(frames).toHaveLength(1);
-    expect(frames[0]!.id).toBe("1");
+    expect(frames[0]?.id).toBe("1");
   });
 });

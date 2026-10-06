@@ -28,6 +28,10 @@ import {
   ATTACHMENT_PNG_BYTES,
   SESSION_ID,
 } from "./conversation-fixtures";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 let gateway: MockGateway;
 let client: GatewayClient;
@@ -35,7 +39,7 @@ let client: GatewayClient;
 beforeAll(() => {
   gateway = createMockGateway();
   client = new GatewayClient(
-    createConnectionConfig("127.0.0.1", gateway.url.split(":")[2]!, TOKEN),
+    createConnectionConfig("127.0.0.1", must(gateway.url.split(":")[2]), TOKEN),
   );
 });
 

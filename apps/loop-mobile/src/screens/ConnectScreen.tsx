@@ -50,6 +50,9 @@ export function ConnectScreen(props: {
   const [bearer, setBearer] = useState(props.initialBearer ?? "");
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  // Focus ring (canon §4): the focused input's border rides the accent —
+  // one state mark per input, never a fill change.
+  const [focusedField, setFocusedField] = useState<string | null>(null);
   const autoConnectFired = useRef(false);
 
   const connect = (token: string) => {
@@ -82,32 +85,35 @@ export function ConnectScreen(props: {
     <KeyboardAvoidingView behavior="padding">
       <Text style={styles.heading}>Connect</Text>
       <Text style={styles.subheading}>
-        Loop gateway over Tailscale. Leave the token empty — tailnet membership is the credential;
-        a token is the fallback, kept in this device's keychain only.
+        Sign in to your Loop gateway over Tailscale — tailnet membership is the credential.
       </Text>
 
-      <Text style={styles.label}>HOST</Text>
+      <Text style={styles.label}>SERVER HOST</Text>
       <TextInput
-        style={styles.input}
+        style={[styles.input, focusedField === "host" && styles.inputFocused]}
         value={host}
         onChangeText={setHost}
-        placeholder="100.x.y.z"
+        placeholder="100.x.y.z or host.ts.net"
         placeholderTextColor={colors.inkFaint}
         autoCapitalize="none"
         autoCorrect={false}
+        onFocus={() => setFocusedField("host")}
+        onBlur={() => setFocusedField(null)}
       />
       <Text style={styles.label}>PORT</Text>
       <TextInput
-        style={styles.input}
+        style={[styles.input, focusedField === "port" && styles.inputFocused]}
         value={port}
         onChangeText={setPort}
         placeholder="port"
         placeholderTextColor={colors.inkFaint}
         inputMode="numeric"
+        onFocus={() => setFocusedField("port")}
+        onBlur={() => setFocusedField(null)}
       />
-      <Text style={styles.label}>TOKEN — fallback only</Text>
+      <Text style={styles.label}>TOKEN — FALLBACK ONLY</Text>
       <TextInput
-        style={styles.input}
+        style={[styles.input, focusedField === "bearer" && styles.inputFocused]}
         value={bearer}
         onChangeText={setBearer}
         placeholder="empty = tokenless"
@@ -115,6 +121,8 @@ export function ConnectScreen(props: {
         secureTextEntry
         autoCapitalize="none"
         autoCorrect={false}
+        onFocus={() => setFocusedField("bearer")}
+        onBlur={() => setFocusedField(null)}
       />
 
       {error !== null ? <Text style={styles.error}>{error}</Text> : null}
@@ -163,33 +171,37 @@ const styles = StyleSheet.create({
     paddingVertical: space.m,
     paddingHorizontal: space.m,
   },
+  // Focus ring (canon §4): the accent marks the focused input only.
+  inputFocused: { borderColor: colors.accent },
   error: { ...type.caption, color: colors.danger, marginTop: space.l },
   notice: { ...type.caption, color: colors.inkMute, marginTop: space.l, maxWidth: 320 },
   cta: {
-    // Full-width primary CTA: the viewport's one strong emphasis (§4),
-    // stretched so the tap target is unmistakable.
+    // Full-width primary CTA: the viewport's one strong emphasis (§4).
+    // Primary tier: white fill, radius.m — the pill radius retired for
+    // buttons (task `redesign-implement`, canon §3 버튼 위계).
     alignSelf: "stretch",
     alignItems: "center",
     marginTop: space.xl,
     backgroundColor: colors.cta,
-    borderRadius: radius.pill,
+    borderRadius: radius.m,
     paddingVertical: space.l,
     paddingHorizontal: space.xl,
   },
   ctaDisabled: { backgroundColor: colors.ctaDisabled },
   ctaText: { ...type.bodyStrong, color: colors.ctaInk },
   ctaTextDisabled: { color: colors.inkFaint },
-  // Quiet secondary entrance (guidance §4): never competes with the Connect
-  // CTA — bordered pill, muted ink, same vocabulary as App's QuietButton.
+  // Quiet secondary entrance (guidance §4): the secondary button tier —
+  // surface fill + hairline, never a second strong emphasis.
   scanEntry: {
     alignSelf: "stretch",
     alignItems: "center",
     marginTop: space.m,
     minHeight: 44,
     justifyContent: "center",
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.hairline,
-    borderRadius: radius.pill,
+    borderRadius: radius.m,
     paddingVertical: space.m,
   },
   scanEntryText: { ...type.captionStrong, color: colors.inkMute },

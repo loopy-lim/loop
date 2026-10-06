@@ -16,9 +16,11 @@ import {
   type AppSettings,
 } from "../state/settings";
 import { DynText } from "../ui/DynText";
+import { LOGOUT_LABEL, READOUT_STYLE } from "../ui/copy";
+import { Icon } from "../ui/Icon";
 import { colors, press, radius, space, type } from "../ui/tokens";
 
-const FONT_STEPS = [FONT_SIZE_MIN, 14, 15, 17, 19, FONT_SIZE_MAX];
+const FONT_STEPS = [FONT_SIZE_MIN, 15, 17, FONT_SIZE_MAX, 26];
 const REFRESH_STEPS = [
   { label: "2 s", ms: 2_000 },
   { label: "10 s", ms: 10_000 },
@@ -32,6 +34,12 @@ export const SETTINGS_GATEWAY_UNSET = "Not connected";
 export function SettingsScreen(props: {
   settings: AppSettings;
   onSave: (settings: AppSettings) => void;
+  /** Logout (task `main-screen-polish`): the bottom Settings path — App
+   * hands over the handler ALREADY wrapped in its confirmation alert;
+   * this row is a quiet destructive control at the list's end (the HIG
+   * home for account-level actions), never inside the settings card
+   * cluster it cannot undo. */
+  onLogout?: () => void;
 }) {
   const [draft, setDraft] = useState<AppSettings>(props.settings);
   const gateway =
@@ -41,7 +49,8 @@ export function SettingsScreen(props: {
 
   return (
     <View>
-      <DynText style={styles.heading}>Settings</DynText>
+      {/* Screen title lives in the header chrome (task `redesign-implement`):
+       * tab destinations keep one title, not a chrome + content pair. */}
 
       <DynText style={styles.section}>Gateway connection</DynText>
       <View style={styles.card}>
@@ -52,34 +61,44 @@ export function SettingsScreen(props: {
       <DynText style={styles.section}>Viewer font size</DynText>
       <View style={styles.card}>
         <View style={styles.choiceRow}>
-          {FONT_STEPS.map((size) => (
-            <TouchableOpacity
-              key={size}
-              style={[styles.choice, draft.viewerFontSize === size && styles.choiceActive]}
-              onPress={() => setDraft({ ...draft, viewerFontSize: clampFontSize(size) })}
-              activeOpacity={press.activeOpacity}
-            >
-              <DynText style={styles.choiceText}>{size}</DynText>
-            </TouchableOpacity>
-          ))}
+          {FONT_STEPS.map((size) => {
+            const active = draft.viewerFontSize === size;
+            return (
+              <TouchableOpacity
+                key={size}
+                style={[styles.choice, active && styles.choiceActive]}
+                onPress={() => setDraft({ ...draft, viewerFontSize: clampFontSize(size) })}
+                activeOpacity={press.activeOpacity}
+              >
+                <DynText style={[styles.choiceText, active && styles.choiceTextActive]}>
+                  {size}
+                </DynText>
+              </TouchableOpacity>
+            );
+          })}
         </View>
       </View>
 
       <DynText style={styles.section}>Refresh interval</DynText>
       <View style={styles.card}>
         <View style={styles.choiceRow}>
-          {REFRESH_STEPS.map((step) => (
-            <TouchableOpacity
-              key={step.ms}
-              style={[styles.choice, draft.refreshIntervalMs === step.ms && styles.choiceActive]}
-              onPress={() =>
-                setDraft({ ...draft, refreshIntervalMs: clampRefreshInterval(step.ms) })
-              }
-              activeOpacity={press.activeOpacity}
-            >
-              <DynText style={styles.choiceText}>{step.label}</DynText>
-            </TouchableOpacity>
-          ))}
+          {REFRESH_STEPS.map((step) => {
+            const active = draft.refreshIntervalMs === step.ms;
+            return (
+              <TouchableOpacity
+                key={step.ms}
+                style={[styles.choice, active && styles.choiceActive]}
+                onPress={() =>
+                  setDraft({ ...draft, refreshIntervalMs: clampRefreshInterval(step.ms) })
+                }
+                activeOpacity={press.activeOpacity}
+              >
+                <DynText style={[styles.choiceText, active && styles.choiceTextActive]}>
+                  {step.label}
+                </DynText>
+              </TouchableOpacity>
+            );
+          })}
         </View>
         <DynText style={styles.note}>Foreground refresh for the run pane inventory.</DynText>
       </View>
@@ -91,17 +110,32 @@ export function SettingsScreen(props: {
       >
         <DynText style={styles.saveText}>{SETTINGS_SAVE_LABEL}</DynText>
       </TouchableOpacity>
+
+      {/* Logout (task `main-screen-polish`): the destructive account
+       * action rides alone at the bottom, visually separated from the
+       * save cluster; the confirmation lives in App, not here. */}
+      {props.onLogout !== undefined ? (
+        <TouchableOpacity
+          style={styles.logoutRow}
+          onPress={props.onLogout}
+          activeOpacity={press.activeOpacity}
+          accessibilityRole="button"
+          accessibilityLabel={LOGOUT_LABEL}
+        >
+          <Icon role="logout" size={type.title.fontSize} color={colors.danger} />
+          <DynText style={styles.logoutText}>{LOGOUT_LABEL}</DynText>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  heading: { ...type.display, color: colors.ink, marginBottom: space.l },
   section: {
     ...type.captionStrong,
     color: colors.inkFaint,
     textTransform: "uppercase",
-    letterSpacing: 0.6,
+    ...READOUT_STYLE,
     marginTop: space.l,
     marginBottom: space.s,
   },
@@ -115,25 +149,48 @@ const styles = StyleSheet.create({
   value: { ...type.body, color: colors.ink },
   note: { ...type.caption, color: colors.inkFaint, marginTop: space.s },
   choiceRow: { flexDirection: "row", flexWrap: "wrap", gap: space.s },
+  // Choice chips: the secondary button tier (surface fill + hairline,
+  // radius.m — the pill radius is retired for buttons, canon §3).
   choice: {
     minHeight: 44,
     justifyContent: "center",
     paddingHorizontal: space.l,
     borderWidth: 1,
     borderColor: colors.hairline,
-    borderRadius: radius.pill,
+    borderRadius: radius.m,
+    backgroundColor: colors.surface,
   },
-  choiceActive: { borderColor: colors.ink, backgroundColor: colors.surfaceAlt },
+  // Selected state = the accent's job (canon §4): accentSoft wash + accent
+  // border and text — a state, not an emphasis.
+  choiceActive: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
   choiceText: { ...type.body, color: colors.ink },
+  choiceTextActive: { ...type.bodyStrong, color: colors.accent },
   saveButton: {
-    alignSelf: "flex-start",
+    alignSelf: "stretch",
+    alignItems: "center",
     marginVertical: space.xl,
     minHeight: 44,
     justifyContent: "center",
     backgroundColor: colors.cta,
-    borderRadius: radius.pill,
-    paddingVertical: space.s,
+    borderRadius: radius.m,
+    paddingVertical: space.m,
     paddingHorizontal: space.xl,
   },
   saveText: { ...type.bodyStrong, color: colors.ctaInk },
+  // Logout row (task `main-screen-polish`): quiet destructive control —
+  // hairline card like the settings cards, danger ink on the label, 44pt
+  // touch floor. No fill of its own; the danger word is the warning.
+  logoutRow: {
+    alignSelf: "stretch",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.s,
+    minHeight: 44,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    borderRadius: radius.m,
+    paddingVertical: space.m,
+    paddingHorizontal: space.l,
+  },
+  logoutText: { ...type.bodyStrong, color: colors.danger },
 });

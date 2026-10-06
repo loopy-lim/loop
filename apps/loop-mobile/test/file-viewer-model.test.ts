@@ -171,19 +171,21 @@ describe("lazy load + ETag revalidation (§A/§B)", () => {
   });
 });
 
+/** Gateway problem fixture with the given status + code (mapping input). */
+const problem = (status: number, code: string) =>
+  new GatewayError({
+    type: "about:blank",
+    title: "",
+    status,
+    code,
+    detail: "",
+    requestId: "",
+    retryable: false,
+    fields: null,
+  });
+
 describe("error mapping (problem code + status only)", () => {
   test("gateway problems map to viewer copy codes", async () => {
-    const problem = (status: number, code: string) =>
-      new GatewayError({
-        type: "about:blank",
-        title: "",
-        status,
-        code,
-        detail: "",
-        requestId: "",
-        retryable: false,
-        fields: null,
-      });
     const api: FileApi = {
       list: () => Promise.reject(problem(404, "not_found")),
       content: () => Promise.reject(problem(413, "file_too_large")),

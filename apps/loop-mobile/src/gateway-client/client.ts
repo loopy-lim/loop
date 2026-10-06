@@ -102,9 +102,6 @@ export type ObserveOptions = {
 
 export class PromptValidationError extends Error {
   override readonly name = "PromptValidationError";
-  constructor(message: string) {
-    super(message);
-  }
 }
 
 function requestId(): string {
@@ -279,6 +276,23 @@ export class GatewayClient {
       await throwProblem(response);
     }
     return (await response.json()) as RemoteRunPage;
+  }
+
+  async resolveAttention(
+    runId: string,
+    attentionId: string,
+    resolution: string,
+  ): Promise<{ runId: string; attentionId: string; resolved: true }> {
+    const response = await this.fetchImpl(
+      this.url(`/runs/${encodeURIComponent(runId)}/attention/resolve`),
+      {
+        method: "POST",
+        headers: this.headers({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ attentionId, resolution }),
+      },
+    );
+    if (response.status !== 200) await throwProblem(response);
+    return (await response.json()) as { runId: string; attentionId: string; resolved: true };
   }
 
   async getRun(runId: string): Promise<RemoteRun> {

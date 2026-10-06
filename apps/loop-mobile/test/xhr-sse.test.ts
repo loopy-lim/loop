@@ -7,14 +7,21 @@ class FakeXhr implements XhrLike {
   status = 0;
   readyState = 0;
   responseText = "";
-  onreadystatechange: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  onabort: (() => void) | null = null;
-  ontimeout: (() => void) | null = null;
+  readonly #listeners = new Map<string, Set<(...args: unknown[]) => void>>();
   opened: { method: string; url: string } | null = null;
   headers: Record<string, string> = {};
   sent = false;
   aborted = false;
+
+  addEventListener(type: string, listener: (...args: unknown[]) => void): void {
+    const set = this.#listeners.get(type) ?? new Set();
+    set.add(listener);
+    this.#listeners.set(type, set);
+  }
+
+  #dispatch(type: string): void {
+    for (const listener of this.#listeners.get(type) ?? []) listener();
+  }
 
   open(method: string, url: string): void {
     this.opened = { method, url };
@@ -33,7 +40,11 @@ class FakeXhr implements XhrLike {
     this.readyState = readyState;
     if (status !== 0) this.status = status;
     this.responseText = responseText;
-    this.onreadystatechange?.();
+    this.#dispatch("readystatechange");
+  }
+  /** Simulate a transport-level failure (RN fires the error event). */
+  fail(): void {
+    this.#dispatch("error");
   }
 }
 
@@ -99,7 +110,7 @@ describe("openXhrSse (React Native transport)", () => {
     const xhr = new FakeXhr();
     const connection = openXhrSse({ url: "http://gw/sse", headers: {}, xhrFactory: () => xhr });
     const statusPromise = connection.status;
-    xhr.onerror?.();
+    xhr.fail();
     expect(await statusPromise).toBe(0);
     await expect(collect(connection, 1)).rejects.toThrow("network error");
   });

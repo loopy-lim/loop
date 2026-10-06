@@ -14,9 +14,11 @@
  * per thumbnail. Photos count as content: send enables on photos alone.
  */
 import { Image, StyleSheet, TextInput, TouchableOpacity, View } from "react-native";
+import { useState } from "react";
 
 import type { PendingAttachment } from "../state/attachFlow";
 import { DynText, MAX_FONT_SCALE } from "../ui/DynText";
+import { Icon } from "../ui/Icon";
 import { glyph } from "../ui/glyphs";
 import {
   ATTACH_PHOTO_LABEL,
@@ -55,6 +57,9 @@ export function Composer(props: {
   const hasText = props.draft.trim().length > 0;
   const empty = !hasText && props.attachments.length === 0;
   const disabled = props.busy || empty || props.sendLocked === true;
+  // Focus ring (canon §4): the input wrap's border rides the accent while
+  // the composer is focused — one state mark, no fill change.
+  const [inputFocused, setInputFocused] = useState(false);
   return (
     <View style={[styles.composer, { paddingBottom: props.paddingBottom }]}>
       {props.attachments.length > 0 ? (
@@ -68,7 +73,7 @@ export function Composer(props: {
               />
               {attachment.ref === null ? (
                 <View style={styles.uploadBadge}>
-                  <DynText style={styles.uploadBadgeText}>{glyph.busy}</DynText>
+                  <Icon role="busy" size={type.caption.fontSize} color={colors.inkMute} />
                 </View>
               ) : null}
               <TouchableOpacity
@@ -82,7 +87,7 @@ export function Composer(props: {
                 hitSlop={{ top: 12, bottom: 12, left: 24, right: 0 }}
                 activeOpacity={press.activeOpacity}
               >
-                <DynText style={styles.removeGlyph}>{glyph.remove}</DynText>
+                <Icon role="remove" size={type.caption.fontSize} color={colors.ink} />
               </TouchableOpacity>
             </View>
           ))}
@@ -101,7 +106,7 @@ export function Composer(props: {
           </DynText>
         </View>
       ) : null}
-      <View style={styles.inputWrap}>
+      <View style={[styles.inputWrap, inputFocused && styles.inputWrapFocused]}>
         <TouchableOpacity
           style={[styles.attachButton, !props.attachAvailable && styles.attachDisabled]}
           onPress={props.onAttach}
@@ -109,11 +114,11 @@ export function Composer(props: {
           accessibilityLabel={ATTACH_PHOTO_LABEL}
           activeOpacity={press.activeOpacity}
         >
-          <DynText
-            style={[styles.attachGlyph, !props.attachAvailable && styles.attachGlyphDisabled]}
-          >
-            {glyph.attach}
-          </DynText>
+          <Icon
+            role="attach"
+            size={type.title.fontSize}
+            color={!props.attachAvailable ? colors.inkFaint : colors.inkMute}
+          />
         </TouchableOpacity>
         <TextInput
           style={styles.input}
@@ -123,6 +128,8 @@ export function Composer(props: {
           placeholder={props.steerMode ? "Steer the running task…" : "Describe the task for Loop"}
           placeholderTextColor={colors.inkFaint}
           maxFontSizeMultiplier={MAX_FONT_SCALE}
+          onFocus={() => setInputFocused(true)}
+          onBlur={() => setInputFocused(false)}
         />
         <TouchableOpacity
           style={[styles.sendButton, disabled && styles.sendDisabled]}
@@ -131,7 +138,11 @@ export function Composer(props: {
           activeOpacity={press.activeOpacity}
           accessibilityLabel={props.steerMode ? "Steer" : "Send"}
         >
-          <DynText style={styles.sendText}>{props.busy ? glyph.busy : glyph.send}</DynText>
+          <Icon
+            role={props.busy ? "busy" : "send"}
+            size={type.bodyStrong.fontSize}
+            color={colors.ctaInk}
+          />
         </TouchableOpacity>
       </View>
       {props.error !== null ? (
@@ -182,7 +193,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.xs + space.xxs,
     opacity: 0.9,
   },
-  uploadBadgeText: { ...type.caption, color: colors.inkMute },
   removeButton: {
     position: "absolute",
     top: -space.xs,
@@ -196,9 +206,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  removeGlyph: { ...type.caption, color: colors.ink, lineHeight: 14 },
   // The composer is the surface's raised control: the hairline carries
   // the edge (decision 2026-xx-minimal-design-spec S5 — no resting shadow).
+  // Focus ring (canon §4): the accent marks the focused composer only.
   inputWrap: {
     flexDirection: "row",
     alignItems: "flex-end",
@@ -211,6 +221,7 @@ const styles = StyleSheet.create({
     paddingRight: space.s,
     paddingVertical: space.s,
   },
+  inputWrapFocused: { borderColor: colors.accent },
   // Attach control (D5): 44×44 touch target inside the input pill.
   attachButton: {
     width: 44,
@@ -220,8 +231,6 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   attachDisabled: { opacity: 0.35 },
-  attachGlyph: { ...type.title, color: colors.inkMute },
-  attachGlyphDisabled: { color: colors.inkFaint },
   input: {
     flex: 1,
     minHeight: 24,
@@ -243,7 +252,6 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   sendDisabled: { backgroundColor: colors.ctaDisabled },
-  sendText: { ...type.bodyStrong, color: colors.ctaInk, lineHeight: 20 },
   // Steer affordance row (visibility contract): one quiet caption line
   // between the attachment strip and the input pill while sends route to
   // the steer mailbox.

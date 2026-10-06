@@ -40,14 +40,18 @@ export function clampUtterance(text: string, max: number = SESSION_TITLE_MAX_CHA
   return `${chars.slice(0, max).join("")}…`;
 }
 
+/** Two-digit zero-padded decimal (stamp components). */
+function pad2(n: number): string {
+  return `${n}`.padStart(2, "0");
+}
+
 /** Local `YYYY-MM-DD HH:mm` start stamp; unparseable input degrades to "". */
 export function startStamp(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  const pad = (n: number): string => `${n}`.padStart(2, "0");
   return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
-    ` ${pad(date.getHours())}:${pad(date.getMinutes())}`
+    `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}` +
+    ` ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
   );
 }
 

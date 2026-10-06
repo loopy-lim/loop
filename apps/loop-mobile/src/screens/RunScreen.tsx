@@ -1,12 +1,27 @@
 import { useEffect, useRef, useState } from "react";
-import { StyleSheet, TouchableOpacity, View } from "react-native";
+import { StyleSheet, TextInput, TouchableOpacity, View } from "react-native";
 
 import type { GatewayClient } from "../gateway-client/client";
-import { countsText, shortRunId } from "../features/run-list";
+import { countsText, runStatusColor, shortRunId } from "../features/run-list";
+import { relativeTime } from "../features/time-format";
 import { RunProjection, type OutputEntry, type RunProjectionState } from "../state/runProjection";
 import type { RemotePaneSummary } from "../gateway-client/wire";
 import { DynText } from "../ui/DynText";
-import { glyph } from "../ui/glyphs";
+import { Icon } from "../ui/Icon";
+import { glyph, type IconRole } from "../ui/glyphs";
+import {
+  ATTENTION_RESPONSE_PLACEHOLDER,
+  RUN_ENDED_TITLE,
+  RUN_FAILED_TITLE,
+  RUN_FINISHED_TITLE,
+  RUN_SUMMARY_HINT,
+  RUN_TITLE,
+  SUBMITTING_LABEL,
+  SUBMIT_RESPONSE_LABEL,
+  TERMINALS_HEADING,
+  WAITING_FOR_PROJECTION_NOTICE,
+  READOUT_STYLE,
+} from "../ui/copy";
 import { colors, press, radius, space, type } from "../ui/tokens";
 
 /**
@@ -46,6 +61,10 @@ export function RunScreen(props: {
   const [state, setState] = useState<RunProjectionState | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [panes, setPanes] = useState<RemotePaneSummary[] | null>(null);
+  const [resolution, setResolution] = useState("");
+  const [resolveError, setResolveError] = useState<string | null>(null);
+  const [resolvedAttentionId, setResolvedAttentionId] = useState<string | null>(null);
+  const [resolving, setResolving] = useState(false);
   const projectionRef = useRef<RunProjection | null>(null);
   const aliveRef = useRef(true);
   useEffect(
@@ -155,6 +174,22 @@ export function RunScreen(props: {
   }, [panes]);
 
   const run = state?.run ?? null;
+  const outputs = state?.outputs ?? [];
+  const resolutionEmpty = resolution.trim().length === 0;
+  const resolveDisabled = resolving || resolutionEmpty;
+  // Focus ring (canon §4): the response input's border rides the accent
+  // while focused.
+  const [inputFocused, setInputFocused] = useState(false);
+  // Completion summary tone (S-13): the closed status triad decides glyph
+  // and color; unknown terminal states stay muted.
+  const summaryTone = !run?.terminal
+    ? null
+    : run.status === "completed"
+      ? { role: "statusDone" as IconRole, color: colors.ok, title: RUN_FINISHED_TITLE }
+      : run.status === "failed"
+        ? { role: "statusError" as IconRole, color: colors.danger, title: RUN_FAILED_TITLE }
+        : { role: "statusDot" as IconRole, color: colors.inkMute, title: RUN_ENDED_TITLE };
+  const statusColor = run !== null ? runStatusColor(run.status) : colors.inkGhost;
 
   // Plain content column: App.tsx wraps this in the shared centered Screen.
   return (
@@ -163,30 +198,104 @@ export function RunScreen(props: {
         <DynText style={styles.streamError}>Stream: {streamError}</DynText>
       ) : null}
       {run === null ? (
-        <DynText style={styles.waiting}>Waiting for run projection…</DynText>
+        <DynText style={styles.waiting}>{WAITING_FOR_PROJECTION_NOTICE}</DynText>
       ) : (
         <View>
-          <DynText style={styles.heading}>
-            {shortRunId(run.runId)} — {run.status}
-            {run.terminal ? " (terminal)" : ""}
+          {/* S-11: the human word is the heading (display tier); the run id
+           * rides a quiet caption — an internal identifier never fronts a
+           * screen (canon §3 위계). */}
+          <DynText style={styles.heading}>{RUN_TITLE}</DynText>
+          <View style={styles.statusRow}>
+            <Icon role="statusDot" size={type.captionStrong.fontSize} color={statusColor} />
+            <DynText style={[styles.statusWord, { color: statusColor }]}>{run.status}</DynText>
+            <DynText style={styles.statusCounts}>{countsText(run)}</DynText>
+          </View>
+          <DynText style={styles.runId} numberOfLines={1}>
+            {shortRunId(run.runId)}
           </DynText>
-          {/* Non-zero counts only (quiet readout): zero rows are noise —
-           * the same closed formatter the chats rows use. */}
-          <DynText style={styles.taskCounts}>{countsText(run)}</DynText>
-          {run.attention !== null ? (
-            <DynText style={styles.attention}>⚠ {run.attention.message}</DynText>
+          {run.attention !== null && run.attention.attentionId !== resolvedAttentionId ? (
+            // Attention panel (S-12): warn edge + glyph — the QUESTION is
+            // ink; color marks the state, it does not carry the text (canon
+            // §2-3 색은 마지막 수단).
+            <View style={styles.attentionCard}>
+              <View style={styles.attentionRow}>
+                <Icon role="attention" size={type.captionStrong.fontSize} color={colors.warn} />
+                <DynText style={styles.attentionMessage} numberOfLines={0}>
+                  {run.attention.message}
+                </DynText>
+              </View>
+              <TextInput
+                accessibilityLabel="Attention response"
+                value={resolution}
+                onChangeText={setResolution}
+                placeholder={ATTENTION_RESPONSE_PLACEHOLDER}
+                placeholderTextColor={colors.inkFaint}
+                style={[styles.resolutionInput, inputFocused && styles.inputFocused]}
+                multiline
+                onFocus={() => setInputFocused(true)}
+                onBlur={() => setInputFocused(false)}
+              />
+              <TouchableOpacity
+                accessibilityRole="button"
+                disabled={resolveDisabled}
+                style={[styles.resolveButton, resolveDisabled && styles.resolveDisabled]}
+                activeOpacity={press.activeOpacity}
+                onPress={() => {
+                  const attention = run.attention;
+                  if (attention === null) return;
+                  setResolving(true);
+                  setResolveError(null);
+                  void props.client.resolveAttention(run.runId, attention.attentionId, resolution)
+                    .then(() => setResolvedAttentionId(attention.attentionId))
+                    .catch((error: unknown) => setResolveError(error instanceof Error ? error.message : String(error)))
+                    .finally(() => setResolving(false));
+                }}
+              >
+                <DynText
+                  style={[
+                    styles.resolveButtonText,
+                    resolveDisabled && styles.resolveTextDisabled,
+                  ]}
+                >
+                  {resolving ? SUBMITTING_LABEL : SUBMIT_RESPONSE_LABEL}
+                </DynText>
+              </TouchableOpacity>
+              {resolveError !== null ? <DynText style={styles.resolveError}>{resolveError}</DynText> : null}
+            </View>
+          ) : null}
+          {/* Completion summary card (S-13): a terminal run is never a
+           * blank screen — status, counts, and the next action. */}
+          {summaryTone !== null ? (
+            <View style={styles.summaryCard}>
+              <Icon
+                role={summaryTone.role}
+                size={type.title.fontSize}
+                color={summaryTone.color}
+              />
+              <View style={styles.summaryMain}>
+                <DynText style={styles.summaryTitle}>{summaryTone.title}</DynText>
+                <DynText style={styles.summaryMeta} numberOfLines={1}>
+                  {countsText(run)} · {relativeTime(run.updatedAt)}
+                </DynText>
+                <DynText style={styles.summaryHint}>{RUN_SUMMARY_HINT}</DynText>
+              </View>
+            </View>
           ) : null}
           {state?.stale ? (
             <DynText style={styles.stale}>reconnecting — recent output may be incomplete</DynText>
           ) : null}
-          {(state?.outputs ?? []).map((entry: OutputEntry) => (
-            <DynText key={entry.activityId} numberOfLines={0} style={styles.outputLine}>
-              [{entry.taskId}] {entry.text}
-            </DynText>
-          ))}
+          {outputs.length > 0 ? (
+            <View style={styles.outputs}>
+              {outputs.map((entry: OutputEntry) => (
+                <DynText key={entry.activityId} numberOfLines={0} style={styles.outputLine}>
+                  [{entry.taskId}] {entry.text}
+                </DynText>
+              ))}
+            </View>
+          ) : null}
           {panes !== null && panes.length > 0 && props.onOpenPane !== undefined ? (
             <View style={styles.paneSection}>
-              <DynText style={styles.paneHeading}>Terminals</DynText>
+              <DynText style={styles.paneHeading}>{TERMINALS_HEADING}</DynText>
               {panes.map((pane) => (
                 <TouchableOpacity
                   key={pane.paneId}
@@ -209,16 +318,67 @@ export function RunScreen(props: {
 }
 
 const styles = StyleSheet.create({
-  heading: { ...type.title, color: colors.ink, marginBottom: space.s },
-  taskCounts: { ...type.caption, color: colors.inkMute, marginBottom: space.xs },
-  // Attention is the one warn semantic on the run view (same as desktop).
-  attention: { ...type.captionStrong, color: colors.warn, marginTop: space.xs },
+  // S-11 (direction A): the human word is the heading — display tier, one
+  // per screen; the id and status ride quiet lines below (canon §3 위계).
+  heading: { ...type.display, color: colors.ink, marginBottom: space.s },
+  statusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.xs,
+    marginBottom: space.xxs,
+  },
+  statusWord: { ...type.captionStrong },
+  statusCounts: { ...type.caption, color: colors.inkMute },
+  runId: { ...type.caption, color: colors.inkFaint, marginBottom: space.m },
+  // Attention panel (S-12): the hairline card + a warn LEFT EDGE — the
+  // edge marks the state; the text stays ink.
+  attentionCard: {
+    marginTop: space.m,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.warn,
+    borderRadius: radius.m,
+    padding: space.m,
+    gap: space.s,
+  },
+  attentionRow: { flexDirection: "row", gap: space.s, alignItems: "flex-start" },
+  attentionMessage: { ...type.bodyStrong, color: colors.ink, flexShrink: 1 },
+  // Nested surface inside the card (§2: surfaceAlt is the in-card layer);
+  // focus rides the accent ring (canon §4).
+  resolutionInput: { ...type.body, color: colors.ink, backgroundColor: colors.surfaceAlt, borderColor: colors.hairline, borderWidth: 1, borderRadius: radius.s, padding: space.m, minHeight: 48 },
+  inputFocused: { borderColor: colors.accent },
+  // The screen's one strong emphasis — the primary button tier: white
+  // fill, radius.m, dark ink (canon §3 버튼 위계).
+  resolveButton: { alignItems: "center", justifyContent: "center", minHeight: 44, backgroundColor: colors.cta, borderRadius: radius.m, paddingVertical: space.m, paddingHorizontal: space.l },
+  resolveDisabled: { backgroundColor: colors.ctaDisabled },
+  resolveButtonText: { ...type.bodyStrong, color: colors.ctaInk },
+  resolveTextDisabled: { color: colors.inkFaint },
+  resolveError: { ...type.caption, color: colors.danger, marginTop: space.xs },
+  // Completion summary card (S-13): the same card vocabulary, a readable
+  // status line, and the next action — never a blank terminal screen.
+  summaryCard: {
+    marginTop: space.m,
+    flexDirection: "row",
+    gap: space.m,
+    alignItems: "flex-start",
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    borderRadius: radius.m,
+    padding: space.m,
+  },
+  summaryMain: { flex: 1, minWidth: 0, gap: space.xxs },
+  summaryTitle: { ...type.bodyStrong, color: colors.ink },
+  summaryMeta: { ...type.caption, color: colors.inkMute },
+  summaryHint: { ...type.caption, color: colors.inkFaint },
   stale: { ...type.caption, color: colors.inkMute, marginTop: space.xs },
+  outputs: { marginTop: space.m, gap: space.xxs },
   outputLine: {
     ...type.mono,
     fontFamily: "Menlo",
     color: colors.ink,
-    marginTop: space.xs,
   },
   paneSection: { marginTop: space.l },
   // §2 system-readout section label: caption tier, uppercase, tracking.
@@ -226,10 +386,10 @@ const styles = StyleSheet.create({
     ...type.captionStrong,
     color: colors.inkFaint,
     textTransform: "uppercase",
-    letterSpacing: 0.6,
+    ...READOUT_STYLE,
     marginBottom: space.s,
   },
-  // Touch target (44pt-class): pill row like the conversation PaneList —
+  // Touch target (44pt-class): row like the conversation PaneList —
   // paddingVertical m puts this row at ~46pt tall.
   paneRow: {
     paddingVertical: space.m,

@@ -12,12 +12,16 @@
 import { describe, expect, test } from "bun:test";
 
 import { colors, elevation, motion, press, radius, space, type } from "../src/ui/tokens";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 describe("spacing rhythm", () => {
   test("ascends in even steps (4pt base with the named 2pt micro-step)", () => {
     const values = Object.values(space);
     for (let i = 1; i < values.length; i += 1) {
-      expect(values[i]!).toBeGreaterThan(values[i - 1]!);
+      expect(must(values[i])).toBeGreaterThan(must(values[i - 1]));
     }
     for (const value of values) expect(value % 2).toBe(0);
   });
@@ -27,7 +31,7 @@ describe("radius ladder", () => {
   test("ascends strictly (composite xxs → pill extreme)", () => {
     const values = Object.values(radius);
     for (let i = 1; i < values.length; i += 1) {
-      expect(values[i]!).toBeGreaterThan(values[i - 1]!);
+      expect(must(values[i])).toBeGreaterThan(must(values[i - 1]));
     }
   });
 });

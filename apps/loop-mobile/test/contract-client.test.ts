@@ -30,6 +30,10 @@ import {
   TOKEN,
 } from "./fixtures";
 import type { RunStreamEvent } from "../src/gateway-client/wire";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 let gateway: MockGateway;
 let client: GatewayClient;
@@ -37,7 +41,7 @@ let client: GatewayClient;
 beforeAll(() => {
   gateway = createMockGateway();
   client = new GatewayClient(
-    createConnectionConfig("127.0.0.1", gateway.url.split(":")[2]!, TOKEN),
+    createConnectionConfig("127.0.0.1", must(gateway.url.split(":")[2]), TOKEN),
   );
 });
 
@@ -50,7 +54,7 @@ describe("sessionAttachmentUrl", () => {
     const url = client.sessionAttachmentUrl("sess_demo_v9_0008", "att_demo_upload_0001");
     expect(url).toBe(
       "http://127.0.0.1:" +
-        gateway.url.split(":")[2]! +
+        must(gateway.url.split(":")[2]) +
         "/v1/sessions/sess_demo_v9_0008/attachments/att_demo_upload_0001",
     );
   });
@@ -143,7 +147,7 @@ describe("submit", () => {
 
   test("maps 401 unauthorized as non-retryable", async () => {
     const bad = new GatewayClient(
-      createConnectionConfig("127.0.0.1", gateway.url.split(":")[2]!, "wrong-token"),
+      createConnectionConfig("127.0.0.1", must(gateway.url.split(":")[2]), "wrong-token"),
     );
     let error: GatewayError | null = null;
     try {
@@ -157,18 +161,42 @@ describe("submit", () => {
   });
 });
 
+describe("attention resolution", () => {
+  test("posts the resolution contract and returns confirmation", async () => {
+    const result = await client.resolveAttention(RUN_ID, RUN.attention?.attentionId, "Approved");
+    expect(result).toEqual({ runId: RUN_ID, attentionId: RUN.attention?.attentionId, resolved: true });
+    const post = gateway.requests.at(-1);
+    expect(post?.method).toBe("POST");
+    expect(post?.path).toBe(`/v1/runs/${RUN_ID}/attention/resolve`);
+    expect(JSON.parse(post?.body ?? "{}")).toEqual({ attentionId: RUN.attention?.attentionId, resolution: "Approved" });
+  });
+
+  test("maps RFC 9457 validation failures", async () => {
+    let error: GatewayError | null = null;
+    try { await client.resolveAttention(RUN_ID, "  ", "Approved"); } catch (e) { error = e as GatewayError; }
+    expect(error?.problem.code).toBe("invalid_request");
+    expect(error?.problem.status).toBe(400);
+    expect(error?.problem.fields).toEqual({ attentionId: "must be a non-empty string" });
+    error = null;
+    try { await client.resolveAttention(RUN_ID, RUN.attention?.attentionId, "   "); } catch (e) { error = e as GatewayError; }
+    expect(error?.problem.code).toBe("invalid_request");
+    expect(error?.problem.status).toBe(400);
+    expect(error?.problem.fields).toEqual({ resolution: "must be a non-empty string" });
+  });
+});
+
 describe("list and get", () => {
   test("preserves decimal-string u64 values and page shape", async () => {
     const page = await client.listRuns(20);
     expect(page).toEqual(RUN_PAGE);
-    expect(typeof page.runs[0]!.lastSequence).toBe("string");
-    expect(page.runs[1]!.lastSequence).toBe("128");
+    expect(typeof page.runs[0]?.lastSequence).toBe("string");
+    expect(page.runs[1]?.lastSequence).toBe("128");
     expect(page.nextCursor).toBeNull();
 
     const run = await client.getRun(RUN_ID);
     expect(run).toEqual(RUN);
     expect(run.attention?.kind).toBe("decision");
-    expect(run.tasks[0]!.status).toBe("running");
+    expect(run.tasks[0]?.status).toBe("running");
   });
 
   test("maps unknown run to run_not_found", async () => {

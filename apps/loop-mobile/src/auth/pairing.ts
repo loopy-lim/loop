@@ -13,9 +13,6 @@ export const PAIR_URL_PREFIX = "loop://connect?";
 
 export class PairUrlError extends Error {
   override readonly name = "PairUrlError";
-  constructor(message: string) {
-    super(message);
-  }
 }
 
 const MIN_PORT = 1;

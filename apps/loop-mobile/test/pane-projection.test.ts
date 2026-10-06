@@ -8,6 +8,7 @@
 
 import { describe, expect, test } from "bun:test";
 
+import { colors } from "../src/ui/tokens";
 import {
   LIFECYCLE_ONLY_NOTICE,
   PANE_GONE_NOTICE,
@@ -31,6 +32,10 @@ import {
   PANE_TEXT_1,
   PANE_TEXT_2,
 } from "./fixtures";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 describe("revision dedupe", () => {
   test("equal or older revisions never re-render; newer revisions apply once", () => {
@@ -84,7 +89,7 @@ describe("reset convergence", () => {
 describe("lifecycle metadata", () => {
   test("summary attaches label/state for honest badges", () => {
     const projection = new PaneProjection(PANE_ID);
-    projection.applySummary(PANE_LIST.panes[0]!);
+    projection.applySummary(must(PANE_LIST.panes[0]));
     expect(projection.snapshot()).toMatchObject({
       label: "pi worker — loop",
       state: "active",
@@ -115,8 +120,10 @@ describe("layout contract (monospace + centered column, D6)", () => {
   });
 
   test("terminal surface reads as a terminal (dark screen, light glyphs)", () => {
-    expect(TERMINAL_BACKGROUND).toBe("#0D1117");
-    expect(TERMINAL_TEXT_COLOR).toBe("#E6EDF3");
+    // Roles, not hex: the terminal mirror tracks the palette (v2 remap in
+    // task `redesign-implement` darkened bg — the mirror follows).
+    expect(TERMINAL_BACKGROUND).toBe(colors.bg);
+    expect(TERMINAL_TEXT_COLOR).toBe(colors.ink);
   });
 
   test("honest-labeling notices exist for snapshot origin and lifecycle-only lanes", () => {

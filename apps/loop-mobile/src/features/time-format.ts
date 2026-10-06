@@ -31,6 +31,11 @@ export function relativeTime(iso: string, now: Date = new Date()): string {
   return date.toLocaleDateString(undefined, { year: "numeric", month: "2-digit", day: "2-digit" });
 }
 
+/** Local-midnight timestamp used for calendar-day comparison. */
+function localMidnightMs(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
 /**
  * Korean relative time for session rows (session-title naming rule,
  * operator-approved): `방금` / `N분 전` / `N시간 전` / `어제` / a date.
@@ -53,9 +58,7 @@ export function relativeTimeKo(iso: string, now: Date = new Date()): string {
   // Calendar-day comparison in LOCAL time: exactly one day back is 어제,
   // anything older is a date.
   const dayMs = 24 * 60 * 60_000;
-  const startOfDay = (d: Date): number =>
-    new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const dayDiff = Math.round((startOfDay(now) - startOfDay(date)) / dayMs);
+  const dayDiff = Math.round((localMidnightMs(now) - localMidnightMs(date)) / dayMs);
   if (dayDiff === 1) return "어제";
   const month = date.getMonth() + 1;
   const day = date.getDate();

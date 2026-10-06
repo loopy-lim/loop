@@ -24,6 +24,10 @@ import {
   TOKEN,
 } from "./fixtures";
 import type { PaneStreamEvent } from "../src/gateway-client/wire";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 let gateway: MockGateway;
 let client: GatewayClient;
@@ -31,7 +35,7 @@ let client: GatewayClient;
 beforeAll(() => {
   gateway = createMockGateway();
   client = new GatewayClient(
-    createConnectionConfig("127.0.0.1", gateway.url.split(":")[2]!, TOKEN),
+    createConnectionConfig("127.0.0.1", must(gateway.url.split(":")[2]), TOKEN),
   );
 });
 
@@ -92,7 +96,7 @@ describe("GET /v1/panes/{paneId}/events", () => {
 describe("list → subscribe → project flow (decision D6)", () => {
   test("a PaneProjection fed by the live client dedupes and converges", async () => {
     const projection = new PaneProjection(PANE_ID);
-    const summary = PANE_FRAMES.list.panes[0]!;
+    const summary = must(PANE_FRAMES.list.panes[0]);
     projection.applySummary(summary);
 
     const seen: string[] = [];

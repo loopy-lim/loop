@@ -1,3 +1,4 @@
+import { READOUT_STYLE } from "../ui/copy";
 import { useCallback, useEffect, useState } from "react";
 import { RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -5,63 +6,56 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { GatewayClient } from "../gateway-client/client";
 import type { RemoteSessionSummary } from "../gateway-client/conversation";
 import type { RemoteRunPage, RemoteRunStatus, RemoteRunSummary } from "../gateway-client/wire";
-import { sessionSubtitle, sessionTitles } from "./session-title";
+import { sessionTitles, type SessionNamingEvidence } from "./session-title";
 import { activeFirst, isActiveRun, isActiveSession } from "../state/activeView";
-import {
-  splitSessions,
-  type SessionNamingEvidence,
-  type SessionNamingIndex,
-} from "../state/sessionsView";
+import { attentionFirst, groupOfRun, groupOfSession, statusMark, type StatusMark } from "../state/session-groups";
+import { splitSessions, type SessionNamingIndex } from "../state/sessionsView";
 import { relativeTime } from "./time-format";
 import { DynText } from "../ui/DynText";
+import { SwipeableRow } from "../ui/SwipeableRow";
+import { Icon } from "../ui/Icon";
+import { type IconRole } from "../ui/glyphs";
 import {
-  ACTIVE_ONLY_LABEL,
-  CHATS_HEADING,
+  ACTIVE_HEADING,
+  EARLIER_HEADING,
   EMPTY_ACTIVE_NOTICE,
   EMPTY_RUNS_NOTICE,
-  SESSIONS_HEADING,
   SHOW_ALL_LABEL,
+  TODAY_HEADING,
+  UNTITLED_RUN_LABEL,
+  UNNAMED_SESSION_LABEL,
+  ACTIVE_ONLY_LABEL,
 } from "../ui/copy";
-import { glyph } from "../ui/glyphs";
 import { colors, press, radius, space, type } from "../ui/tokens";
 
 /**
- * Chats list (GUI conversation v1, decision D6; row redesign in task
- * `ui-codex-redesign`): the existing runs list is the entry point; run rows
- * carry their correlated session badge, and observed sessions WITHOUT a run
- * correlation get their own "Sessions" section with an honest `run_id = null`
- * mark. Rows open the conversation view; the list is fetched on mount and
- * refetches only on explicit refresh (no background polling surface in v1).
+ * Chats list (GUI conversation v1, decision D6; grouped rows in task
+ * `main-screen-polish`): the existing runs list is the entry point. The
+ * list reads as THREE sections — In progress (non-terminal runs, attention
+ * included, plus live sessions; attention leads the section), Today, and
+ * Earlier — grouped by the pure fold in state/session-groups.ts from what
+ * the Rust-owned projections proved. One unified row anatomy:
+ * title + status glyph + relative time on a single line; an entry without
+ * an honest name shows the owned empty-state label — a run id or session
+ * id never fronts a row (brief S-11). Attention rows keep the warn left
+ * edge, so the S-13 action anchor survives inside the section instead of
+ * a separate inbox.
  *
- * Row anatomy (Codex-like): title (session title or compact run id) on the
- * first line with a status dot badge on the right, recent-activity meta on
- * the second line. The status dot is the closed status triad of
- * ui-ux-guidance §1 — one glyph, colored text only, never a surface fill.
+ * Naming (operator-approved rule, task `session-title-implementation`):
+ * observed sessions are titled by their first user utterance
+ * (features/session-title.ts); never-observed sessions have no honest
+ * utterance, so they read "Unnamed session" — never a fabricated title.
  *
- * SESSIONS naming (operator-approved rule, task
- * `session-title-implementation`): a session the app has observed is titled
- * by its first user utterance (one line, 48-char ellipsis; `새 세션` + start
- * time without one; repeated titles carry a start stamp — see
- * features/session-title.ts), and its subtitle is the Korean relative time
- * plus a source badge (TUI/앱). Sessions the app never observed have no
- * honest utterance to show: the adapter label stands in, else the compact
- * id — never a fabricated "새 세션". Deterministic: the evidence fold is
- * app-local (state/sessionsView.ts), no model calls.
- *
- * Logout (task `header-statusbar-redesign`): the destructive action lives
- * in the chats header's right corner — NOT here. The bottom row this list
- * used to render rode the home-indicator corner, where the rounded screen
- * edges clip it; the list is high-frequency surface and carries no
- * destructive control at all now (App gates the handler behind the header
- * confirmation alert).
+ * Logout (task `main-screen-polish`): this surface is chrome-free — no
+ * header, no destructive control anywhere. Logout lives on the bottom
+ * Settings tab (App composes it behind the confirmation alert).
  *
  * Session focus (task `session-focus`): the default view is the ACTIVE
- * work only — non-terminal runs, live sessions — with the running loop
- * leading (most recently updated first). The full inventory exists
- * exclusively behind an explicit "Show all sessions" toggle, and the
- * toggle itself appears only when something is actually hidden, so the
- * quiet view stays quiet. Filtering/ordering live in the pure
- * state/activeView.ts fold; this component only renders it.
+ * work only — in the grouped layout that is the In progress section alone;
+ * Today/Earlier render only behind the explicit "Show all sessions"
+ * toggle, which appears only when something is actually hidden.
+ * Filtering/ordering live in the pure state folds (activeView.ts,
+ * session-groups.ts); this component only renders them.
  */
 
 /** Display-only truncation of the opaque run id (never parsed back). */
@@ -83,8 +77,10 @@ export function countsText(run: { taskCounts: RemoteRunSummary["taskCounts"] }):
   return parts.length > 0 ? parts.join(", ") : "no tasks";
 }
 
-/** Closed status → dot color mapping (§1; anything unknown stays muted). */
-function runStatusColor(status: RemoteRunStatus): string {
+/** Closed status → color mapping (§1; anything unknown stays muted).
+ * Exported: the run screen's status line reuses the SAME mapping — one
+ * status→color table for the app. */
+export function runStatusColor(status: RemoteRunStatus): string {
   switch (status) {
     case "running":
     case "planning":
@@ -94,48 +90,66 @@ function runStatusColor(status: RemoteRunStatus): string {
     case "failed":
       return colors.danger;
     default:
-      return colors.inkFaint;
+      return colors.inkGhost;
   }
 }
 
-function RunRow(props: {
-  run: RemoteRunSummary;
-  session: RemoteSessionSummary | undefined;
-  /** Full-inventory view: the non-zero counts readout joins the meta line.
-   * The default (active) view keeps the meta to the relative time only —
-   * the status badge already carries the state. */
-  detailed: boolean;
+/** Mark → icon role (the closed ui/glyphs.ts registry, §1): the view owns
+ * the registry lookup because the state fold may not import ui — the fold
+ * decides WHICH mark, this table decides WHICH role renders it (the SF
+ * Symbol / protected-text choice is ui/Icon's, task `fab-icons`). */
+const MARK_ROLE: Record<StatusMark, IconRole> = {
+  running: "statusRunning",
+  attention: "attention",
+  error: "statusError",
+  done: "statusDone",
+  dot: "statusDot",
+};
+
+/** Display model of one row (task `main-screen-polish`): title + status
+ * glyph + relative time — one line. The glyph is the state carrier (the
+ * closed vocabulary above); the word is gone (C-4: frequent states stay
+ * quiet, and the ⚠/✕ marks read alone). */
+interface RowModel {
+  key: string;
+  /** The registered icon role carrying the state (closed vocabulary). */
+  glyphRole: IconRole;
+  glyphColor: string;
+  title: string;
+  timeIso: string | null;
+  /** Attention rows keep the warn left edge — the S-13 anchor now lives
+   * in the row, not in a separate inbox section. */
+  edge: boolean;
   onOpen?: () => void;
-}) {
-  const { run, session } = props;
+}
+
+/** The one row component: run rows and session rows share the anatomy,
+ * the swipe contract, and the 44pt-class touch floor. */
+function ListRow(props: { row: RowModel; peek: boolean }) {
+  const { row } = props;
   return (
-    <TouchableOpacity
-      style={[styles.row, props.onOpen === undefined && styles.rowDisabled]}
-      disabled={props.onOpen === undefined}
-      onPress={props.onOpen}
-      activeOpacity={press.activeOpacity}
-    >
-      <View style={styles.rowTop}>
-        <DynText style={styles.rowTitle} numberOfLines={1}>
-          {session?.title ?? shortRunId(run.runId)}
-        </DynText>
-        <View style={styles.badge}>
-          <DynText style={[styles.badgeDot, { color: runStatusColor(run.status) }]}>
-            {glyph.statusDot}
-          </DynText>
-          <DynText style={[styles.badgeText, { color: runStatusColor(run.status) }]}>
-            {run.status}
-          </DynText>
+    // Row actions (task `mobile-ux-patterns`, iOS HIG): a horizontal drag
+    // reveals Open — the one verb the contract owns for a row. The FIRST
+    // actionable row on the list mounts partially open (peek) so the
+    // gesture is discoverable without a coach mark.
+    <SwipeableRow onAction={row.onOpen} peek={props.peek}>
+      <TouchableOpacity
+        style={[styles.row, row.edge && styles.rowEdge, row.onOpen === undefined && styles.rowDisabled]}
+        disabled={row.onOpen === undefined}
+        onPress={row.onOpen}
+        activeOpacity={press.activeOpacity}
+      >
+        <View style={styles.rowLeading}>
+          <Icon role={row.glyphRole} size={type.captionStrong.fontSize} color={row.glyphColor} />
         </View>
-      </View>
-      {/* Minimal meta (§1 quiet state): relative time always; the non-zero
-       * counts readout joins only in the full view — never zero rows, and
-       * never a duplicated state word (the badge above already says it). */}
-      <DynText style={styles.rowMeta} numberOfLines={1}>
-        {relativeTime(run.updatedAt)}
-        {props.detailed ? ` · ${countsText(run)}` : ""}
-      </DynText>
-    </TouchableOpacity>
+        <DynText style={styles.rowTitle} numberOfLines={1}>
+          {row.title}
+        </DynText>
+        {row.timeIso !== null ? (
+          <DynText style={styles.rowTime}>{relativeTime(row.timeIso)}</DynText>
+        ) : null}
+      </TouchableOpacity>
+    </SwipeableRow>
   );
 }
 
@@ -146,7 +160,7 @@ export function RunsList(props: {
   naming?: SessionNamingIndex;
   /** Opens the conversation view of an existing run (omitted: rows are static). */
   onOpenRun?: (runId: string) => void;
-  /** Opens the conversation view of an uncorrelated session. */
+  /** Opens the conversation of an uncorrelated session. */
   onOpenSession?: (sessionId: string) => void;
 }) {
   const [page, setPage] = useState<RemoteRunPage | null>(null);
@@ -166,7 +180,7 @@ export function RunsList(props: {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
     // Session inventory is best-effort (a gateway without the conversation
-    // surface simply hides the badges and the sessions section).
+    // surface simply hides the sessions).
     props.client
       .listSessions()
       .then((list) => setSessions(list.sessions))
@@ -193,7 +207,8 @@ export function RunsList(props: {
   const hiddenCount = runs.length - visibleRuns.length + (uncorrelated.length - visibleUncorrelated.length);
   const toggleVisible = showAll || hiddenCount > 0;
   // Naming rule (operator-approved): only OBSERVED sessions are named by
-  // their first utterance; the rest keep the honest label/id fallbacks.
+  // their first utterance; the rest keep the honest label/empty-state
+  // fallbacks.
   const naming = props.naming;
   const namedTitles = sessionTitles(
     uncorrelated
@@ -207,6 +222,65 @@ export function RunsList(props: {
       ),
   );
 
+  // Grouping fold (state/session-groups.ts, task `main-screen-polish`):
+  // rows bucket by what the projections proved. In progress = non-terminal
+  // runs (attention INCLUDED — an unanswered question is in-progress work)
+  // plus live sessions; the rest read Today/Earlier off their last update
+  // (sessions: the naming-evidence start time — the wire carries no session
+  // timestamp, and an unprovable recency buckets honestly into Earlier).
+  const now = new Date();
+  const toRunRow = (run: RemoteRunSummary): RowModel => {
+    const session = byRunId.get(run.runId);
+    return {
+      key: `run:${run.runId}`,
+      glyphRole: MARK_ROLE[statusMark(run.status)],
+      glyphColor: runStatusColor(run.status),
+      title: session?.title ?? UNTITLED_RUN_LABEL,
+      timeIso: run.updatedAt,
+      edge: run.status === "attention",
+      onOpen: openRun !== undefined ? () => openRun(run.runId) : undefined,
+    };
+  };
+  const toSessionRow = (session: RemoteSessionSummary): RowModel => {
+    const evidence = naming?.evidence(session.sessionId) ?? null;
+    const title =
+      (evidence !== null ? namedTitles.get(session.sessionId) : undefined) ??
+      session.title ??
+      UNNAMED_SESSION_LABEL;
+    return {
+      key: `session:${session.sessionId}`,
+      glyphRole: "statusDot",
+      glyphColor: colors.inkGhost,
+      title,
+      timeIso: evidence?.startedAt ?? null,
+      edge: false,
+      onOpen: openSession !== undefined ? () => openSession(session.sessionId) : undefined,
+    };
+  };
+  const runGroup = (run: RemoteRunSummary) => groupOfRun(run, now);
+  const sessionGroup = (session: RemoteSessionSummary) =>
+    groupOfSession(session, naming?.evidence(session.sessionId)?.startedAt ?? null, now);
+  const activeRows: RowModel[] = [
+    // Attention leads the section (attentionFirst), then recency — the
+    // action anchor survives the inbox's removal.
+    ...visibleRuns.filter((run) => runGroup(run) === "active").toSorted(attentionFirst).map(toRunRow),
+    ...visibleUncorrelated.filter((session) => sessionGroup(session) === "active").map(toSessionRow),
+  ];
+  const todayRows: RowModel[] = [
+    ...visibleRuns.filter((run) => runGroup(run) === "today").map(toRunRow),
+    ...visibleUncorrelated.filter((session) => sessionGroup(session) === "today").map(toSessionRow),
+  ];
+  const earlierRows: RowModel[] = [
+    ...visibleRuns.filter((run) => runGroup(run) === "earlier").map(toRunRow),
+    ...visibleUncorrelated.filter((session) => sessionGroup(session) === "earlier").map(toSessionRow),
+  ];
+  // Discoverability peek: exactly ONE row — the first actionable row of
+  // the rendered list — mounts with the strip partially open.
+  const peekKey =
+    activeRows.find((row) => row.onOpen !== undefined)?.key ??
+    todayRows.find((row) => row.onOpen !== undefined)?.key ??
+    earlierRows.find((row) => row.onOpen !== undefined)?.key;
+
   return (
     <ScrollView
       style={styles.scroll}
@@ -217,12 +291,12 @@ export function RunsList(props: {
         <RefreshControl refreshing={loading} onRefresh={reload} tintColor={colors.inkMute} />
       }
     >
-      {/* Section label only (§2 readout): the list refreshes via its
-       * pull-to-refresh control — a second explicit refresh button was a
-       * duplicate control and is gone. The focus toggle rides the same row
-       * as a quiet caption action; the full list exists only behind it. */}
+      {/* The In progress heading doubles as the focus-toggle row: the label
+       * stays even when the section is empty, so the toggle always has a
+       * stable home (§2 readout label; no chrome above this — the list is
+       * the screen, task `main-screen-polish`). */}
       <View style={styles.headingRow}>
-        <DynText style={styles.sectionLabel}>{CHATS_HEADING}</DynText>
+        <DynText style={styles.sectionLabel}>{ACTIVE_HEADING}</DynText>
         {toggleVisible ? (
           <TouchableOpacity
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -242,61 +316,34 @@ export function RunsList(props: {
       {error === null &&
       !loading &&
       runs.length + uncorrelated.length > 0 &&
-      visibleRuns.length === 0 &&
-      visibleUncorrelated.length === 0 ? (
+      activeRows.length === 0 ? (
         <DynText style={styles.empty}>{EMPTY_ACTIVE_NOTICE}</DynText>
       ) : null}
       <View style={styles.rows}>
-        {visibleRuns.map((run: RemoteRunSummary) => (
-          <RunRow
-            key={run.runId}
-            run={run}
-            session={byRunId.get(run.runId)}
-            detailed={showAll}
-            onOpen={openRun !== undefined ? () => openRun(run.runId) : undefined}
-          />
+        {activeRows.map((row) => (
+          <ListRow key={row.key} row={row} peek={row.key === peekKey} />
         ))}
       </View>
 
-      {visibleUncorrelated.length > 0 ? (
-        <View style={styles.sessionsSection}>
-          <DynText style={styles.sectionLabel}>{SESSIONS_HEADING}</DynText>
+      {/* Today / Earlier exist only behind the toggle (session-focus) and
+       * only while non-empty — a labeled empty section is noise. */}
+      {showAll && todayRows.length > 0 ? (
+        <View style={styles.groupSection}>
+          <DynText style={styles.sectionLabel}>{TODAY_HEADING}</DynText>
           <View style={styles.rows}>
-            {visibleUncorrelated.map((session) => {
-              const evidence = naming?.evidence(session.sessionId) ?? null;
-              const title =
-                (evidence !== null ? namedTitles.get(session.sessionId) : undefined) ??
-                session.title ??
-                shortRunId(session.sessionId);
-              return (
-                <TouchableOpacity
-                  key={session.sessionId}
-                  style={[styles.row, openSession === undefined && styles.rowDisabled]}
-                  disabled={openSession === undefined}
-                  onPress={
-                    openSession !== undefined ? () => openSession(session.sessionId) : undefined
-                  }
-                  activeOpacity={press.activeOpacity}
-                >
-                  <View style={styles.rowTop}>
-                    <DynText style={styles.rowTitle} numberOfLines={1}>
-                      {title}
-                    </DynText>
-                    <View style={styles.badge}>
-                      <DynText style={[styles.badgeDot, { color: colors.inkFaint }]}>
-                        {glyph.statusDot}
-                      </DynText>
-                      <DynText style={[styles.badgeText, { color: colors.inkFaint }]}>
-                        {session.state}
-                      </DynText>
-                    </View>
-                  </View>
-                  <DynText style={styles.rowMeta} numberOfLines={1}>
-                    {sessionSubtitle(evidence, session.lane)}
-                  </DynText>
-                </TouchableOpacity>
-              );
-            })}
+            {todayRows.map((row) => (
+              <ListRow key={row.key} row={row} peek={row.key === peekKey} />
+            ))}
+          </View>
+        </View>
+      ) : null}
+      {showAll && earlierRows.length > 0 ? (
+        <View style={styles.groupSection}>
+          <DynText style={styles.sectionLabel}>{EARLIER_HEADING}</DynText>
+          <View style={styles.rows}>
+            {earlierRows.map((row) => (
+              <ListRow key={row.key} row={row} peek={row.key === peekKey} />
+            ))}
           </View>
         </View>
       ) : null}
@@ -313,7 +360,7 @@ const styles = StyleSheet.create({
     ...type.captionStrong,
     color: colors.inkFaint,
     textTransform: "uppercase",
-    letterSpacing: 0.6,
+    ...READOUT_STYLE,
   },
   // Heading row carries the label + the session-focus toggle on one line.
   headingRow: {
@@ -326,6 +373,7 @@ const styles = StyleSheet.create({
   // no border: hierarchy from weight alone (§1).
   toggleLabel: { ...type.captionStrong, color: colors.inkMute },
   rows: { gap: space.s },
+  groupSection: { marginTop: space.xl },
   row: {
     backgroundColor: colors.surface,
     // Edge rule (decision 2026-xx-minimal-design-spec S5): the hairline
@@ -333,23 +381,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.hairline,
     borderRadius: radius.m,
+    // Row anatomy (task `main-screen-polish`): glyph · title · time on
+    // ONE line — nothing else survives the simplification.
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.m,
     paddingVertical: space.m,
     paddingHorizontal: space.l,
   },
-  rowTop: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: space.m,
-  },
+  // Attention edge (S-13): the warn strip marks the rows that ask for
+  // the operator; every other row stays unmarked.
+  rowEdge: { borderLeftWidth: 3, borderLeftColor: colors.warn },
+  rowLeading: { flexShrink: 0 },
   rowTitle: { ...type.bodyStrong, color: colors.ink, flexShrink: 1 },
-  badge: { flexDirection: "row", alignItems: "center", gap: space.xs, flexShrink: 0 },
-  badgeDot: { ...type.glyph },
-  badgeText: { ...type.captionStrong },
-  rowMeta: { ...type.caption, color: colors.inkMute, marginTop: space.xxs },
+  rowTime: { ...type.caption, color: colors.inkMute, flexShrink: 0 },
   error: { ...type.caption, color: colors.danger, marginBottom: space.s },
   empty: { ...type.body, color: colors.inkMute },
-  sessionsSection: { marginTop: space.xl },
   // Visibility contract: a control that cannot fire reads as disabled —
   // static rows (no open handler) dim like the disabled refresh label.
   rowDisabled: { opacity: 0.5 },

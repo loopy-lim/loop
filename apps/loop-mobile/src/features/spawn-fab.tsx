@@ -1,11 +1,18 @@
 /**
- * Remote spawn surface (task `spawn-app-ui`, decision 2026-xx-session-spawn
- * §D-D): the chats-home "New TUI session" card → POST /v1/sessions/spawn →
+ * Remote spawn FAB (task `fab-icons`, superseding the chats-home spawn
+ * card of task `spawn-app-ui` — decision 2026-xx-session-spawn §D-D): the
+ * "New TUI session" entry is now a "+" floating action button anchored
+ * bottom-right above the tab bar (canon v3 §3 플로팅 액션 버튼 — a
+ * SECONDARY-tier action: surface fill + hairline + float elevation; it
+ * never competes with Submit, the screen's single strong CTA).
+ *
+ * The spawn flow's state contract is unchanged: POST /v1/sessions/spawn →
  * auto-open the discovered session in the conversation view. Thin state
  * wiring only — every unit-testable piece (discovery polling, problem
  * formatting, gate classification) lives in the react-free
- * `features/session-spawn.ts` (a separate basename so the test runtime,
- * which cannot load react-native, imports the pure module unambiguously).
+ * `features/session-spawn.ts`. The busy → waiting → problem states stay
+ * visible in the status pill directly ABOVE the button (생성 중 상태 유지):
+ * the flow's feedback stays inline, no modal hops.
  */
 
 import { useState } from "react";
@@ -28,10 +35,11 @@ import {
   SPAWN_TUI_TIMEOUT_SUFFIX,
   SPAWN_TUI_WAITING,
 } from "../ui/copy";
+import { Icon } from "../ui/Icon";
 import { DynText } from "../ui/DynText";
-import { colors, press, space, type } from "../ui/tokens";
+import { colors, elevation, press, radius, space, type, COLUMN_GUTTER } from "../ui/tokens";
 
-export type SpawnCardProps = {
+export type SpawnFabProps = {
   client: GatewayClient;
   /** Learned gate (connection lifetime, App-owned): the action cannot fire
    * after the gateway said spawn is off — the disabled state is visible. */
@@ -47,10 +55,11 @@ type SpawnStatus =
   | { kind: "busy"; text: string }
   | { kind: "done"; text: string; error: boolean };
 
-/** The chats-home spawn card: a quiet labeled action under the composer —
- * it never competes with Submit (the screen's single strong CTA) and its
- * status line owns the whole flow's feedback inline (no modal hops). */
-export function SpawnSessionCard(props: SpawnCardProps) {
+/** The chats-home spawn FAB: a 56pt circle (44pt touch floor exceeded)
+ * floating bottom-right — the viewport's ONE floating emphasis. While
+ * spawning, the "+" gives way to the busy mark; the status pill above the
+ * button carries spawning/waiting/problem copy until it resolves. */
+export function SpawnFab(props: SpawnFabProps) {
   const [status, setStatus] = useState<SpawnStatus>({ kind: "idle" });
   const disabled = props.blocked || status.kind === "busy";
 
@@ -109,44 +118,79 @@ export function SpawnSessionCard(props: SpawnCardProps) {
   };
 
   return (
-    <View style={styles.card}>
+    // box-none: the host spans a strip above the button; taps on empty
+    // areas fall through to the list underneath.
+    <View pointerEvents="box-none" style={styles.host}>
+      {status.kind !== "idle" ? (
+        // Status pill (canon v3): the one floating companion of the FAB —
+        // detached chrome like the button itself, so the whole flow's
+        // feedback stays anchored to the tap point (no modal hops).
+        <View style={styles.statusPill}>
+          <DynText
+            style={[styles.statusText, status.kind === "done" && status.error && styles.statusError]}
+          >
+            {status.text}
+          </DynText>
+        </View>
+      ) : null}
       <TouchableOpacity
-        style={[styles.button, disabled && styles.buttonDisabled]}
+        style={[styles.fab, disabled && styles.fabDisabled]}
         onPress={spawn}
         disabled={disabled}
         activeOpacity={press.activeOpacity}
         accessibilityLabel={SPAWN_TUI_LABEL}
+        accessibilityRole="button"
       >
-        <DynText style={[styles.buttonText, disabled && styles.buttonTextDisabled]}>
-          {SPAWN_TUI_LABEL}
-        </DynText>
+        {/* Busy replaces the "+" while the spawn is in flight; problems
+         * return the "+" so the action stays retryable (except when the
+         * learned gate blocks it). */}
+        <Icon
+          role={status.kind === "busy" ? "busy" : "spawn"}
+          size={type.title.fontSize}
+          weight="medium"
+          color={disabled ? colors.inkFaint : colors.inkMute}
+        />
       </TouchableOpacity>
-      {status.kind !== "idle" ? (
-        <DynText
-          style={[styles.status, status.kind === "done" && status.error && styles.statusError]}
-        >
-          {status.text}
-        </DynText>
-      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { marginTop: space.m },
-  button: {
-    minHeight: 44,
+  // Anchored bottom-right, above the tab bar; the right offset clears the
+  // landscape inset at the screen level (the host is absolute).
+  host: {
+    position: "absolute",
+    right: COLUMN_GUTTER,
+    bottom: space.l,
+    alignItems: "flex-end",
+    gap: space.s,
+  },
+  // Circular secondary-tier button: surface fill + hairline + float
+  // elevation (detached chrome over the scrolling list). 56pt square with
+  // a 50% radius — the pill radius's registered circular use (canon §3),
+  // and the 44pt touch floor is exceeded.
+  fab: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.hairline,
-    borderRadius: 999,
-    paddingVertical: space.s,
-    paddingHorizontal: space.l,
+    ...elevation.float,
   },
-  buttonDisabled: { opacity: 0.5 },
-  buttonText: { ...type.captionStrong, color: colors.inkMute },
-  buttonTextDisabled: { color: colors.inkFaint },
-  status: { ...type.caption, color: colors.inkMute, marginTop: space.s },
+  fabDisabled: { opacity: 0.5 },
+  statusPill: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    borderRadius: radius.m,
+    paddingHorizontal: space.m,
+    paddingVertical: space.s,
+    maxWidth: 264,
+    ...elevation.float,
+  },
+  statusText: { ...type.caption, color: colors.inkMute },
   statusError: { color: colors.danger },
 });

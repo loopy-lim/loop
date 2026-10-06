@@ -132,6 +132,13 @@ function utf8SequenceLength(b: number): number {
   return 4;
 }
 
+/** Bounds-checked byte read (callers guarantee the index is in range). */
+function byteAt(bytes: Uint8Array | number[], index: number): number {
+  const value = bytes[index];
+  if (value === undefined) throw new RangeError(`byte index ${index} out of range`);
+  return value;
+}
+
 /** Decode one UTF-8 sequence; null when the continuation bytes are invalid. */
 function decodeUtf8Sequence(
   bytes: Uint8Array | number[],
@@ -143,7 +150,7 @@ function decodeUtf8Sequence(
     if (b === undefined || b < 0x80 || b > 0xbf) return null;
   }
   // Invariant: the caller checked `start + length <= bytes.length` before calling.
-  const at = (k: number): number => bytes[start + k]!;
+  const at = (k: number): number => byteAt(bytes, start + k);
   switch (length) {
     case 2:
       return ((at(0) & 0x1f) << 6) | (at(1) & 0x3f);
@@ -177,7 +184,7 @@ export class Utf8ChunkDecoder {
     let out = "";
     let i = 0;
     while (i < bytes.length) {
-      const b = bytes[i]!; // loop condition guarantees i < bytes.length
+      const b = byteAt(bytes, i); // loop condition guarantees i < bytes.length
       const length = utf8SequenceLength(b);
       if (i + length > bytes.length) {
         if (options.stream === true) {

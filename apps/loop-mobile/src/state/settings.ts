@@ -16,7 +16,7 @@
 /** Viewer prose base font size, px. The markdown renderer scales headers
  * and code off this base. Clamped for legibility on both ends. */
 export const FONT_SIZE_MIN = 12;
-export const FONT_SIZE_MAX = 22;
+export const FONT_SIZE_MAX = 26;
 export const FONT_SIZE_DEFAULT = 15;
 
 /** Foreground refresh interval for the run tree's pane inventory (ms).

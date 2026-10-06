@@ -78,8 +78,13 @@ describe("run-list source contract — the full list exists only behind the togg
   });
 
   test("the filtered lists are what renders (no unfiltered map survives)", () => {
-    expect(runListSource).toContain("visibleRuns.map(");
-    expect(runListSource).toContain("visibleUncorrelated.map(");
+    // task `main-screen-polish`: the visible (filtered) lists feed the
+    // group fold — each section maps rows derived ONLY from them.
+    expect(runListSource).toContain("visibleRuns.filter(");
+    expect(runListSource).toContain("visibleUncorrelated.filter(");
+    expect(runListSource).toContain("activeRows.map(");
+    expect(runListSource).toContain("todayRows.map(");
+    expect(runListSource).toContain("earlierRows.map(");
     expect(runListSource).not.toMatch(/\buncorrelated\.map\(/);
     expect(runListSource).not.toMatch(/\bruns\.map\(/);
   });

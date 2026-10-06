@@ -117,7 +117,7 @@ describe("repeated-title disambiguation", () => {
       { sessionId: "c", evidence: { utterance: "other topic", startedAt: null, source: "app" } },
     ];
     const forward = sessionTitles(rows);
-    const reversed = sessionTitles([...rows].reverse());
+    const reversed = sessionTitles(rows.toReversed());
     expect(forward.get("c")).toBe("other topic");
     expect(reversed.get("c")).toBe("other topic");
     expect(forward.get("a")).toBe(reversed.get("a"));

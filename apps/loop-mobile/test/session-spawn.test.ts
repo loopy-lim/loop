@@ -23,6 +23,31 @@ import {
   isSpawnGateProblem,
 } from "../src/features/session-spawn";
 import { TOKEN } from "./fixtures";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
+
+/** An already-resolved sleep (discovery polls without wall-clock delay). */
+const INSTANT = (): Promise<void> => Promise.resolve();
+
+/** 403 problem fixture for spawn-gate classification + copy tests. */
+function gatewayError(
+  code: string,
+  detail: string,
+  fields: Record<string, string> | null,
+): GatewayError {
+  return new GatewayError({
+    type: `https://loop.local/problems/${code}`,
+    title: code,
+    status: 403,
+    code,
+    detail,
+    requestId: "req_srv_1",
+    retryable: false,
+    fields,
+  });
+}
 
 const PORT = "18477";
 
@@ -64,7 +89,7 @@ describe("spawnTuiSession — POST /v1/sessions/spawn contract", () => {
 
     expect(outcome).toEqual(SPAWN_201);
     expect(requests).toHaveLength(1);
-    const { url, init } = requests[0]!;
+    const { url, init } = must(requests[0]);
     expect(url).toBe(`http://127.0.0.1:${PORT}/v1/sessions/spawn`);
     expect(init.method).toBe("POST");
     expect((init.headers as Record<string, string>)["Content-Type"]).toBe(
@@ -78,7 +103,7 @@ describe("spawnTuiSession — POST /v1/sessions/spawn contract", () => {
   test("carries an explicitly requested cwd and none of the gate state", async () => {
     const { client, requests } = scripted(201, SPAWN_201);
     await client.spawnTuiSession("/work/nested");
-    expect(JSON.parse(requests[0]!.init.body as string)).toEqual({ cwd: "/work/nested" });
+    expect(JSON.parse(requests[0]?.init.body as string)).toEqual({ cwd: "/work/nested" });
   });
 
   test("tokenless mode sends NO Authorization header (tailnet membership is the boundary)", async () => {
@@ -92,7 +117,7 @@ describe("spawnTuiSession — POST /v1/sessions/spawn contract", () => {
     );
     await tokenless.spawnTuiSession();
     expect(requests).toHaveLength(1);
-    expect((requests[0]!.init.headers as Record<string, string>).Authorization).toBeUndefined();
+    expect((requests[0]?.init.headers as Record<string, string> | undefined)?.Authorization).toBeUndefined();
   });
 
   test("maps `spawn_disabled` (403) to GatewayError and never retries", async () => {
@@ -157,8 +182,6 @@ describe("spawnTuiSession — POST /v1/sessions/spawn contract", () => {
 });
 
 describe("awaitSpawnedSession — before/after inventory correlation", () => {
-  const INSTANT = () => Promise.resolve();
-
   test("opens the first NEWLY observed session id", async () => {
     const discovery = await awaitSpawnedSession({
       listSessions: async () => ({
@@ -235,23 +258,6 @@ describe("awaitSpawnedSession — before/after inventory correlation", () => {
 });
 
 describe("problem surfacing — the reason the action failed", () => {
-  function gatewayError(
-    code: string,
-    detail: string,
-    fields: Record<string, string> | null,
-  ): GatewayError {
-    return new GatewayError({
-      type: `https://loop.local/problems/${code}`,
-      title: code,
-      status: 403,
-      code,
-      detail,
-      requestId: "req_srv_1",
-      retryable: false,
-      fields,
-    });
-  }
-
   test("formats code + detail + rule fields (fields never carry path values)", () => {
     expect(
       describeSpawnProblem(gatewayError("spawn_disabled", "remote spawn is disabled", null)),

@@ -14,7 +14,7 @@ const FULL_TOP = sheetTopOffset("full", HEIGHT);
 
 describe("snap points", () => {
   test("exactly two snap points: half and full", () => {
-    expect(Object.keys(SHEET_SNAPS).sort()).toEqual(["full", "half"]);
+    expect(Object.keys(SHEET_SNAPS).toSorted()).toEqual(["full", "half"]);
   });
 
   test("half is mid-screen, full stays below the top edge", () => {

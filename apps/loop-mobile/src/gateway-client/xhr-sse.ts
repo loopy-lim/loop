@@ -31,10 +31,7 @@ export type XhrLike = {
   status: number;
   readyState: number;
   responseText: string;
-  onreadystatechange: ((...args: unknown[]) => void) | null;
-  onerror: ((...args: unknown[]) => void) | null;
-  onabort: ((...args: unknown[]) => void) | null;
-  ontimeout: ((...args: unknown[]) => void) | null;
+  addEventListener(type: string, listener: (...args: unknown[]) => void): void;
 };
 
 export type XhrFactory = () => XhrLike;
@@ -106,7 +103,7 @@ export function openXhrSse(options: {
   for (const [name, value] of Object.entries(options.headers)) {
     xhr.setRequestHeader(name, value);
   }
-  xhr.onreadystatechange = () => {
+  xhr.addEventListener("readystatechange", () => {
     if (xhr.readyState >= HEADERS_RECEIVED && xhr.status !== 0) {
       resolveStatusOnce(xhr.status);
     }
@@ -121,10 +118,10 @@ export function openXhrSse(options: {
         close();
       }
     }
-  };
-  xhr.onerror = () => fail("XHR network error");
-  xhr.onabort = () => close();
-  xhr.ontimeout = () => fail("XHR timeout");
+  });
+  xhr.addEventListener("error", () => fail("XHR network error"));
+  xhr.addEventListener("abort", () => close());
+  xhr.addEventListener("timeout", () => fail("XHR timeout"));
   xhr.send();
 
   async function* chunks(): AsyncGenerator<string, void, void> {

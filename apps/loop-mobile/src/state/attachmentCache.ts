@@ -51,21 +51,35 @@ export function formatByteLen(byteLen: number): string {
 
 const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+/** Bounds-checked byte read (callers guarantee the index is in range). */
+function byteAt(bytes: Uint8Array, index: number): number {
+  const value = bytes[index];
+  if (value === undefined) throw new RangeError(`byte index ${index} out of range`);
+  return value;
+}
+
+/** Bounds-checked alphabet lookup (callers guarantee a 6-bit index). */
+function alphabetAt(index: number): string {
+  const value = BASE64_ALPHABET[index];
+  if (value === undefined) throw new RangeError(`alphabet index ${index} out of range`);
+  return value;
+}
+
 /** Deterministic standard base64 (no runtime-specific atob/btoa/Buffer —
  * Hermes and Bun both take the same pure path; testable without a runtime). */
 export function toBase64(bytes: Uint8Array): string {
   let out = "";
   for (let offset = 0; offset < bytes.length; offset += 3) {
-    const b0 = bytes[offset]!;
-    const b1 = offset + 1 < bytes.length ? bytes[offset + 1]! : null;
-    const b2 = offset + 2 < bytes.length ? bytes[offset + 2]! : null;
-    out += BASE64_ALPHABET[b0 >> 2]!;
+    const b0 = byteAt(bytes, offset);
+    const b1 = offset + 1 < bytes.length ? byteAt(bytes, offset + 1) : null;
+    const b2 = offset + 2 < bytes.length ? byteAt(bytes, offset + 2) : null;
+    out += alphabetAt(b0 >> 2);
     if (b1 === null) {
-      out += `${BASE64_ALPHABET[(b0 & 0x03) << 4]!}==`;
+      out += `${alphabetAt((b0 & 0x03) << 4)}==`;
     } else if (b2 === null) {
-      out += `${BASE64_ALPHABET[((b0 & 0x03) << 4) | (b1 >> 4)]!}${BASE64_ALPHABET[(b1 & 0x0f) << 2]!}=`;
+      out += `${alphabetAt(((b0 & 0x03) << 4) | (b1 >> 4))}${alphabetAt((b1 & 0x0f) << 2)}=`;
     } else {
-      out += `${BASE64_ALPHABET[((b0 & 0x03) << 4) | (b1 >> 4)]!}${BASE64_ALPHABET[((b1 & 0x0f) << 2) | (b2 >> 6)]!}${BASE64_ALPHABET[b2 & 0x3f]!}`;
+      out += `${alphabetAt(((b0 & 0x03) << 4) | (b1 >> 4))}${alphabetAt(((b1 & 0x0f) << 2) | (b2 >> 6))}${alphabetAt(b2 & 0x3f)}`;
     }
   }
   return out;

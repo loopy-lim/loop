@@ -35,7 +35,11 @@ import type { ConversationStreamEvent } from "../src/gateway-client/conversation
 import type { FetchLike } from "../src/gateway-client/client";
 import { TOKEN } from "./fixtures";
 import { SESSION_GONE, SESSION_ID } from "./conversation-fixtures";
-import { createMockGateway, type MockGateway } from "./mock-gateway";
+import { createMockGateway } from "./mock-gateway";
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
 
 const CONFIG = createConnectionConfig("gw.tailnet.ts.net", "18477", "tok_resilience");
 
@@ -59,7 +63,7 @@ describe("Retry-After parsing (RFC 9110 delta-seconds and HTTP-date)", () => {
 
   test("HTTP-date resolves to the remaining delay, never negative", () => {
     const future = new Date(Date.now() + 5_000).toUTCString();
-    const parsed = parseRetryAfter(future)!;
+    const parsed = must(parseRetryAfter(future));
     expect(parsed).toBeGreaterThan(0);
     expect(parsed).toBeLessThanOrEqual(5_000);
     expect(parseRetryAfter(new Date(Date.now() - 60_000).toUTCString())).toBe(0);
@@ -119,12 +123,9 @@ describe("classification: retryable vs terminal is consistent", () => {
 });
 
 describe("429 on submit and steer (mock gateway, Retry-After: 0)", () => {
-  let gateway: MockGateway;
-  let client: GatewayClient;
-
   // A dedicated gateway per describe block: rate-limit scripting is stateful.
-  gateway = createMockGateway();
-  client = new GatewayClient(createConnectionConfig("127.0.0.1", Number(gateway.url.split(":")[2]), TOKEN));
+  const gateway = createMockGateway();
+  const client = new GatewayClient(createConnectionConfig("127.0.0.1", Number(gateway.url.split(":")[2]), TOKEN));
 
   test("transient 429s are absorbed: submit succeeds on a later attempt", async () => {
     gateway.rateLimitNextPosts(2);
@@ -197,11 +198,8 @@ describe("429 on submit and steer (mock gateway, Retry-After: 0)", () => {
 });
 
 describe("429 on live streams + cursor replay (mock gateway)", () => {
-  let gateway: MockGateway;
-  let client: GatewayClient;
-
-  gateway = createMockGateway();
-  client = new GatewayClient(
+  const gateway = createMockGateway();
+  const client = new GatewayClient(
     createConnectionConfig("127.0.0.1", Number(gateway.url.split(":")[2]), TOKEN),
   );
 
@@ -215,7 +213,7 @@ describe("429 on live streams + cursor replay (mock gateway)", () => {
     // The refused connection was retried with the Retry-After hint (0ms),
     // and the follow-up connection delivered the whole stream untouched.
     expect(retries).toHaveLength(1);
-    expect(retries[0]!.delayMs).toBe(0);
+    expect(retries[0]?.delayMs).toBe(0);
     expect(events.at(-1)?.frame).toEqual(SESSION_GONE);
   });
 
