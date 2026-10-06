@@ -1,0 +1,17 @@
+{
+  "demo": "showcase-recapture",
+  "runId": "run_demo_attention_0010",
+  "attentionId": "att_demo_attention_0010",
+  "open": false,
+  "resolved": true,
+  "resolution": "Skip the flaky test and continue with the remaining tasks",
+  "resolvedAt": "2026-10-05T13:38:50.064Z",
+  "runStatusAfter": "running",
+  "taskCountsAfter": { "pending": 0, "running": 0, "attention": 0, "done": 1, "failed": 0, "cancelled": 0 },
+  "evidence": [
+    "05-attention-open-runs.png",
+    "06-attention-response-typed.png",
+    "07-attention-released.png"
+  ],
+  "notes": "Resolution typed into the RunScreen input and submitted via the app's Submit response button (cliclick on real buttons); gateway POST /v1/runs/{id}/attention/resolve state change plus run projection attention:null prove the release."
+}

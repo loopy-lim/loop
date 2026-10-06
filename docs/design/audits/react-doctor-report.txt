@@ -1,0 +1,259 @@
+  
+[32m✔[39m Scanned 111 files in 0.9s [~10 workers]
+✔ Scanned 111 files in 1.9s
+
+React Doctor — @loop/loop-mobile
+Score: 46 / 100 Critical
+
+159 issues
+Correctness: 1 warning
+Bugs: 7 errors, 135 warnings
+Maintainability: 9 warnings
+Performance: 7 warnings
+
+⚠ react-doctor/rn-no-metro-babel-runtime-version
+  react-doctor/rn-no-metro-babel-runtime-version
+  babel.config.js
+✖ eslint/no-unused-vars ×2
+  eslint/no-unused-vars
+  scripts/analyze-shot.ts:13
+  scripts/analyze-shot.ts:15
+⚠ typescript/no-non-null-assertion ×110
+  typescript/no-non-null-assertion
+  scripts/analyze-shot.ts:99
+  scripts/analyze-shot.ts:124
+  scripts/analyze-shot.ts:125
+  scripts/analyze-shot.ts:126
+  scripts/analyze-shot.ts:127
+  src/features/syntax.ts:334
+  src/features/syntax.ts:387
+  src/features/syntax.ts:396
+  src/features/syntax.ts:402
+  src/features/syntax.ts:414
+  src/gateway-client/sse.ts:146
+  src/gateway-client/sse.ts:180
+  src/screens/RunScreen.tsx:208
+  src/screens/RunScreen.tsx:209
+  src/state/attachmentCache.ts:59
+  src/state/attachmentCache.ts:60
+  src/state/attachmentCache.ts:61
+  src/state/attachmentCache.ts:62
+  src/state/attachmentCache.ts:64
+  src/state/attachmentCache.ts:66
+  src/state/attachmentCache.ts:66
+  src/state/attachmentCache.ts:68
+  src/state/attachmentCache.ts:68
+  src/state/attachmentCache.ts:68
+  test/attach-flow.test.ts:64 (test file)
+  test/attachment-render.test.ts:38 (test file)
+  test/attachment-upload.test.ts:33 (test file)
+  test/contract-client.test.ts:40 (test file)
+  test/contract-client.test.ts:53 (test file)
+  test/contract-client.test.ts:146 (test file)
+  test/contract-client.test.ts:162 (test file)
+  test/contract-client.test.ts:163 (test file)
+  test/contract-client.test.ts:167 (test file)
+  test/contract-client.test.ts:177 (test file)
+  test/contract-client.test.ts:188 (test file)
+  test/contract-client.test.ts:189 (test file)
+  test/contract-client.test.ts:195 (test file)
+  test/contrast.test.ts:22 (test file)
+  test/contrast.test.ts:48 (test file)
+  test/contrast.test.ts:48 (test file)
+  test/contrast.test.ts:95 (test file)
+  test/contrast.test.ts:95 (test file)
+  test/conversation-contract.test.ts:47 (test file)
+  test/conversation-contract.test.ts:298 (test file)
+  test/conversation-contract.test.ts:299 (test file)
+  test/conversation-contract.test.ts:304 (test file)
+  test/conversation-contract.test.ts:309 (test file)
+  test/conversation-contract.test.ts:315 (test file)
+  test/conversation-contract.test.ts:322 (test file)
+  test/conversation-contract.test.ts:325 (test file)
+  test/conversation-contract.test.ts:341 (test file)
+  test/conversation-contract.test.ts:344 (test file)
+  test/conversation-contract.test.ts:364 (test file)
+  test/conversation-contract.test.ts:367 (test file)
+  test/conversation-contract.test.ts:382 (test file)
+  test/conversation-contract.test.ts:388 (test file)
+  test/conversation-contract.test.ts:399 (test file)
+  test/conversation-contract.test.ts:401 (test file)
+  test/conversation-contract.test.ts:402 (test file)
+  test/conversation-contract.test.ts:406 (test file)
+  test/conversation-contract.test.ts:407 (test file)
+  test/conversation-contract.test.ts:408 (test file)
+  test/conversation-contract.test.ts:412 (test file)
+  test/conversation-contract.test.ts:437 (test file)
+  test/conversation-contract.test.ts:439 (test file)
+  test/conversation-contract.test.ts:446 (test file)
+  test/conversation-contract.test.ts:450 (test file)
+  test/file-client.test.ts:22 (test file)
+  test/mock-gateway.ts:232 (test file)
+  test/mock-gateway.ts:303 (test file)
+  test/mock-gateway.ts:340 (test file)
+  test/mock-gateway.ts:402 (test file)
+  test/mock-gateway.ts:529 (test file)
+  test/mock-gateway.ts:605 (test file)
+  test/mock-gateway.ts:641 (test file)
+  test/mock-gateway.ts:726 (test file)
+  test/mock-gateway.ts:808 (test file)
+  test/pane-contract.test.ts:34 (test file)
+  test/pane-contract.test.ts:95 (test file)
+  test/pane-projection.test.ts:87 (test file)
+  test/resilience.test.ts:62 (test file)
+  test/resilience.test.ts:218 (test file)
+  test/run-projection.test.ts:40 (test file)
+  test/session-spawn.test.ts:67 (test file)
+  test/session-spawn.test.ts:81 (test file)
+  test/session-spawn.test.ts:95 (test file)
+  test/sse-decoder.test.ts:76 (test file)
+  test/sse-decoder.test.ts:77 (test file)
+  test/sse-decoder.test.ts:84 (test file)
+  test/syntax.test.ts:65 (test file)
+  test/syntax.test.ts:77 (test file)
+  test/syntax.test.ts:87 (test file)
+  test/syntax.test.ts:94 (test file)
+  test/syntax.test.ts:102 (test file)
+  test/syntax.test.ts:109 (test file)
+  test/syntax.test.ts:117 (test file)
+  test/syntax.test.ts:126 (test file)
+  test/syntax.test.ts:134 (test file)
+  test/syntax.test.ts:142 (test file)
+  test/syntax.test.ts:151 (test file)
+  test/syntax.test.ts:158 (test file)
+  test/syntax.test.ts:166 (test file)
+  test/syntax.test.ts:175 (test file)
+  test/syntax.test.ts:183 (test file)
+  test/syntax.test.ts:192 (test file)
+  test/syntax.test.ts:198 (test file)
+  test/tokens.test.ts:20 (test file)
+  test/tokens.test.ts:20 (test file)
+  test/tokens.test.ts:30 (test file)
+  test/tokens.test.ts:30 (test file)
+⚠ Large component is hard to read and change ×2
+  react-doctor/no-giant-component
+  src/App.tsx:60
+  src/screens/ConversationScreen.tsx:98
+⚠ Side effect inside a state updater function
+  react-doctor/no-side-effect-in-state-updater-function
+  src/App.tsx:103
+⚠ Array index used as a key ×12
+  react-doctor/no-array-index-as-key
+  src/features/file-viewer.tsx:66
+  src/features/file-viewer.tsx:75
+  src/features/file-viewer.tsx:82
+  src/features/file-viewer.tsx:90
+  src/features/markdown-view.tsx:35
+  src/features/markdown-view.tsx:42
+  src/features/markdown-view.tsx:47
+  src/features/markdown-view.tsx:104
+  src/features/markdown-view.tsx:122
+  src/features/markdown-view.tsx:127
+  src/features/markdown-view.tsx:135
+  src/features/markdown-view.tsx:142
+⚠ State initializer runs on every render
+  react-doctor/rerender-lazy-state-init
+  src/features/file-viewer.tsx:126
+⚠ Inline renderItem on list ×2
+  react-doctor/rn-no-inline-flatlist-renderitem
+  src/features/file-viewer.tsx:163
+  src/features/file-viewer.tsx:176
+⚠ Inline handler in list renderItem ×2
+  react-doctor/rn-list-callback-per-row
+  src/features/file-viewer.tsx:168
+  src/features/file-viewer.tsx:181
+✖ Module removed from react-native core
+  react-doctor/rn-no-deprecated-modules
+  src/features/markdown-view.tsx:8
+⚠ Non-component export in component file ×4
+  react-doctor/only-export-components
+  src/features/run-list.tsx:69
+  src/features/run-list.tsx:75
+  src/screens/RunSplitScreen.tsx:27
+  src/ui/motion.tsx:106
+⚠ React function has high control-flow complexity ×3
+  react-doctor/no-high-complexity-react-function
+  src/features/run-list.tsx:143
+  src/screens/ConversationScreen.tsx:98
+  src/screens/RunScreen.tsx:34
+⚠ array.find() inside a loop
+  react-doctor/js-index-maps
+  src/features/session-title.ts:132
+⚠ Ref initializer runs on every render ×3
+  react-doctor/rerender-lazy-ref-init
+  src/features/viewer-sheet.tsx:39
+  src/screens/QRScannerScreen.tsx:44
+  src/ui/motion.tsx:71
+✖ Ref mutated during render
+  react-doctor/no-ref-current-in-render
+  src/screens/ConversationScreen.tsx:179
+✖ Effect subscription or timer never cleaned up
+  react-doctor/effect-needs-cleanup
+  src/screens/ConversationScreen.tsx:209
+⚠ Derived value copied into state
+  react-doctor/no-derived-state
+  src/screens/ConversationScreen.tsx:211
+⚠ Missing effect dependencies
+  react-doctor/exhaustive-deps
+  src/screens/ConversationScreen.tsx:290
+✖ setState in onScroll handler ×2
+  react-doctor/rn-no-scroll-state
+  src/screens/ConversationScreen.tsx:318
+  src/screens/PaneScreen.tsx:103
+⚠ await inside a loop ×2
+  react-doctor/async-await-in-loop
+  src/screens/ConversationScreen.tsx:515
+  src/state/attachFlow.ts:86
+⚠ Non-virtualized mapped list in ScrollView
+  react-doctor/rn-no-scrollview-mapped-list
+  src/screens/ConversationScreen.tsx:636
+⚠ Prop derived into useState
+  react-doctor/no-derived-useState
+  src/screens/SettingsScreen.tsx:37
+⚠ eslint/prefer-const ×4
+  eslint/prefer-const
+  test/resilience.test.ts:122 (test file)
+  test/resilience.test.ts:123 (test file)
+  test/resilience.test.ts:200 (test file)
+  test/resilience.test.ts:201 (test file)
+  Full diagnostics written to /var/folders/z8/h16kj6d16t53dj0lfvlkxf0h0000gn/T/react-doctor-3676b1c8-17f5-440c-bb16-224ef0bd3358
+
+  ────────────────────────────────────────────────────────────
+
+  Share: https://react.doctor/share?p=%40loop%2Floop-mobile&s=46&e=7&w=152&f=35
+  Tell others how you did on socials
+
+  Docs: https://react.doctor/docs
+  Learn more about fixing issues, setting up CI/CD, and
+  configuring rules with a config file
+
+  GitHub: https://github.com/millionco/react-doctor
+  Report issues and star the repository!
+
+
+────────────────────────────────────────────
+## 수정 권고 요약 (error 등급 7건, 2026 런 react-doctor-pass)
+
+코드 수정은 본 작업 범위 밖. 아래는 후속 수정 권고.
+
+1. eslint/no-unused-vars ×2
+   - scripts/analyze-shot.ts:13, src/gateway-client/sse.ts:146
+   - 권고: 미사용 식별자 제거 또는 사용. analyze-shot은 스크립트이므로 삭제 검토.
+
+2. react-doctor/rn-no-deprecated-modules
+   - src/features/markdown-view.tsx:8
+   - 권고: react-native 코어에서 제거된 모듈 임포트를 커뮤니티 패키지로 교체.
+
+3. react-doctor/no-ref-current-in-render
+   - src/screens/ConversationScreen.tsx:179
+   - 권고: 렌더 중 ref.current 변이를 state 또는 useEffect 이동.
+
+4. react-doctor/effect-needs-cleanup
+   - src/screens/ConversationScreen.tsx:209
+   - 권고: 구독/타이머를 effect 클린업에서 해제(Subscription.unsubscribe / clearInterval).
+
+5. react-doctor/rn-no-scroll-state ×2
+   - src/screens/ConversationScreen.tsx:318, src/screens/PaneScreen.tsx:103
+   - 권고: onScroll의 setState를 throttle/rAF로 감싸거나 Animated/Reanimated 값으로 대체.
+
+비고: 총계 46/100 (Critical) — 7 errors, 152 warnings, 35 files. 요약·점수 생성은 워커 수행 중 1회 실행으로 완료, 완료 체크는 파일 존재만 검사(읽기 전용).
