@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Composer } from "../features/composer";
@@ -31,7 +30,7 @@ import {
   type ConversationViewState,
 } from "../state/conversationProjection";
 import { composerTarget, sendComposerText } from "../state/composer";
-import { nextFollowState } from "../state/paneProjection";
+import { useFollowScroll } from "../ui/followScroll";
 import type { SessionNamingIndex } from "../state/sessionsView";
 import {
   ACTION_CAMERA_LABEL,
@@ -51,6 +50,9 @@ import {
   WAITING_FOR_SESSION_NOTICE,
   TERMINALS_HEADING,
   READOUT_STYLE,
+  NO_PANES_NOTICE,
+  PANE_LOADING_NOTICE,
+  LIFECYCLE_ONLY_SUFFIX,
 } from "../ui/copy";
 import { DynText } from "../ui/DynText";
 import { AppHeader } from "../ui/AppHeader";
@@ -171,8 +173,9 @@ export function ConversationScreen(props: {
   const keyboardVisible = useKeyboardVisible();
   const projectionRef = useRef<ConversationProjection | null>(null);
   const scrollRef = useRef<ScrollView | null>(null);
-  const followingRef = useRef(true);
-  const [following, setFollowing] = useState(true);
+  // Follow-the-tail state lives in one shared hook (decision D6) — the
+  // onScroll verdict rides a ref, the flush rides one scheduled frame.
+  const { following, onScroll, followNow } = useFollowScroll();
   const autoSteerFired = useRef(false);
   const autoBackFired = useRef(false);
 
@@ -182,7 +185,9 @@ export function ConversationScreen(props: {
   // rides a ref: it is a fresh closure every render, and the timer must
   // not restart on re-renders.
   const onBackRef = useRef(props.onBack);
-  onBackRef.current = props.onBack;
+  useEffect(() => {
+    onBackRef.current = props.onBack;
+  });
   useEffect(() => {
     if (autoBackFired.current || props.autoBackDelayMs === undefined) return;
     autoBackFired.current = true;
@@ -215,32 +220,35 @@ export function ConversationScreen(props: {
   useEffect(() => {
     if (props.sessionId !== undefined) {
       setSessionId(props.sessionId);
-      return;
+      return () => undefined;
     }
     const runId = props.runId;
-    if (runId === undefined) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let cancelled = false;
-    const poll = () => {
+    if (runId === undefined) return () => undefined;
+    // Fixed-cadence probe with an in-flight guard: one wire call at a time,
+    // the interval owns the single timer, cleanup clears it. The first probe
+    // fires immediately (a correlated session usually exists already).
+    let stopped = false;
+    let inFlight = false;
+    const probe = () => {
+      if (inFlight) return;
+      inFlight = true;
       props.client
         .listSessions()
         .then((list) => {
-          if (cancelled) return;
+          inFlight = false;
+          if (stopped) return;
           const found = list.sessions.find((session) => session.runId === runId);
-          if (found !== undefined) {
-            setSessionId(found.sessionId);
-          } else {
-            timer = setTimeout(poll, 4000);
-          }
+          if (found !== undefined) setSessionId(found.sessionId);
         })
         .catch(() => {
-          if (!cancelled) timer = setTimeout(poll, 4000);
+          inFlight = false;
         });
     };
-    poll();
+    probe();
+    const timer = setInterval(probe, 4000);
     return () => {
-      cancelled = true;
-      if (timer !== null) clearTimeout(timer);
+      stopped = true;
+      clearInterval(timer);
     };
   }, [props.client, props.runId, props.sessionId]);
 
@@ -314,16 +322,6 @@ export function ConversationScreen(props: {
       scrollRef.current?.scrollToEnd({ animated: true });
     }
   }, [following, mode, view?.items.length]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const onScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
-    const next = nextFollowState(followingRef.current, distanceFromBottom);
-    if (next !== followingRef.current) {
-      followingRef.current = next;
-      setFollowing(next);
-    }
-  };
 
   const sendText = (text: string) => {
     const target = composerTarget({ running: view?.running ?? false, runId: props.runId ?? null });
@@ -599,12 +597,10 @@ export function ConversationScreen(props: {
                 <Icon role="menu" size={type.title.fontSize} color={colors.inkMute} />
               </TouchableOpacity>
             ) : null}
-            {running ? (
-              <View style={styles.runningBadge}>
-                <RunningDot />
-                <DynText style={[styles.runningText, { color: colors.ok }]}>running</DynText>
-              </View>
-            ) : null}
+            {/* F-4 (usability audit v9): the header carries the STATE SIGNAL
+             * only — a blinking dot; the status word lives in the status row
+             * alone, never twice in one viewport (§4 emphasis budget). */}
+            {running ? <RunningDot /> : null}
             <TouchableOpacity
               onPress={() => setMode(mode === "chat" ? "raw" : "chat")}
               hitSlop={{ top: 14, bottom: 14, left: 16, right: 16 }}
@@ -656,6 +652,7 @@ export function ConversationScreen(props: {
               ref={scrollRef}
               onScroll={onScroll}
               scrollEventThrottle={16}
+              keyboardDismissMode="on-drag"
               style={styles.timeline}
               contentContainerStyle={styles.timelineContent}
             >
@@ -718,8 +715,7 @@ export function ConversationScreen(props: {
                   style={styles.jumpPill}
                   activeOpacity={press.activeOpacity}
                   onPress={() => {
-                    followingRef.current = true;
-                    setFollowing(true);
+                    followNow();
                     scrollRef.current?.scrollToEnd({ animated: true });
                   }}
                 >
@@ -771,10 +767,10 @@ function PaneList(props: {
   onOpenPane?: (paneId: string) => void;
 }) {
   if (props.panes === null) {
-    return <DynText style={styles.notice}>loading terminals…</DynText>;
+    return <DynText style={styles.notice}>{PANE_LOADING_NOTICE}</DynText>;
   }
   if (props.panes.length === 0) {
-    return <DynText style={styles.notice}>No terminals observed.</DynText>;
+    return <DynText style={styles.notice}>{NO_PANES_NOTICE}</DynText>;
   }
   return (
     <>
@@ -787,7 +783,7 @@ function PaneList(props: {
         >
           <DynText style={styles.paneRowText} numberOfLines={1}>
             {glyph.foldClosed} {pane.label ?? pane.paneId}
-            {pane.state === "unknown" ? " (lifecycle only)" : ""}
+            {pane.state === "unknown" ? LIFECYCLE_ONLY_SUFFIX : ""}
           </DynText>
         </TouchableOpacity>
       ))}
@@ -816,8 +812,6 @@ const styles = StyleSheet.create({
   // Side-menu hamburger (task `mobile-ux-patterns`): same header-corner
   // grammar as the back chevron — quiet glyph on the 44pt touch floor.
   menuButton: { minWidth: 44, minHeight: 44, alignItems: "center", justifyContent: "center" },
-  runningBadge: { flexDirection: "row", alignItems: "center", gap: space.xs, flexShrink: 0 },
-  runningText: { ...type.captionStrong },
   // S-08: a chip affordance (surface fill + hairline, radius.m) — visible
   // control, not bare text.
   toggleChip: {

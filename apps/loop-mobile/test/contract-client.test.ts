@@ -163,8 +163,9 @@ describe("submit", () => {
 
 describe("attention resolution", () => {
   test("posts the resolution contract and returns confirmation", async () => {
-    const result = await client.resolveAttention(RUN_ID, RUN.attention?.attentionId, "Approved");
-    expect(result).toEqual({ runId: RUN_ID, attentionId: RUN.attention?.attentionId, resolved: true });
+    const attentionId = must(RUN.attention?.attentionId);
+    const result = await client.resolveAttention(RUN_ID, attentionId, "Approved");
+    expect(result).toEqual({ runId: RUN_ID, attentionId, resolved: true });
     const post = gateway.requests.at(-1);
     expect(post?.method).toBe("POST");
     expect(post?.path).toBe(`/v1/runs/${RUN_ID}/attention/resolve`);
@@ -178,7 +179,7 @@ describe("attention resolution", () => {
     expect(error?.problem.status).toBe(400);
     expect(error?.problem.fields).toEqual({ attentionId: "must be a non-empty string" });
     error = null;
-    try { await client.resolveAttention(RUN_ID, RUN.attention?.attentionId, "   "); } catch (e) { error = e as GatewayError; }
+    try { await client.resolveAttention(RUN_ID, must(RUN.attention?.attentionId), "   "); } catch (e) { error = e as GatewayError; }
     expect(error?.problem.code).toBe("invalid_request");
     expect(error?.problem.status).toBe(400);
     expect(error?.problem.fields).toEqual({ resolution: "must be a non-empty string" });

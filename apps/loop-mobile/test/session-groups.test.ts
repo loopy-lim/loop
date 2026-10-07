@@ -165,7 +165,7 @@ describe("run-list source contract — grouped sections, no ids, one peek", () =
   test("the grouping fold feeds the sections (no ad-hoc time logic in the view)", () => {
     expect(runListSource).toContain("groupOfRun(");
     expect(runListSource).toContain("groupOfSession(");
-    expect(runListSource).toContain(".toSorted(attentionFirst)");
+    expect(runListSource).toContain(".slice().sort(attentionFirst)");
     // the mark→role lookup stays in the view, on the closed registry
     // (task `fab-icons`: rows render through ui/Icon by role)
     expect(runListSource).toContain('"statusRunning"');

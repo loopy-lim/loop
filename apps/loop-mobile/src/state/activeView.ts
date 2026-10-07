@@ -30,7 +30,9 @@ export function isActiveSession(session: Pick<RemoteSessionSummary, "state">): b
  * loop that is running right now is the first (emphasized) row. Stable for
  * equal timestamps; never mutates the input. */
 export function activeFirst(runs: RemoteRunSummary[]): RemoteRunSummary[] {
-  return runs.toSorted((a, b) => {
+  // Hermes (RN) lacks the ES2023 immutable-sort method; slice().sort() is
+  // equally immutable and stable (ES2019+ guarantees sort stability).
+  return runs.slice().sort((a, b) => {
     if (a.updatedAt === b.updatedAt) return 0;
     return a.updatedAt < b.updatedAt ? 1 : -1;
   });

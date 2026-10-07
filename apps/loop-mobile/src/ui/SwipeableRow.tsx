@@ -58,7 +58,11 @@ function ActiveSwipeableRow(props: { onAction: () => void; peek: boolean; childr
     return () => clearTimeout(timer);
   }, [props.peek]);
   const onActionRef = useRef(props.onAction);
-  onActionRef.current = props.onAction;
+  // Latest-ref sync rides an effect (react-doctor no-ref-current-in-render):
+  // the pan callbacks read the ref at event time, after commit.
+  useEffect(() => {
+    onActionRef.current = props.onAction;
+  });
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_event, gesture) =>

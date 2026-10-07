@@ -44,6 +44,7 @@ export const TERMINAL_RENDER_INTERVAL_MS = 300;
 
 /** Notice lines shown above the terminal surface (honest labeling, D6). */
 export const SNAPSHOT_ORIGIN_NOTICE = "screen-buffer snapshots — not a lossless transcript";
-export const LIFECYCLE_ONLY_NOTICE = "lifecycle only — this pane has no streaming source";
+export const LIFECYCLE_ONLY_NOTICE =
+  "Status only — this terminal has no live output stream yet.";
 export const UNOBSERVED_NOTICE = "not observed — pane is above the gateway observation cap";
 export const PANE_GONE_NOTICE = "pane closed — worker lifetime ended";

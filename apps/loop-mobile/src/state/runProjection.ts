@@ -1,7 +1,7 @@
 /**
  * Run projection — reduces the SSE stream into display state (ADR §5.3).
  *
- * - `status` events replace the authoritative run projection.
+ * - `status` events replace the authoritative run state.
  * - `output` events append bounded activity text, deduped by `activityId`.
  * - `reset` events replace the authoritative run; previously observed output
  *   is kept but marked as a previous observation (loss recovery is not

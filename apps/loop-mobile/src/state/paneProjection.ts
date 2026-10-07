@@ -2,9 +2,10 @@
  * Pane terminal-view projection (decision 2026-xx-terminal-mirror D6).
  *
  * Pure state: dedupes pane_text frames on `paneId + revision` (decimal-string
- * revisions compare numerically), converges on pane_reset frames, and hosts
- * the autoscroll-follow state machine (detach on scroll-up, re-attach at the
- * bottom). No network, no React — the screen renders `snapshot()`.
+ * revisions compare numerically) and converges on pane_reset frames.
+ * No network, no React — the screen renders `snapshot()`. The autoscroll-follow
+ * machine lives in ui/followScroll.ts (decision D-B keeps `ui` leaf; the
+ * machine is a scroll-UI concern with that hook as its only consumer).
  */
 
 import type {
@@ -13,19 +14,6 @@ import type {
   RemotePaneSummary,
   RemotePaneTextEvent,
 } from "../gateway-client/wire";
-
-/** Distance from the bottom (px) inside which the view counts as "at the
- * bottom" and auto-follow re-attaches. */
-export const AUTOSCROLL_BOTTOM_EPSILON = 48;
-
-/**
- * Autoscroll follow state machine: the view follows the tail while the user
- * is at (or near) the bottom; scrolling up detaches, returning to the bottom
- * re-attaches (decision D6).
- */
-export function nextFollowState(currentFollowing: boolean, distanceFromBottom: number): boolean {
-  return distanceFromBottom <= AUTOSCROLL_BOTTOM_EPSILON;
-}
 
 export type PaneViewState = {
   paneId: string;

@@ -5,7 +5,7 @@
  * type roles, and glyphs come from ui/ tokens, never inline hex.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Clipboard, StyleSheet, TouchableOpacity, View } from "react-native";
+import { StyleSheet, TouchableOpacity, View } from "react-native";
 import type { TextStyle } from "react-native";
 
 import { COPY_CODE_LABEL, COPIED_CODE_LABEL, READOUT_STYLE } from "../ui/copy";
@@ -15,6 +15,7 @@ import { glyph } from "../ui/glyphs";
 import { colors, press, radius, space, type } from "../ui/tokens";
 import { parseInline, parseMarkdown, type MarkdownInline } from "./markdown";
 import { highlightSyntax, type SyntaxSpan } from "./syntax";
+import { copyText } from "./clipboard";
 
 /** Token-kind → color role (ui/tokens). `plain` inherits the block's ink —
  * color removal still leaves every glyph (ui-ux-guidance §5). */
@@ -69,7 +70,8 @@ function CodeBlock(props: { code: string; lang: string }) {
   );
   const spans = useMemo(() => highlightSyntax(props.code, props.lang), [props.code, props.lang]);
   const onCopy = () => {
-    Clipboard.setString(props.code);
+    // Honest copy affordance: no native clipboard — no fake "Copied".
+    if (!copyText(props.code)) return;
     setCopied(true);
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = setTimeout(() => setCopied(false), 1500);

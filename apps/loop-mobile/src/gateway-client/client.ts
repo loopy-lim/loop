@@ -575,10 +575,11 @@ export class GatewayClient {
 
   /**
    * Remote spawn (decision 2026-xx-session-spawn §D-C): POST
-   * /v1/sessions/spawn asks the host to open a NEW pi TUI in a fresh tmux
-   * window. The 201 body is the launcher handle ONLY — it deliberately
-   * carries no sessionId (the real one is fixed when the spawned pi's tap
-   * registers with the collector), so discovery is the caller's job via
+   * /v1/sessions/spawn asks the host to open a NEW terminal session in a
+   * fresh tmux window. The 201 body is the launcher handle ONLY — it
+   * deliberately carries no sessionId (the real one is fixed when the
+   * spawned session's tap registers with the collector), so discovery is
+   * the caller's job via
    * GET /v1/sessions (`awaitSpawnedSession` in features/session-spawn).
    * Never retried: spawning is not idempotent — a retry would open a second
    * terminal window. Failures are deterministic problems (`spawn_disabled`,

@@ -6,6 +6,7 @@ import type { SubmitPromptAccepted } from "../gateway-client/wire";
 import type { SessionNamingIndex } from "../state/sessionsView";
 import { SpawnFab } from "../features/spawn-fab";
 import { DynText } from "../ui/DynText";
+import { SUBMIT_FAILED_NOTICE } from "../ui/copy";
 import { colors, press, radius, space, type } from "../ui/tokens";
 import { RunsList } from "../features/run-list";
 
@@ -54,7 +55,9 @@ export function SubmitScreen(props: {
     props.client
       .submitPrompt(prompt, undefined)
       .then(props.onAccepted)
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "submit failed"))
+      // R-6 (mechanical part): the failure notice is an owned constant —
+      // the raw transport message never reaches the surface (C10).
+      .catch(() => setError(SUBMIT_FAILED_NOTICE))
       .finally(() => setBusy(false));
   };
 
@@ -69,7 +72,7 @@ export function SubmitScreen(props: {
       props.client
         .submitPrompt(initial, undefined)
         .then(props.onAccepted)
-        .catch((e: unknown) => setError(e instanceof Error ? e.message : "submit failed"))
+        .catch(() => setError(SUBMIT_FAILED_NOTICE))
         .finally(() => setBusy(false));
     }, props.submitDelayMs ?? 8000);
     return () => clearTimeout(timer);

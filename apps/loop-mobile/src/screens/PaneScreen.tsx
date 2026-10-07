@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
-import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 
 import type { GatewayClient } from "../gateway-client/client";
-import { PaneProjection, nextFollowState, type PaneViewState } from "../state/paneProjection";
+import { PaneProjection, type PaneViewState } from "../state/paneProjection";
 import {
   LIFECYCLE_ONLY_NOTICE,
   PANE_GONE_NOTICE,
@@ -20,6 +19,7 @@ import {
 } from "../ui/terminalLayout";
 import { colors, radius, space, type } from "../ui/tokens";
 import { STREAM_DISCONNECTED_NOTICE } from "../ui/copy";
+import { useFollowScroll } from "../ui/followScroll";
 
 /**
  * Screen 4 — live worker pane terminal view (terminal mirror v1, decision D6).
@@ -35,9 +35,10 @@ import { STREAM_DISCONNECTED_NOTICE } from "../ui/copy";
 export function PaneScreen(props: { client: GatewayClient; paneId: string }) {
   const [view, setView] = useState<PaneViewState | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
-  const [following, setFollowing] = useState(true);
+  // Follow-the-tail state lives in one shared hook (decision D6) — the
+  // onScroll verdict rides a ref, the flush rides one scheduled frame.
+  const { following, onScroll } = useFollowScroll();
   const scrollRef = useRef<ScrollView | null>(null);
-  const followingRef = useRef(true);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -93,16 +94,6 @@ export function PaneScreen(props: { client: GatewayClient; paneId: string }) {
       scrollRef.current?.scrollToEnd({ animated: false });
     }
   }, [following, view?.text]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const onScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
-    const next = nextFollowState(followingRef.current, distanceFromBottom);
-    if (next !== followingRef.current) {
-      followingRef.current = next;
-      setFollowing(next);
-    }
-  };
 
   const notices: string[] = [SNAPSHOT_ORIGIN_NOTICE];
   if (view?.state === "unknown") notices.push(LIFECYCLE_ONLY_NOTICE);

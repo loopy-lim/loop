@@ -13,7 +13,7 @@
  * control keep their touches (ui/back-swipe.ts isBackGestureStart
  * is the gate).
  */
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PanResponder, StyleSheet, View, useWindowDimensions } from "react-native";
 
 import { BACK_EDGE_WIDTH, backDragTranslate, resolveBackSwipe } from "./back-swipe";
@@ -22,7 +22,11 @@ export function BackSwipeZone(props: { onBack: () => void; children: ReactNode }
   const width = useWindowDimensions().width;
   const [dragX, setDragX] = useState(0);
   const onBackRef = useRef(props.onBack);
-  onBackRef.current = props.onBack;
+  // Latest-ref sync rides an effect (react-doctor no-ref-current-in-render):
+  // the pan callbacks read the ref at event time, after commit.
+  useEffect(() => {
+    onBackRef.current = props.onBack;
+  });
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_event, gesture) =>

@@ -20,10 +20,9 @@ import {
 } from "../src/ui/terminalLayout";
 import {
   AUTOSCROLL_BOTTOM_EPSILON,
-  PaneProjection,
-  isRevisionAfter,
   nextFollowState,
-} from "../src/state/paneProjection";
+} from "../src/ui/followScroll";
+import { PaneProjection, isRevisionAfter } from "../src/state/paneProjection";
 import {
   PANE_GONE,
   PANE_ID,
@@ -126,10 +125,11 @@ describe("layout contract (monospace + centered column, D6)", () => {
     expect(TERMINAL_TEXT_COLOR).toBe(colors.ink);
   });
 
-  test("honest-labeling notices exist for snapshot origin and lifecycle-only lanes", () => {
+  test("honest-labeling notices exist for snapshot origin and status-only lanes", () => {
     expect(SNAPSHOT_ORIGIN_NOTICE).toContain("snapshot");
     expect(SNAPSHOT_ORIGIN_NOTICE).toContain("not a lossless transcript");
-    expect(LIFECYCLE_ONLY_NOTICE).toContain("lifecycle only");
+    expect(LIFECYCLE_ONLY_NOTICE).toContain("Status only");
+    expect(LIFECYCLE_ONLY_NOTICE).toContain("no live output stream");
     expect(PANE_GONE_NOTICE).toContain("pane closed");
   });
 });

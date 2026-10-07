@@ -21,6 +21,10 @@ import {
   TERMINALS_HEADING,
   WAITING_FOR_PROJECTION_NOTICE,
   READOUT_STYLE,
+  STREAM_DISCONNECTED_NOTICE,
+  RUN_STALE_NOTICE,
+  RESOLVE_FAILED_NOTICE,
+  LIFECYCLE_ONLY_SUFFIX,
 } from "../ui/copy";
 import { colors, press, radius, space, type } from "../ui/tokens";
 
@@ -195,7 +199,9 @@ export function RunScreen(props: {
   return (
     <View>
       {streamError !== null ? (
-        <DynText style={styles.streamError}>Stream: {streamError}</DynText>
+        // R-5: the stream failure is a one-line owned summary — the raw
+        // transport message never reaches the surface (C10).
+        <DynText style={styles.streamError}>{STREAM_DISCONNECTED_NOTICE}</DynText>
       ) : null}
       {run === null ? (
         <DynText style={styles.waiting}>{WAITING_FOR_PROJECTION_NOTICE}</DynText>
@@ -260,7 +266,9 @@ export function RunScreen(props: {
                   {resolving ? SUBMITTING_LABEL : SUBMIT_RESPONSE_LABEL}
                 </DynText>
               </TouchableOpacity>
-              {resolveError !== null ? <DynText style={styles.resolveError}>{resolveError}</DynText> : null}
+              {resolveError !== null ? (
+                <DynText style={styles.resolveError}>{RESOLVE_FAILED_NOTICE}</DynText>
+              ) : null}
             </View>
           ) : null}
           {/* Completion summary card (S-13): a terminal run is never a
@@ -282,7 +290,7 @@ export function RunScreen(props: {
             </View>
           ) : null}
           {state?.stale ? (
-            <DynText style={styles.stale}>reconnecting — recent output may be incomplete</DynText>
+            <DynText style={styles.stale}>{RUN_STALE_NOTICE}</DynText>
           ) : null}
           {outputs.length > 0 ? (
             <View style={styles.outputs}>
@@ -305,7 +313,7 @@ export function RunScreen(props: {
                 >
                   <DynText style={styles.paneRowText} numberOfLines={1}>
                     {glyph.foldClosed} {pane.label ?? pane.paneId}
-                    {pane.state === "unknown" ? " (lifecycle only)" : ""}
+                    {pane.state === "unknown" ? LIFECYCLE_ONLY_SUFFIX : ""}
                   </DynText>
                 </TouchableOpacity>
               ))}

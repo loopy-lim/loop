@@ -82,7 +82,7 @@ export type RemoteAttention = {
   message: string;
 };
 
-/** Full run projection returned by GET /v1/runs/{runId} and `status` events. */
+/** Full run state returned by GET /v1/runs/{runId} and `status` events. */
 export type RemoteRun = RemoteRunSummary & {
   tasks: RemoteTask[];
   /** Oldest-open attention, or null. */

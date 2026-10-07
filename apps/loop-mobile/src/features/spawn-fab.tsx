@@ -1,7 +1,7 @@
 /**
  * Remote spawn FAB (task `fab-icons`, superseding the chats-home spawn
  * card of task `spawn-app-ui` — decision 2026-xx-session-spawn §D-D): the
- * "New TUI session" entry is now a "+" floating action button anchored
+ * spawn entry is now a "+" floating action button anchored
  * bottom-right above the tab bar (canon v3 §3 플로팅 액션 버튼 — a
  * SECONDARY-tier action: surface fill + hairline + float elevation; it
  * never competes with Submit, the screen's single strong CTA).

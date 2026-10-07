@@ -4,10 +4,10 @@
  * phrases are owned as constants, never composed inline at call sites).
  */
 
-/** Truncation honesty (C5): the cut is the gateway's bounded-field budget —
- * the app only receives the boolean, so the phrase names the bound's owner,
- * never an invented byte count. */
-export const TRUNCATED_NOTICE = "…(truncated — gateway wire budget)";
+/** Truncation honesty (C5): the phrase states only the fact of the cut —
+ * the app only receives the boolean, never an invented reason or byte
+ * count (usability audit v9 R-13). */
+export const TRUNCATED_NOTICE = "…(truncated)";
 
 /** A closed tool call that produced an empty result (C5-2c) — distinct
  * from a running card that has no result yet (the result area stays hidden). */
@@ -27,10 +27,10 @@ export const SESSION_ENDED_NOTICE = "session ended";
 /** Stream failures render as a one-line state summary — never a raw
  * transport dump (C10). */
 export const STREAM_DISCONNECTED_NOTICE = "stream disconnected — the client keeps retrying";
-export const WAITING_FOR_PROJECTION_NOTICE = "Waiting for run projection…";
+export const WAITING_FOR_PROJECTION_NOTICE = "Getting this task ready…";
 export const NO_PANES_NOTICE = "No terminals are available.";
 export const PANE_LOADING_NOTICE = "Loading terminals…";
-export const LIFECYCLE_ONLY_SUFFIX = " (lifecycle only)";
+export const LIFECYCLE_ONLY_SUFFIX = " (status only)";
 export const EMPTY_DIRECTORY_NOTICE = "Empty directory.";
 export const FILES_REPORTS_LABEL = "Files & reports";
 export const TERMINALS_HEADING = "Terminals";
@@ -42,13 +42,25 @@ export const RUN_FINISHED_TITLE = "Task finished";
 export const RUN_FAILED_TITLE = "Task failed";
 export const RUN_ENDED_TITLE = "Task ended";
 export const RUN_SUMMARY_HINT = "Continue this task from its chat in the Chats tab.";
+/** Stream-stale honesty (usability audit v9 R-12): the reconnect state
+ * rides one owned line — never composed inline at call sites. */
+export const RUN_STALE_NOTICE = "reconnecting — recent output may be incomplete";
+/** Reply failure (usability audit v9 R-5): the resolve-error surface is a
+ * constant — the raw transport message never renders. */
+export const RESOLVE_FAILED_NOTICE = "Couldn't send the reply — try again.";
 export const ATTENTION_RESPONSE_PLACEHOLDER = "Your response";
 export const SUBMITTING_LABEL = "Submitting…";
-export const SUBMIT_RESPONSE_LABEL = "Submit response";
+/** Attention CTA (usability audit v9 U-5, user-approved): the button names
+ * the act — "Reply"; the response word stays in the placeholder. */
+export const SUBMIT_RESPONSE_LABEL = "Reply";
 export const TERMINAL_SUFFIX = " (terminal)";
 
 /** Submit-failure affordance (C10): same submit route, preserved draft. */
 export const RESEND_BUTTON_LABEL = "Resend";
+/** Submit failure (usability audit v9 R-6, mechanical part): the failure
+ * notice states the fact, the preserved draft, and the next action — the
+ * raw transport message never reaches the surface. */
+export const SUBMIT_FAILED_NOTICE = "Couldn't send — your draft is kept. Try again.";
 export const READOUT_STYLE = { letterSpacing: 0.6 } as const;
 
 /** Visible steer affordance (visibility contract): the one-word mark shown
@@ -97,7 +109,10 @@ export const SETTINGS_TITLE = "Settings";
 export const ACTIVE_HEADING = "In progress";
 export const TODAY_HEADING = "Today";
 export const EARLIER_HEADING = "Earlier";
-export const EMPTY_RUNS_NOTICE = "No runs yet — submit a prompt to start one.";
+export const EMPTY_RUNS_NOTICE = "No tasks yet — describe one below to start.";
+/** List-load failure (usability audit v9 R-7): the error line states the
+ * fact and the recovery action — no internal prefix, no raw dump. */
+export const RUNS_LIST_ERROR_NOTICE = "Couldn't load the list — pull to retry.";
 
 /** Row swipe action (task `mobile-ux-patterns`, iOS HIG row actions):
  * the one verb the list rows own — the mobile client contract has no
@@ -109,8 +124,8 @@ export const ROW_OPEN_ACTION_LABEL = "Open";
  * explicit toggle, and the toggle is the only way back to the quiet view. */
 export const SHOW_ALL_LABEL = "Show all sessions";
 export const ACTIVE_ONLY_LABEL = "Active only";
-/** Quiet default-view empty state: runs exist but none are active — the
- * honest mark (the generic "No runs yet" would be false here). */
+/** Quiet default-view empty state: entries exist but none are active — the
+ * honest mark (the generic empty-state notice would be false here). */
 export const EMPTY_ACTIVE_NOTICE = "No active loops.";
 /** Row-title empty states (task `main-screen-polish`): an entry without
  * an honest name says what is missing — an internal identifier (run id,
@@ -136,8 +151,8 @@ export const LOGOUT_CONFIRM_CANCEL = "Cancel";
  * call sites. The honest grammar: the app opens the window; the SESSION is
  * discovered from the session list once the tap registers, and every waiting
  * message says so instead of claiming a session that is not observed yet. */
-export const SPAWN_TUI_LABEL = "New TUI session";
-export const SPAWN_TUI_SPAWNING = "Opening a new pi TUI on the host…";
+export const SPAWN_TUI_LABEL = "New task";
+export const SPAWN_TUI_SPAWNING = "Opening a new task on your computer…";
 export const SPAWN_TUI_WAITING = "Window opened — waiting for the session to appear…";
 /** `tmuxTarget` is display-only per the spawn contract; naming the target
  * here is exactly the evidence an operator checks in `tmux ls`. */
@@ -147,5 +162,5 @@ export const SPAWN_TUI_TIMEOUT_SUFFIX = ").";
 export const SPAWN_TUI_LIST_UNAVAILABLE =
   "Window opened — the session list is unavailable, so the session cannot be auto-opened. Check the Sessions list once it recovers.";
 export const SPAWN_TUI_BLOCKED =
-  "Spawning is turned off on this gateway — ask the operator to enable it.";
-export const SPAWN_TUI_FAILED_PREFIX = "Spawn failed — ";
+  "New tasks are turned off for this connection — ask the owner to enable them.";
+export const SPAWN_TUI_FAILED_PREFIX = "Couldn't open a new task — ";

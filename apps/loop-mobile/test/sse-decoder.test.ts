@@ -2,6 +2,11 @@ import { describe, expect, test } from "bun:test";
 
 import { sseFrames, SseParser, Utf8ChunkDecoder } from "../src/gateway-client/sse";
 
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
+
 describe("Utf8ChunkDecoder", () => {
   test("decodes ASCII across arbitrary chunk splits", () => {
     const text = 'event: status\ndata: {"ok":true}\n\n';
@@ -74,7 +79,7 @@ describe("sseFrames over a chunked stream", () => {
     }
     expect(frames).toHaveLength(1);
     expect(frames[0]?.event).toBe("message");
-    expect(JSON.parse(frames[0]?.data).text).toBe("연구 결과 ✓");
+    expect(JSON.parse(must(frames[0]?.data)).text).toBe("연구 결과 ✓");
   });
 
   test("parser keeps ignoring keepalive comments (existing contract)", () => {

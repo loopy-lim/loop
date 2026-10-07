@@ -10,7 +10,7 @@
  * Footer: the gateway display line (§B settings display row) — the one
  * piece of auxiliary context an operator checks before spawning work.
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PanResponder, StyleSheet, TouchableOpacity, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -40,7 +40,11 @@ export function DrawerMenu(props: {
   const insets = useSafeAreaInsets();
   const [dragX, setDragX] = useState(0);
   const onCloseRef = useRef(props.onClose);
-  onCloseRef.current = props.onClose;
+  // Latest-ref sync rides an effect (react-doctor no-ref-current-in-render):
+  // the pan callbacks read the ref at event time, after commit.
+  useEffect(() => {
+    onCloseRef.current = props.onClose;
+  });
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_event, gesture) =>

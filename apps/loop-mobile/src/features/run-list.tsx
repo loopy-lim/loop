@@ -25,6 +25,7 @@ import {
   UNTITLED_RUN_LABEL,
   UNNAMED_SESSION_LABEL,
   ACTIVE_ONLY_LABEL,
+  RUNS_LIST_ERROR_NOTICE,
 } from "../ui/copy";
 import { colors, press, radius, space, type } from "../ui/tokens";
 
@@ -263,7 +264,9 @@ export function RunsList(props: {
   const activeRows: RowModel[] = [
     // Attention leads the section (attentionFirst), then recency — the
     // action anchor survives the inbox's removal.
-    ...visibleRuns.filter((run) => runGroup(run) === "active").toSorted(attentionFirst).map(toRunRow),
+    // Hermes lacks the ES2023 immutable-sort method; slice().sort() keeps
+    // the input unmutated with identical stable ordering.
+    ...visibleRuns.filter((run) => runGroup(run) === "active").slice().sort(attentionFirst).map(toRunRow),
     ...visibleUncorrelated.filter((session) => sessionGroup(session) === "active").map(toSessionRow),
   ];
   const todayRows: RowModel[] = [
@@ -309,7 +312,9 @@ export function RunsList(props: {
           </TouchableOpacity>
         ) : null}
       </View>
-      {error !== null ? <DynText style={styles.error}>runs list: {error}</DynText> : null}
+      {/* R-7: the load failure is an owned constant — fact + recovery
+       * action, no internal prefix, no raw dump (C10). */}
+      {error !== null ? <DynText style={styles.error}>{RUNS_LIST_ERROR_NOTICE}</DynText> : null}
       {error === null && !loading && runs.length === 0 && uncorrelated.length === 0 ? (
         <DynText style={styles.empty}>{EMPTY_RUNS_NOTICE}</DynText>
       ) : null}
