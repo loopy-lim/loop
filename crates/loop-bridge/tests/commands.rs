@@ -810,7 +810,11 @@ fn answer_resolution_redispatches_a_parked_task_bound_attention() {
     use loop_bridge::{ExecutionLeaseInput, claim_execution};
 
     let dir = tempfile::tempdir().unwrap();
-    let database_path = dir.path().join("answer-redispatch.db").display().to_string();
+    let database_path = dir
+        .path()
+        .join("answer-redispatch.db")
+        .display()
+        .to_string();
     create_run(CreateRunInput {
         database_path: database_path.clone(),
         run_id: "answer-redispatch".into(),
@@ -1986,4 +1990,41 @@ fn add_task_directive_rejects_missing_malformed_or_colliding_corrective_contract
     .unwrap();
     assert_eq!(held.state, RunState::Attention);
     assert_eq!(held.tasks.len(), 1);
+}
+
+#[test]
+fn renew_execution_retries_boundedly_before_reporting_a_lost_lease() {
+    use loop_bridge::{
+        ExecutionLeaseInput, ReleaseExecutionInput, claim_execution, release_execution,
+        renew_execution,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let database_path = dir.path().join("lease.db").display().to_string();
+    create_run(CreateRunInput {
+        database_path: database_path.clone(),
+        run_id: "renew-run".into(),
+    })
+    .unwrap();
+    let lease = |owner: &str| ExecutionLeaseInput {
+        database_path: database_path.clone(),
+        run_id: "renew-run".into(),
+        owner: owner.into(),
+        now_ms: 0,
+        ttl_ms: 5_000,
+    };
+
+    // Renewing without any lease reports the loss without retries.
+    assert!(!renew_execution(lease("owner-1")).unwrap().accepted);
+    // A held lease renews.
+    assert!(claim_execution(lease("owner-1")).unwrap().accepted);
+    assert!(renew_execution(lease("owner-1")).unwrap().accepted);
+    // A foreign owner cannot renew a held lease.
+    assert!(!renew_execution(lease("owner-2")).unwrap().accepted);
+    release_execution(ReleaseExecutionInput {
+        database_path,
+        run_id: "renew-run".into(),
+        owner: "owner-1".into(),
+    })
+    .unwrap();
 }

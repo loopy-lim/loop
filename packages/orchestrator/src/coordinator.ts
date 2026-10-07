@@ -2,7 +2,12 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { HerdrWorkerRuntime } from "@loop/herdr";
-import type { GoalCriterionInput, TaskSpecInput } from "@loop/protocol";
+import type {
+  GoalCriterionInput,
+  OperationOutput,
+  TaskRouting,
+  TaskSpecInput,
+} from "@loop/protocol";
 import type { AgentProvider, ProviderRegistry, RouteSelection } from "@loop/providers";
 import { CompletionVerifier, NodeCompletionRunner } from "./completion";
 import { cleanupRun, type CleanupRunReport, type CleanupRunRequest } from "./cleanup";
@@ -21,6 +26,14 @@ import {
   type ComputeSelection,
 } from "./compute-selection";
 import { executeTask, type TaskExecution } from "./task-execution";
+import {
+  MAX_AUTO_RELAX_STEPS,
+  RoutingRelaxLedger,
+  grantedRelaxStep,
+  isRelaxationExhausted,
+  isRoutingFailure,
+  routingExhaustionSummary,
+} from "./auto-relax";
 import { redact } from "./redact";
 import { buildScopeCodeMap, type CodeMapProvider } from "./code-map";
 import type { ContextLifecyclePolicy } from "./context-lifecycle";
@@ -169,6 +182,67 @@ export class Orchestrator {
       return selectWhileActive(this.#providers.selectForTask(task, excluded), stillActive);
     }
   }
+  /**
+   * One step of the dispatcher-driven relaxation walk for a routing
+   * failure. The core owns every ladder decision: the `relax_routing`
+   * resolution grants exactly one downgrade-only step and re-dispatches,
+   * and a spent ladder is refused with `relaxation_exhausted`. Returns
+   * "granted" when the task should be re-claimed immediately, "exhausted"
+   * when the standing attention must park on a human — either because core
+   * refused the ladder (no candidate can exist) or because the ADR budget
+   * is spent. In both exhausted cases the attention is re-issued with the
+   * consumed relaxation history and the options that remain.
+   */
+  async #autoRelaxRouting(args: {
+    input: { databasePath: string; runId: string };
+    executionInput: { databasePath: string; runId: string; executionOwner: string };
+    taskId: string;
+    attentionId: string;
+    routing: TaskRouting | null | undefined;
+    ledger: RoutingRelaxLedger;
+  }): Promise<"granted" | "exhausted"> {
+    const { input, executionInput, taskId, attentionId, routing, ledger } = args;
+    const exhaust = async (limitHit: boolean): Promise<"exhausted"> => {
+      await this.#control.requestAttention({
+        ...executionInput,
+        attentionId,
+        kind: "failure",
+        taskId,
+        summary: redact(
+          routingExhaustionSummary({ taskId, grants: ledger.grants(taskId), routing, limitHit }),
+        ),
+      });
+      return "exhausted";
+    };
+    if (!ledger.budgetLeft(taskId)) return exhaust(true);
+    let receipt: OperationOutput;
+    try {
+      receipt = await this.#control.resolveAttention({
+        databasePath: input.databasePath,
+        runId: input.runId,
+        attentionId,
+        resolution: "relax_routing",
+      });
+    } catch (resolveError) {
+      // Core's refusal IS the exhaustion verdict: the ladder is spent, so
+      // no candidate can satisfy any further relaxation. The attention
+      // stays open and is enriched instead of resolved.
+      if (isRelaxationExhausted(resolveError)) return exhaust(false);
+      throw resolveError;
+    }
+    const grant = grantedRelaxStep(receipt);
+    ledger.record(taskId, grant);
+    await this.#control.recordActivity({
+      ...executionInput,
+      taskId,
+      activity: redact(
+        `Auto-relax ${ledger.count(taskId)}/${MAX_AUTO_RELAX_STEPS} for task ${taskId}: ${grant.receipt}`,
+        400,
+      ),
+    });
+    return "granted";
+  }
+
   async prepare(request: RunRequest): Promise<void> {
     const input = runInput(request);
     const prepared = {
@@ -327,6 +401,10 @@ export class Orchestrator {
       ...(this.#stallTimeoutMs === undefined ? {} : { stallTimeoutMs: this.#stallTimeoutMs }),
     };
     const active = new Map<string, TaskExecution>();
+    // Auto-relax audit for one dispatch loop (ADR
+    // 2026-xx-attention-agent-auto-resolution): granted ladder steps per
+    // task, bounded by the ADR budget, feeding the exhaustion attention.
+    const relaxLedger = new RoutingRelaxLedger();
     let leaseLost = false;
     let mailbox: GuidanceMailbox | undefined;
     let heartbeatRunning = false;
@@ -370,7 +448,7 @@ export class Orchestrator {
           )
         : undefined;
       mailbox?.start();
-      while (true) {
+      dispatchLoop: while (true) {
         if (leaseLost) throw new Error("execution ownership was lost; stopped local workers");
         if (request.signal?.aborted) await this.#control.cancelRun(input);
         let snapshot = await this.#control.getSnapshot(input);
@@ -474,14 +552,36 @@ export class Orchestrator {
             provider = selected.provider;
             route = selected;
             routeReason = selected.reason;
+            // Relief delivered a candidate; the ledger's audit job for this
+            // task is done (each grant is already durable evidence).
+            relaxLedger.clear(taskId);
           } catch (error) {
+            const attentionId = `provider-${request.runId}-${taskId}-${context.attempt}`;
             await this.#control.requestAttention({
               ...executionInput,
-              attentionId: `provider-${request.runId}-${taskId}-${context.attempt}`,
+              attentionId,
               kind: "failure",
               taskId,
               summary: redact(error),
             });
+            if (isRoutingFailure(error)) {
+              // ADR 2026-xx-attention-agent-auto-resolution: before a
+              // routing shortfall may park on a human, the dispatcher itself
+              // walks the core-owned relaxation ladder. Each granted step is
+              // durable evidence (TaskRoutingUpdated) plus an audited
+              // activity record, and the task re-enters the dispatch lane —
+              // the attention only stands once the ladder (or the budget)
+              // is spent, enriched with the history and remaining options.
+              const relief = await this.#autoRelaxRouting({
+                input,
+                executionInput,
+                taskId,
+                attentionId,
+                routing: context.task.routing,
+                ledger: relaxLedger,
+              });
+              if (relief === "granted") continue dispatchLoop;
+            }
             break;
           }
           if (!provider || route === undefined) break;

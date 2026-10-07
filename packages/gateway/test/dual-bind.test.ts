@@ -19,6 +19,11 @@ import { startGateway } from "../src/server";
 import { LoopbackBindRejectedError, validateLoopbackBindHost } from "../src/tailscale";
 import { authHeader, bootTestGateway, makeSnapshot, submitPrompt } from "./helpers";
 
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
+
 describe("loopback bind policy (decision §D-A4 amendment, fail closed)", () => {
   test("accepts IPv4 127.0.0.0/8 and IPv6 ::1 literals only", () => {
     for (const host of ["127.0.0.1", "127.8.8.8", "127.255.255.254", "::1", "0:0:0:0:0:0:0:1"]) {
@@ -236,7 +241,7 @@ describe("SSE transport teardown hardening (v7 wrapper replacement precondition)
         headers: { Accept: "text/event-stream", ...authHeader(gateway.token()) },
       });
       expect(response.status).toBe(200);
-      const reader = response.body?.getReader();
+      const reader = must(response.body?.getReader());
       await reader.read(); // drain the intro so frames are flowing
       await reader.cancel(); // client walks away mid-stream
 
@@ -267,7 +272,7 @@ describe("SSE transport teardown hardening (v7 wrapper replacement precondition)
         signal: control.signal,
       });
       expect(response.status).toBe(200);
-      const reader = response.body?.getReader();
+      const reader = must(response.body?.getReader());
       await reader.read();
       control.abort();
       gateway.runtime.emit(makeSnapshot({ runId, state: "completed" }));

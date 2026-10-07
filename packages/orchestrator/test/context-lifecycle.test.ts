@@ -107,7 +107,7 @@ test("fold replaces passed-check bodies with bounded heads and keeps every prese
   expect(fold?.summary).toContain("check big");
   expect(fold?.summary).toContain("previous attempt");
   expect(fold?.reason).toBe("budgetThreshold");
-  expect(fold?.advisoryBytesAfter).toBeLessThan(fold?.advisoryBytesBefore);
+  expect(fold?.advisoryBytesAfter).toBeLessThan(must(fold).advisoryBytesBefore);
   expect(fold?.truncated).toBe(false);
 });
 
@@ -144,16 +144,17 @@ test("oversized summary text is cut at the byte cap and flagged", () => {
   for (const foldedReceipt of folded.previousChecks) {
     expect(foldedReceipt.stdout.length).toBeLessThanOrEqual(100);
   }
-  expect(toContextSummaryEvent(must(fold), { runId: "run", taskId: "t1", attempt: 2 })).toEqual({
+  const recorded = must(fold);
+  expect(toContextSummaryEvent(recorded, { runId: "run", taskId: "t1", attempt: 2 })).toEqual({
     runId: "run",
     taskId: "t1",
     attempt: 2,
     reason: "budgetThreshold",
-    summarizedEntryCount: fold?.summarizedEntryCount,
-    preservedEntryCount: fold?.preservedEntryCount,
-    summary: fold?.summary,
+    summarizedEntryCount: recorded.summarizedEntryCount,
+    preservedEntryCount: recorded.preservedEntryCount,
+    summary: recorded.summary,
     truncated: true,
-    occurredAt: fold?.occurredAt,
+    occurredAt: recorded.occurredAt,
   });
 });
 

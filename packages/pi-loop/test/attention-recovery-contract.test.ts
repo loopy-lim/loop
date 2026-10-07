@@ -201,7 +201,7 @@ test("the loop_resolve tool hands the corrective contract to the bridge as one e
   // The embedded payload deserializes into the bridge's structured
   // CorrectiveTaskInput: exact camelCase keys, required fields present.
   const embedded = JSON.parse(
-    calls[0]?.slice("resolve:run-x:failure-1:add_task:".length),
+    must(calls[0]).slice("resolve:run-x:failure-1:add_task:".length),
   ) as Record<string, unknown>;
   expect(Object.keys(embedded).sort()).toEqual([
     "completionChecks",

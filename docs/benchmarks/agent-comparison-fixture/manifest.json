@@ -1,0 +1,18 @@
+{
+  "name": "normalize-label-real-providers",
+  "intent": "Normalize labels consistently",
+  "sourceDirectory": "/Users/loopy/dev/ll3/loop/docs/benchmarks/agent-comparison-fixture",
+  "candidateIds": ["pi:zai/glm-5.3-flashx", "pi:openai-codex/gpt-6.1-sol:minimal"],
+  "iterations": 2,
+  "tasks": [{
+    "id": "implement", "title": "Normalize labels", "kind": "implementation",
+    "dependencies": [], "readScope": ["src/normalize.ts", "tests/normalize.test.ts"],
+    "writeScope": ["src/normalize.ts"],
+    "requirements": ["normalizeLabel trims whitespace, collapses internal whitespace, title-cases words, and returns empty string for blank input"],
+    "completionChecks": [{"id": "normalize-test", "command": "bun", "args": ["test", "tests/normalize.test.ts"], "workingDirectory": null, "timeoutMs": 120000}],
+    "preferredCompute": "fast", "minimumCompute": "fast", "maximumCompute": "fast",
+    "routing": {"risk": "low", "required": {"coding": 1, "reasoning": 1, "tools": 1, "vision": 0, "long_context": 0}},
+    "maxAttempts": 1
+  }],
+  "criteria": [{"id": "normalization", "taskId": "implement", "description": "normalizeLabel trims whitespace, collapses internal whitespace, title-cases words, and returns empty string for blank input", "checkIds": ["normalize-test"]}]
+}

@@ -53,7 +53,7 @@ export function receiptsBlockCriteria(
     if (!source) return true;
     if (source.beforeFingerprint === "" || source.beforeFingerprint !== source.afterFingerprint)
       return true;
-    return source.observedChangedPaths.some(
+    return source.observedOutsideWriteScope.some(
       (path) => !writeScope.some((scope) => scopeContainsPath([scope], path)),
     );
   });
@@ -107,9 +107,8 @@ export async function rerunCriteriaChecksOnStableSource(
     before !== undefined &&
     after !== undefined &&
     (() => {
-      const observedChangedPaths = changedSourcePaths(before, after);
       if (scopedFingerprint(before, scopes) !== scopedFingerprint(after, scopes)) return false;
-      return !observedChangedPaths.some(
+      return !changedSourcePaths(before, after).some(
         (path) => !writeScope.some((scope) => scopeContainsPath([scope], path)),
       );
     })();

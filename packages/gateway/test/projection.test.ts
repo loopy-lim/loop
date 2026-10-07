@@ -18,6 +18,11 @@ import {
 import type { RemoteRunStatus } from "../src/wire";
 import { makeSnapshot, makeTask } from "./helpers";
 
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
+
 describe("status mapping", () => {
   test("pausing and cancelling still project as running; paused needs attention", () => {
     const cases: [RunState, RemoteRunStatus][] = [
@@ -156,7 +161,7 @@ describe("incremental activity projection", () => {
     });
     const emitted = projectNewActivities(snapshot, windows);
     expect(emitted[0]?.truncated).toBe(true);
-    expect(Buffer.byteLength(emitted[0]?.text, "utf8")).toBeLessThanOrEqual(8 * 1024);
+    expect(Buffer.byteLength(must(emitted[0]).text, "utf8")).toBeLessThanOrEqual(8 * 1024);
   });
 });
 

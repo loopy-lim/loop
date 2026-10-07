@@ -14,6 +14,11 @@ const verifier = new CompletionVerifier({
   run: async () => ({ exitCode: 0, stdout: "verification evidence", stderr: "", timedOut: false }),
 });
 
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
+
 function fixture(id: string): TaskSpecInput {
   return {
     id,
@@ -76,7 +81,7 @@ test("owner startup failure raises an immediate durable failure attention and st
   expect(spawn?.summary).toContain("lease store unavailable");
   // Run-level: no task is blamed for the owner's own death.
   expect(spawn?.taskId ?? null).toBeNull();
-  expect(snapshot.openAttentionIds).toContain(spawn?.id);
+  expect(snapshot.openAttentionIds).toContain(must(spawn).id);
 }, 30_000);
 
 test("a failed spawn on a missing run cannot record and must not mask the error", async () => {

@@ -32,7 +32,7 @@
  * machinery (fail-observer, like the pane mirror's fail-closed axis).
  */
 
-import { statSync, unlinkSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -267,10 +267,10 @@ export class SessionCollector {
       this.#mergeTimer.unref?.();
     }
     if (this.#socketPath === null || this.#listener !== null) return;
-    try {
-      unlinkStaleSocket(this.#socketPath);
-    } catch {
-      /* ENOENT and friends are fine; a real bind error surfaces below. */
+    // Never remove a socket belonging to another gateway. A stale socket
+    // requires explicit operator cleanup rather than silently stealing ingress.
+    if (existsSync(this.#socketPath)) {
+      throw new Error(`Session socket already exists: ${this.#socketPath}`);
     }
     this.#listener = Bun.listen<SocketData>({
       unix: this.#socketPath,
@@ -972,12 +972,3 @@ function boundedLabel(value: unknown, fallback: string): string {
   return label ?? fallback;
 }
 
-/** A stale socket file from a crashed previous gateway must not survive into bind. */
-function unlinkStaleSocket(path: string): void {
-  try {
-    statSync(path);
-    unlinkSync(path);
-  } catch {
-    /* nothing to clean */
-  }
-}

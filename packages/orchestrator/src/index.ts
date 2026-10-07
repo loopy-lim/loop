@@ -1,5 +1,6 @@
 export * from "./benchmark";
 export * from "./agent-comparison";
+export * from "./auto-relax";
 export * from "./coordinator";
 export * from "./completion";
 export * from "./criteria-self-heal";

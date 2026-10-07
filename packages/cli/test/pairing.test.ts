@@ -237,7 +237,7 @@ test("format info matches an independent BCH(15,5) computation", () => {
 test("structural invariants: size, finder corners, timing alternation, capacity error", () => {
   const matrix = encodeQr(golden.payload);
   expect(matrix.length).toBe(golden.size);
-  const at = (row: number, col: number): boolean => must(matrix[row])[col];
+  const at = (row: number, col: number): boolean => must(matrix[row]?.[col]);
   for (const [top, left] of [
     [0, 0],
     [0, golden.size - 7],

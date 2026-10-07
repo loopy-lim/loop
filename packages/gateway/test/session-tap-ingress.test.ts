@@ -18,6 +18,11 @@ import { SessionCollector } from "../src/session-collector";
 import { SessionEventLog, type SessionOutboundFrame } from "../src/session-events";
 import { SessionTap, type TapPi } from "../../../pi-extensions/session-tap";
 
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
+
 // ——— scripted fake pi (drives the real tap) ———
 
 class FakePi {
@@ -196,9 +201,9 @@ describe("tap -> collector over the real socket (M-GC1)", () => {
       });
 
       // The attachment body referenced by the user_message frame is fetchable.
-      const attachment = collector.getAttachment(sessionId, attachmentId);
+      const attachment = collector.getAttachment(sessionId, must(attachmentId));
       expect(attachment).not.toBeNull();
-      expect(Buffer.from(attachment?.bytes).toString("utf8")).toBe("fakepng-bytes");
+      expect(Buffer.from(must(attachment).bytes).toString("utf8")).toBe("fakepng-bytes");
     } finally {
       collector.stop();
       rmSync(socketPath, { force: true });

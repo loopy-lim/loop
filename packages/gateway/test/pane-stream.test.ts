@@ -38,7 +38,7 @@ async function openPaneStream(
 }
 
 async function readRaw(response: Response, deadlineMs = 1_500): Promise<string> {
-  const reader = response.body?.getReader();
+  const reader = must(response.body?.getReader());
   const decoder = new TextDecoder();
   let raw = "";
   const deadline = Date.now() + deadlineMs;
@@ -304,7 +304,7 @@ describe("GET /v1/panes/{paneId}/events", () => {
       // Read intro frame, observe the pane's death, read until the reset.
       let raw = "";
       {
-        const reader = response.body?.getReader();
+        const reader = must(response.body?.getReader());
         const decoder = new TextDecoder();
         raw += decoder.decode((await reader.read()).value ?? new Uint8Array(), { stream: true });
         expect(raw).toContain("pane_text");

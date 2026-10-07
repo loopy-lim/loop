@@ -44,6 +44,19 @@ import {
   type ViewerFile,
   type ViewerTheme,
 } from "./ui/files-viewer";
+import {
+  registerToolApproval,
+  type ApprovalPiApi,
+  type ApprovalUi,
+  type ToolAnnotations,
+  type ToolCallVerdict,
+} from "./approval";
+import type { LoopUiTheme } from "./ui/components/ui-theme";
+import {
+  DashboardOverlay,
+  dashboardRunView,
+  type DashboardRunView,
+} from "./ui/dashboard";
 
 /**
  * Lead-facing settings derived once per process from Loop configuration:
@@ -92,17 +105,28 @@ import { renderModels } from "./ui/models";
 import { renderRuns, renderSnapshot, renderTaskContext } from "./ui/snapshot";
 import { renderLoopRunSummary } from "./ui/summary";
 
+/** Host run mode, mirroring pi's `ExtensionMode`. */
+type PiExtensionMode = "tui" | "rpc" | "json" | "print";
+
 interface PiContext {
   cwd: string;
+  /** Host run mode. "tui" guards terminal-only UI such as custom overlays
+   * (see docs/rpc-extension-ui.md); absent for embedding test hosts. */
+  mode?: PiExtensionMode;
   ui: {
     notify(message: string, level?: "info" | "success" | "warning" | "error"): void;
     setStatus?(key: string, text: string | undefined): void;
     setWidget?(key: string, lines: string[] | undefined): void;
+    /** Selector dialog: native in tui mode, forwarded through pi's RPC
+     * extension-UI (dialog) sub-protocol in rpc mode. */
+    select?(title: string, options: readonly string[]): Promise<string | undefined>;
+    /** Confirmation dialog: same mode behavior as `select`. */
+    confirm?(title: string, message: string): Promise<boolean>;
     /** Interactive-only custom overlay (see docs/tui.md). Absent in JSON/print modes. */
     custom?<T>(
       factory: (
         tui: { requestRender(): void },
-        theme: ViewerTheme,
+        theme: ViewerTheme & LoopUiTheme,
         keybindings: unknown,
         done: (result: T) => void,
       ) => unknown,
@@ -173,6 +197,16 @@ export interface PiExtensionApi {
       context: PiContext,
     ): Promise<PiToolResult>;
   }): void;
+  /** Registered tools with their MCP-style annotations (approval classifier input). */
+  getAllTools?(): Array<{ name: string; annotations?: ToolAnnotations }>;
+  /** Tool-approval gate: returning `{ block: true, reason }` blocks the call. */
+  on(
+    event: "tool_call",
+    handler: (
+      event: unknown,
+      context: PiContext,
+    ) => Promise<ToolCallVerdict> | ToolCallVerdict,
+  ): void;
   appendEntry?(customType: string, data: unknown): void;
   sendMessage?(
     message: { customType: string; content: string; display: boolean },
@@ -271,6 +305,22 @@ function renderRunWidget(
           : "Waiting for the next task · ask here to adjust";
   }
   return [headline, detail].map((line) => singleLine(line, limits.lineTextLimit));
+}
+
+/**
+ * Mode guard for the approval dialog surface (see pi docs/rpc-extension-ui.md):
+ * - "tui": ctx.ui dialogs render in the terminal.
+ * - "rpc": the same ctx.ui dialogs delegate through pi's dialog sub-protocol —
+ *   no terminal access needed, so the identical call surface works.
+ * - "json"/"print": no dialog surface; the approval flow then degrades to
+ *   blocking (deny) instead of silently allowing.
+ * Hosts that omit `mode` (embedding tests) fall back to the dialog methods
+ * they actually expose.
+ */
+function approvalDialogUi(context: PiContext): ApprovalUi | undefined {
+  if (context.mode === "json" || context.mode === "print") return undefined;
+  if (context.mode === "tui" || context.mode === "rpc") return context.ui;
+  return context.ui.select || context.ui.confirm ? context.ui : undefined;
 }
 
 function verifierReportedFailure(snapshot: SnapshotOutput): boolean {
@@ -1327,6 +1377,109 @@ export function registerLoopExtension(
     lines[0] = singleLine(`Owner restart requested · ${lines[0]}`, limits.lineTextLimit);
     return lines.join("\n");
   };
+
+  /** Active-run views for the dashboard: current run first, capped for the overlay budget. */
+  const DASHBOARD_MAX_RUNS = 3;
+  const dashboardViews = async (cwd: string): Promise<DashboardRunView[]> => {
+    const active = (await backend.runs(cwd))
+      .filter((run) => isActiveRunState(run.state))
+      .map((run) => run.runId);
+    const ordered = [
+      ...new Set(
+        currentRunId && active.includes(currentRunId) ? [currentRunId, ...active] : active,
+      ),
+    ].slice(0, DASHBOARD_MAX_RUNS);
+    const views = await Promise.all(
+      ordered.map(async (runId) => {
+        try {
+          return dashboardRunView(await backend.snapshot(runId, cwd));
+        } catch {
+          return undefined; // One stale run must not blank the dashboard.
+        }
+      }),
+    );
+    return views.filter((view): view is DashboardRunView => view !== undefined);
+  };
+
+  pi.registerCommand("loop-dashboard", {
+    description: "Open the Loop dashboard overlay for active runs",
+    async handler(_args, context) {
+      const custom = context.ui.custom;
+      // Terminal-only overlay: RPC forwards dialogs, never custom components;
+      // JSON/print have no UI. Guarded by ctx.mode per docs/rpc-extension-ui.md.
+      if (context.mode !== "tui" || !custom) {
+        context.ui.notify("The Loop dashboard needs the interactive Pi TUI.", "warning");
+        return;
+      }
+      let views: DashboardRunView[];
+      try {
+        views = await dashboardViews(context.cwd);
+      } catch (error) {
+        context.ui.notify(
+          `Dashboard load failed: ${error instanceof Error ? error.message : String(error)}`,
+          "error",
+        );
+        return;
+      }
+      if (views.length === 0) {
+        context.ui.notify("No active Loop runs.", "info");
+        return;
+      }
+      let overlay: DashboardOverlay | undefined;
+      let refresh: ReturnType<typeof setInterval> | undefined;
+      let closed = false;
+      try {
+        await custom<undefined>(
+          (tui, theme, _keybindings, done) => {
+            overlay = new DashboardOverlay({
+              runs: () => views,
+              theme,
+              done,
+              requestRender: () => tui.requestRender(),
+            });
+            // The overlay is a pure view; this poller is the host-side data
+            // refresh: swap views, drop the render cache, redraw on change.
+            refresh = setInterval(() => {
+              void dashboardViews(context.cwd)
+                .then((next) => {
+                  if (closed || JSON.stringify(next) === JSON.stringify(views)) return;
+                  views = next;
+                  overlay?.invalidate();
+                  tui.requestRender();
+                })
+                .catch(() => {});
+            }, 2000);
+            return overlay;
+          },
+          { overlay: true, overlayOptions: { anchor: "center", width: "90%", maxHeight: "90%" } },
+        );
+      } finally {
+        closed = true;
+        if (refresh) clearInterval(refresh);
+      }
+    },
+  });
+
+  // Codex-style tool approval gate (see ./approval). Registered before the
+  // extension's own session hooks so host dispatch order keeps the session
+  // cache reset ahead of restore. The adapter filters the dialog surface
+  // through the ctx.mode guard: terminal dialogs in tui mode, pi's dialog
+  // sub-protocol in rpc mode, blocking in json/print.
+  const approvalApi: ApprovalPiApi = {
+    getAllTools: pi.getAllTools?.bind(pi),
+    on: (event, handler) => {
+      if (event === "tool_call") {
+        pi.on("tool_call", (rawEvent, context) =>
+          handler(rawEvent, { ui: approvalDialogUi(context) }),
+        );
+        return;
+      }
+      pi.on(event, async (rawEvent, context) => {
+        await handler(rawEvent, { ui: approvalDialogUi(context) });
+      });
+    },
+  };
+  registerToolApproval(approvalApi);
 
   pi.on("session_start", restore);
   pi.on("session_tree", restore);

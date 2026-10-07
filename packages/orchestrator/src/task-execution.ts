@@ -17,7 +17,7 @@ import {
 import { resolvePersona, type PersonaKindDefaults, type PersonaRegistry } from "./persona";
 import { redact } from "./redact";
 import { storeCheckOutput } from "./evidence-artifact";
-import { captureSourceState, changedSourcePaths, scopedFingerprint } from "./source-state";
+import { captureSourceState, changedSourcePaths, scopeContainsPath, scopedFingerprint } from "./source-state";
 import {
   summarizeTaskContext,
   DEFAULT_CONTEXT_LIFECYCLE_POLICY,
@@ -410,6 +410,16 @@ async function run(
         sourceBeforeWorker && sourceBeforeChecks
           ? changedSourcePaths(sourceBeforeWorker, sourceBeforeChecks)
           : [];
+      const unknownOutsideScope = observedChangedPaths.filter(
+        (path) => !context.task.writeScope.some((scope) => scopeContainsPath([scope], path)),
+      );
+      if (unknownOutsideScope.length > 0) {
+        await control.recordActivity({
+          ...input,
+          taskId,
+          activity: `Writer unknown outside write scope (not attributed to this worker): ${redact(unknownOutsideScope.join(", "), 300)}`,
+        });
+      }
       // Check runs are progress: announce the verification stage so the
       // persisted last-progress timestamp and the stall watchdog both stay
       // fed while checks execute (they can outlast any stream output).
@@ -444,7 +454,11 @@ async function run(
                 ...context.task.writeScope,
               ]),
               observedChangedPaths,
-              observedOutsideWriteScope: [],
+              observedOutsideWriteScope: sourceBeforeChecks && sourceAfterChecks
+                ? changedSourcePaths(sourceBeforeChecks, sourceAfterChecks).filter(
+                    (path) => !context.task.writeScope.some((scope) => scopeContainsPath([scope], path)),
+                  )
+                : [],
             }
           : undefined;
       const receipts = await Promise.all(
@@ -496,7 +510,7 @@ async function run(
         const criteriaCheckIds = criteriaCheckIdsForTask(goalCriteria, taskId);
         if (
           criteriaCheckIds.length > 0 &&
-          receiptsBlockCriteria(receipts, context.task.writeScope)
+          (receiptsBlockCriteria(receipts, context.task.writeScope) || unknownOutsideScope.length > 0)
         ) {
           criteriaHealed = true;
           try {

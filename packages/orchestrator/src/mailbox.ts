@@ -52,12 +52,22 @@ export interface GuidanceMailboxOptions {
   pollIntervalMs?: number;
   /** Byte budget for one combined steer message; overflow waits for the next window. Default 16000 (steerRun's own cap). */
   maxMessageBytes?: number;
+  /**
+   * Wall-clock budget for one live steer hand-off. Provider channels bound
+   * themselves (herdr control commands: 15s), but the tap loop must not trust
+   * every adapter's internals: a steer that never settles would park
+   * #drainDue and, with it, mailbox.stop() in the owner's shutdown path.
+   * Expiry keeps the batch pending and backs off one window, exactly like a
+   * rejection. Default 15000ms.
+   */
+  steerDeliveryBudgetMs?: number;
 }
 
 export const GUIDANCE_MAILBOX_DEFAULTS = {
   coalescingWindowMs: 2000,
   pollIntervalMs: 100,
   maxMessageBytes: 16000,
+  steerDeliveryBudgetMs: 15_000,
 } as const;
 
 /** GuidanceAdded/GuidanceDelivered payload shape (serde tag/content) inside EventOutput.payloadJson. */
@@ -163,6 +173,10 @@ export function resolveMailboxOptions(
     ),
     pollIntervalMs: positive(options.pollIntervalMs, GUIDANCE_MAILBOX_DEFAULTS.pollIntervalMs),
     maxMessageBytes: positive(options.maxMessageBytes, GUIDANCE_MAILBOX_DEFAULTS.maxMessageBytes),
+    steerDeliveryBudgetMs: positive(
+      options.steerDeliveryBudgetMs,
+      GUIDANCE_MAILBOX_DEFAULTS.steerDeliveryBudgetMs,
+    ),
   };
 }
 
@@ -245,6 +259,7 @@ export class GuidanceMailbox {
   readonly #coalescingWindowMs: number;
   readonly #pollIntervalMs: number;
   readonly #maxMessageBytes: number;
+  readonly #steerDeliveryBudgetMs: number;
   /** Execution-lease owner for GuidanceDelivered appends; absent outside an owned execution. */
   readonly #executionOwner?: string;
   readonly #targets = new Map<string, MailboxTarget>();
@@ -277,6 +292,7 @@ export class GuidanceMailbox {
     this.#coalescingWindowMs = resolved.coalescingWindowMs;
     this.#pollIntervalMs = resolved.pollIntervalMs;
     this.#maxMessageBytes = resolved.maxMessageBytes;
+    this.#steerDeliveryBudgetMs = resolved.steerDeliveryBudgetMs;
     this.#executionOwner = executionOwner;
   }
 
@@ -552,15 +568,37 @@ export class GuidanceMailbox {
       const lastPending = target.pending[batch - 1];
       if (lastPending === undefined) continue; // batch <= pending.length 불변식
       const throughSequence = lastPending.sequence;
+      // Bounded hand-off: a channel that never settles must not park #drainDue
+      // (and with it mailbox.stop() in the owner's shutdown). On expiry the
+      // batch stays pending and the drain backs off one window, exactly like
+      // the rejection path below.
+      let budgetTimer: ReturnType<typeof setTimeout> | undefined;
+      const delivery = target.steer(message);
+      // A budget-expired delivery must not surface later as an unhandled
+      // rejection if the channel eventually fails after the tap moved on.
+      delivery.catch(() => {});
       try {
-        await target.steer(message);
+        await Promise.race([
+          delivery,
+          new Promise<never>((_, reject) => {
+            budgetTimer = setTimeout(
+              () =>
+                reject(
+                  new Error(`live steer delivery exceeded its ${this.#steerDeliveryBudgetMs}ms budget`),
+                ),
+              this.#steerDeliveryBudgetMs,
+            );
+          }),
+        ]);
       } catch {
-        // Rejection (e.g. agent_blocked) keeps the messages pending — the
-        // recorded-steer contract already preserves them in run history. Even
-        // inbox targets back off one window so a rejecting channel is not
-        // retried on every tick.
+        // Rejection (e.g. agent_blocked or a budget expiry) keeps the messages
+        // pending — the recorded-steer contract already preserves them in run
+        // history. Even inbox targets back off one window so a rejecting or
+        // hung channel is not retried on every tick.
         target.nextDrainAt = now + this.#coalescingWindowMs;
         continue;
+      } finally {
+        if (budgetTimer) clearTimeout(budgetTimer);
       }
       // Delivery happened; drop the batch immediately (at-most-once live).
       // Byte-budget overflow waits for the next drain: a window after the

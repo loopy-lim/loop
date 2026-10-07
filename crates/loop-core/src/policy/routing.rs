@@ -244,6 +244,28 @@ impl RoutingRelaxation {
     }
 }
 
+impl TaskRouting {
+    /// The full remaining relaxation ladder, in policy order. Walking this
+    /// plan step by step is defined to equal granting
+    /// [`TaskRouting::relax_step`] until it returns `None`, so a dispatcher
+    /// automating the walk (ADR `2026-xx-attention-agent-auto-resolution`)
+    /// can never act beyond the core-owned ladder: it either lands a
+    /// candidate or reaches the same spent-ladder verdict core refuses with.
+    /// The plan also bounds the automation budget: the deepest contract with
+    /// every capability at 2 is 13 steps, so an auto-relax budget above that
+    /// only stops anomalous declared contracts from degrading forever.
+    pub fn relax_ladder(&self) -> Vec<RoutingRelaxation> {
+        let mut ladder = Vec::new();
+        let mut routing = self.clone();
+        while let Some(step) = routing.relax_step() {
+            step.apply_to(&mut routing)
+                .expect("relax_step and apply_to are inverse-consistent");
+            ladder.push(step);
+        }
+        ladder
+    }
+}
+
 fn risk_level(risk: Risk) -> u8 {
     match risk {
         Risk::Low => 0,
@@ -363,6 +385,33 @@ mod relaxation_tests {
             required: ComputeCapabilities::new(0, 0, 0, 0, 0),
         };
         assert_eq!(routing.relax_step(), None);
+        assert!(routing.relax_ladder().is_empty());
+    }
+
+    #[test]
+    fn the_full_ladder_plan_matches_repeated_single_steps_and_ends_spent() {
+        let routing = TaskRouting {
+            risk: Risk::Critical,
+            required: ComputeCapabilities::new(2, 2, 2, 2, 2),
+        };
+        let plan = routing.relax_ladder();
+        // Five senses at two levels each, then critical→high→medium→low.
+        assert_eq!(plan.len(), 13);
+        let mut sequential = routing.clone();
+        let mut walked = Vec::new();
+        while let Some(step) = sequential.relax_step() {
+            step.apply_to(&mut sequential).unwrap();
+            walked.push(step);
+        }
+        assert_eq!(plan, walked);
+        // Replaying the plan lands exactly on the floor core refuses from.
+        let mut replayed = routing;
+        for step in &plan {
+            step.apply_to(&mut replayed).unwrap();
+        }
+        assert_eq!(replayed.relax_step(), None);
+        assert_eq!(replayed.risk, Risk::Low);
+        assert_eq!(replayed.required, ComputeCapabilities::new(0, 0, 0, 0, 0));
     }
 
     #[test]

@@ -316,7 +316,8 @@ pub fn resolve_attention(input: ResolveAttentionInput) -> Result<OperationOutput
                     resume_parked_task_events(&projection, &input.run_id, &task_id, &mut events)
                 {
                     output.redispatched_task_id = Some(redispatched.to_string());
-                    output.summary = Some(format!("guidance recorded; re-dispatched task {task_id}"));
+                    output.summary =
+                        Some(format!("guidance recorded; re-dispatched task {task_id}"));
                 }
             }
         }

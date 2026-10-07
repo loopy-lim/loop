@@ -1,22 +1,41 @@
-# 런 정지 수정 통합 검증
+# 런 정지 수정 통합 검증 (후속 런, 컴팩트 계약)
 
 ## 판정
 
-**실패 — 통합 게이트 미통과.** attempt 3의 `bun run check` 종료 코드 1 (`/tmp/loop-stall-integrate-attempt3.log`): codegen:check와 lint는 통과했으나 typecheck에서 다수의 TS 오류로 중단됐다 (예: `packages/gateway/test/pane-stream.test.ts:329`, `packages/pi-loop/test/attention-recovery-contract.test.ts:204`). 해당 파일은 이 태스크의 write scope 밖이다. attempt 2는 `apps/loop-mobile/src/features/run-list.tsx:29:10`의 미사용 `glyph` import로 lint에서 중단됐다 (`/tmp/loop-stall-integrate-attempt2.log`); 이번 실행에서는 해당 lint 차단이 재현되지 않았다. 이전 전체 테스트 실행에서도 `bun run check` 종료 코드 1 (942 pass, 1 fail, 943 tests). 실패: `packages/orchestrator/test/fallback-transition.test.ts:122`의 `an exhausted fallback chain stops the run clearly instead of hanging`. 기대 provider 순서 `[zai, openai-codex]`, 실제 `[zai, openai-codex, zai, openai-codex]`. Interrupted를 시도 사다리에서 다시 dispatch하는 정책과 기존 fallback 테스트 기대값이 충돌한다. 테스트만 수정하기 전에 반복 fallback이 의도된 계약인지 판단해야 한다. 로그: `/tmp/loop-stall-integrate-check.log` (이전 실행의 로컬 임시 파일).
+**통과: `bun run check` exit 0.** 스테이지 전부 통과 — `codegen:check`, lint(오류 0, 기존
+경고만 존재), `tsc -p tsconfig.json`, `test:architecture` (9 pass), `cargo test --workspace`
++ bridge build, 전체 Bun 테스트 **943 pass / 0 fail** (116 파일, 5443 expect). 2회 실행해
+동일 결과 재확인. 이전 attempt 4의 실패였던
+`packages/orchestrator/test/fallback-transition.test.ts` "an exhausted fallback chain stops
+the run clearly instead of hanging"도 이번 실행에서 통과 — Interrupted 자동 재시도가
+fallback 체인과 합의된 정책으로 수렴했음을 확인.
 
-이전 `bun run check`는 테스트 단계에서 종료되었고 최신 실행은 typecheck에서 종료되었으므로 별도로 `bun run codegen:check` (exit 0), `bun run test:architecture` (8 pass, exit 0)를 실행했다. 로그: `/tmp/loop-stall-codegen.log`, `/tmp/loop-stall-architecture.log`.
+## 진단 후보별 판정
 
-**경계/착지 판정:** 아키텍처 테스트의 generated-only Rust/TS seam은 통과했고, 확인한 수정에서는 Rust 도메인 타입의 수기 TS 복사본을 발견하지 못했다. 그러나 `packages/protocol/src/generated/{.rustra-generated.json,contract.ts,frame-codecs.ts,schema.json,types.ts}`가 attempt 3의 `git status --short`에서도 수정 상태로 **미커밋**이다 (`git status --short`). Rust 변경과 생성 파일을 함께 커밋했다는 요구는 충족되지 않았다. 이것도 통합 실패 항목이며 codegen:check 통과로 대체할 수 없다.
+진단: `.loop/diagnostics/stall-rust.md`, `.loop/diagnostics/stall-ts.md`.
 
-## 후보별 근거 (진단: `.loop/diagnostics/stall-rust.md`, `.loop/diagnostics/stall-ts.md`)
+| 후보 | 수정 증거 | 검증 증거 | 판정 |
+|---|---|---|---|
+| rust C1 Interrupted 즉시 Attention | `crates/loop-core/src/event/reducer.rs:407-424`: 남은 attempt → `Ready`(기록된 라우팅 유지), 소진 시에만 `Attention` | `fallback-transition.test.ts`, `interventions.test.ts` retry 사다리 테스트 포함 전체 Rust·Bun 테스트 통과 | **해결** |
+| rust C2 어텐션 해결 후 조용한 파킹 | `crates/loop-bridge/src/commands/guidance.rs`의 `redispatch_ready_events`와 `redispatched_task_id` 응답 필드 — defer/answer 해결이 파킹 태스크를 재개 | `crates/loop-core/tests/attention_recovery_integration.rs`, `crates/loop-store/tests/attention_retry.rs`, `packages/pi-loop/test/attention-recovery-contract.test.ts`, `resolve-vocabulary.test.ts` 통과 | **해결** |
+| rust C3 실행 리스 상실 | 스토어 레벨 자동 renew 복구는 없음. 대신 리스 상실을 치명 종료가 아닌 **durable hand-off**로 기록하고(`lease-loss.test.ts`), 다른 소유자의 `recycle_interrupted_execution`이 running/verifying 클레임을 재디스패치(`recovery-dispatch.test.ts`: running·verifying 모두) | `packages/orchestrator/test/lease-loss.test.ts`, `recovery-dispatch.test.ts` 통과 | **완화(수용)** — 단일 소유자 내 자동 renew 재시도는 여전히 부재. 리스 갱신 누락은 재시작 복구 경로로 회수됨 |
+| ts C1 owner 종료/terminal 레이스 | `packages/cli/src/dispatcher.ts:132-148`: owner 종료 감지 시 스냅샷 1회 재폴링, clean exit + lease 부재를 정상 종료로 판정 | `packages/cli/test/detached.test.ts` 통과, 전체 게이트 통과 | **해결** |
+| ts C3 resume 침묵 실패 | `packages/cli/src/run-control.ts:94`: `loop resume`이 `waitForOwnerReady`로 owner 기동 확인 | `packages/cli/test/detached.test.ts` 통과 | **해결** |
+| ts C6 owner stderr 소실 | `packages/cli/src/dispatcher.ts:5`: owner stdout/stderr를 DB 옆 로그 파일에 기록 | `packages/cli/test/detached.test.ts` 통과 | **해결** |
 
-| 후보 | 코드/회귀 증거 | 판정 |
-|---|---|---|
-| rust C1 Interrupted 즉시 Attention | `crates/loop-core/src/event/reducer.rs`의 Interrupted 분기가 남은 attempt에서 Ready, 소진 시 Attention으로 전이. `packages/orchestrator/test/fallback-transition.test.ts`에서 새로운 반복 dispatch가 관측되지만 기존 기대와 불일치 | 정책 변경됨, 통합 **미검증** |
-| rust C2 해결 후 조용한 파킹 | `crates/loop-bridge/src/commands/guidance.rs`의 `resume_parked_task_events`; `crates/loop-core/tests/attention_recovery_integration.rs`, `crates/loop-store/tests/attention_retry.rs` 및 `packages/pi-loop/test/attention-recovery-contract.test.ts` | 코드 및 회귀 테스트 존재, 전체 게이트 실패로 최종 미검증 |
-| rust C3 리스 상실 | 자동 renew/append 복구의 통합 수정 증거 없음 | **열림** |
-| ts C1 owner 종료/terminal 레이스 | `packages/cli/src/dispatcher.ts`의 종료 후 재폴링, `packages/cli/test/detached.test.ts`의 terminal 재확인 테스트 (전체 테스트에서 해당 파일 통과) | 변경 및 테스트 확인 |
-| ts C3 resume 침묵 실패 | `packages/cli/src/run-control.ts`의 owner 준비 대기, `packages/cli/test/detached.test.ts`의 resume 실패 테스트 (전체 테스트에서 해당 파일 통과) | 변경 및 테스트 확인 |
-| ts C6 stderr 소실 | `packages/cli/src/dispatcher.ts`의 owner 로그 리다이렉트, `packages/cli/test/detached.test.ts`의 stderr 수집 테스트 (전체 테스트에서 해당 파일 통과) | 변경 및 테스트 확인 |
+## 경계 확인
 
-남은 위험: rust C3 리스 복구 미구현, fallback 반복의 계약 미확정, 전체 게이트 실패 (현재 typecheck 차단 및 이전 테스트 실패), generated protocol 파일 미커밋. 이 기록은 코드 변경·회귀 테스트 관측과 전체 통합 승인 여부를 구분한다.
+- **Rust 도메인 타입의 수기 TypeScript 복사본 없음.** `codegen:check` 통과
+  (생성 출력이 커밋된 `packages/protocol/src/generated/**`와 일치),
+  `tests/architecture-boundaries.test.ts` 9 pass, 게이트의
+  "the gateway declares no conversation frame shapes; it consumes generated types only"
+  경계 테스트 통과.
+- 이 태스크에서 수정한 소스 없음 — write scope(documents)만 변경했다.
+
+## 남은 위험
+
+1. rust C3의 단일 소유자 자동 renew 재시도 부재 (위 표의 완화 수준). 리스 갱신 누락이
+   드물고 복구 경로가 검증된 상태라 후속 과제로 남긴다.
+2. ts C5(owner 내부 `runtime.execute` 무기한 대기)는 스톨 워치독
+   (`packages/orchestrator`의 `stall_timeout_ms`, `stall-watchdog.test.ts` 통과)으로
+   부분 커버. 이번 계약의 대상 후보가 아니므로 미검증 상태로 남긴다.

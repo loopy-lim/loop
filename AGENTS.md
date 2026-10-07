@@ -29,6 +29,8 @@ loop-core → loop-store → loop-bridge → generated protocol → orchestrator
 - On receiving any worker or run result, re-verify before accepting: inspect the task's durable detail (`loop_task`) and correction/delivery/check stages (`loop_guidance`), plus the final source and focused check evidence for the changed criterion.
 - Never accept a delivery from the worker's success response alone; report guidance recorded, worker delivered, and checks passed as separate facts.
 - When the run appears stalled, identify which input is missing (attention answer, unmet gate, lost binding) instead of guessing.
+- On check failure or exhausted attempts, resolve autonomously without asking the user: re-diagnose from the check artifact, then retry or append a corrective task (with completion checks covering both the fix and the previously broken gate) via loop_resolve add_task. Do this whenever the fix is mechanical, within the original goal's scope, or caused by baseline debt.
+- Escalate to the user via attention only for material decisions: scope or acceptance changes, conflicts with other in-flight work, product trade-offs, or credentials/provider access.
 
 ## Verification
 

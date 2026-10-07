@@ -68,7 +68,7 @@ test("quota failure releases the first worker and retries on another provider", 
     async release() {
       const snapshot = await protocol.getSnapshot(input);
       expect(snapshot.activeWorkers).toHaveLength(1);
-      owners.push(snapshot.activeWorkers[0]?.id);
+      owners.push(must(snapshot.activeWorkers[0]).id);
       lifecycle.push("released");
     }
   }
@@ -77,7 +77,7 @@ test("quota failure releases the first worker and retries on another provider", 
       lifecycle.push("fallback");
       const snapshot = await protocol.getSnapshot(input);
       expect(snapshot.activeWorkers).toHaveLength(1);
-      owners.push(snapshot.activeWorkers[0]?.id);
+      owners.push(must(snapshot.activeWorkers[0]).id);
       expect(startInput.attempt).toBe(0);
       return super.start(startInput);
     }

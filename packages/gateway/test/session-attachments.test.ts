@@ -45,7 +45,7 @@ function register(gateway: TestGateway, sessionId = "s-1"): string {
 }
 
 function userMessageFrame(gateway: TestGateway, sessionId = "s-1"): UserMessagePayload | null {
-  const frames = gateway.sessions?.bufferedFrames(sessionId);
+  const frames = must(gateway.sessions?.bufferedFrames(sessionId));
   const frame = frames.find((candidate) => candidate.event === "user_message");
   return frame === undefined ? null : (frame.data as UserMessagePayload);
 }
@@ -88,10 +88,9 @@ describe("attachment body ingress (D5)", () => {
     // Honesty: the frame buffer never carries the body (replay budget, D5).
     expect(JSON.stringify(userMessageFrame(gateway))).not.toContain("PNG");
 
-    const stored = gateway.sessions?.getAttachment("s-1", "att-1");
-    expect(stored).not.toBeNull();
-    expect(stored?.mimeType).toBe("image/png");
-    expect(Buffer.from(stored?.bytes).toString("base64")).toBe(PNG_BASE64);
+    const stored = must(gateway.sessions?.getAttachment("s-1", "att-1"));
+    expect(stored.mimeType).toBe("image/png");
+    expect(Buffer.from(stored.bytes).toString("base64")).toBe(PNG_BASE64);
   });
 
   test("bodies survive session end; frames replay references, not bodies", () => {
@@ -170,7 +169,7 @@ describe("attachment body ingress (D5)", () => {
       attachments: nine,
     });
 
-    const refs = userMessageFrame(gateway)?.attachments;
+    const refs = must(userMessageFrame(gateway)?.attachments);
     expect(refs).toHaveLength(8); // MAX_ATTACHMENTS_PER_MESSAGE
     expect(refs.map((ref) => ref.attachmentId)).toEqual(
       Array.from({ length: 8 }, (_, index) => `att-${index + 1}`),

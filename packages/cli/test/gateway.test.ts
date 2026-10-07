@@ -299,6 +299,9 @@ test("ensureGatewayRunning spawns the daemon, records the pid, and waits for the
       env: Record<string, unknown>;
       cwd: string;
     } | null = null;
+    // Read through a closure: the callback assignment is invisible to
+    // control-flow narrowing at the read site below.
+    const spawnedRecord = (): typeof spawnedArgs => spawnedArgs;
     const deps: EnsureGatewayOptions = {
       env,
       executablePath: "/repo/dist/loop",
@@ -333,17 +336,17 @@ test("ensureGatewayRunning spawns the daemon, records the pid, and waits for the
       },
     };
     const result = await ensureGatewayRunning(deps);
-    expect(spawnedArgs).not.toBeNull();
-    expect(spawnedArgs?.command).toBe("bun");
-    expect(spawnedArgs?.args[0]?.endsWith(join("packages", "gateway", "src", "main.ts"))).toBe(
+    const spawned = must(spawnedRecord());
+    expect(spawned.command).toBe("bun");
+    expect(spawned.args[0]?.endsWith(join("packages", "gateway", "src", "main.ts"))).toBe(
       true,
     );
-    expect(spawnedArgs?.cwd).toBe(resolve(must(spawnedArgs?.args[0]), "..", "..", ".."));
-    expect(spawnedArgs?.env).toMatchObject({ LOOP_GATEWAY_HOST: "100.80.133.120" });
+    expect(spawned.cwd).toBe(resolve(must(spawned.args[0]), "..", "..", ".."));
+    expect(spawned.env).toMatchObject({ LOOP_GATEWAY_HOST: "100.80.133.120" });
     expect(readFileSync(pidPath, "utf8")).toBe("4242\n");
     expect(result.decision.action).toBe("spawn");
     expect(result.record).not.toBeNull();
-    expect(result.record?.port).toBe(Number(spawnedArgs?.env.LOOP_GATEWAY_PORT));
+    expect(result.record?.port).toBe(Number(spawned.env.LOOP_GATEWAY_PORT));
   } finally {
     for (const server of openedServers) server.close();
     rmSync(root, { recursive: true, force: true });

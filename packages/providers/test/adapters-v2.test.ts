@@ -187,10 +187,10 @@ test("Pi workers without a write scope receive only read-only tools", async () =
   });
   const readOnlyInput = {
     ...input,
-    context: { ...must(input.context), task: { ...input.context?.task, writeScope: [] } },
+    context: { ...must(input.context), task: { ...must(input.context?.task), writeScope: [] } },
   };
   await headless.start(readOnlyInput);
-  const headlessArgs = runner.calls.at(-1)?.args;
+  const headlessArgs = must(runner.calls.at(-1)?.args);
   expect(
     headlessArgs.slice(headlessArgs.indexOf("--tools"), headlessArgs.indexOf("--tools") + 2),
   ).toEqual(["--tools", "read,grep,find,ls"]);

@@ -7,5 +7,8 @@ mod schema;
 mod sqlite;
 mod trace;
 
-pub use sqlite::{EventRecord, InterruptedClaim, InterruptedExecution, SqliteStore, StoreError};
+pub use sqlite::{
+    bounded_renewal, EventRecord, InterruptedClaim, InterruptedExecution, RenewalOutcome,
+    SqliteStore, StoreError, RENEW_MAX_ATTEMPTS, RENEW_RETRY_DELAY_MS, RENEW_THRESHOLD_DIVISOR,
+};
 pub use trace::{RunTraceReport, TaskTrace};

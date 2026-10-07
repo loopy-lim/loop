@@ -5,17 +5,22 @@ import { join } from "node:path";
 
 import { storeCheckOutput } from "../src/evidence-artifact";
 
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
+
 test("large check output is saved privately after redaction and only then gets a path", async () => {
   const root = mkdtempSync(join(tmpdir(), "loop-check-artifact-"));
   const database = join(root, "run.db");
   const output = `${"normal output\n".repeat(50)}api_key=private-value`;
-  const stored = await storeCheckOutput(database, "run", "task", "check", output, "");
-  expect(stored?.path).toContain("run.db.artifacts");
-  expect(stored?.preview).toContain("artifact saved");
-  const body = readFileSync(stored?.path, "utf8");
+  const stored = must(await storeCheckOutput(database, "run", "task", "check", output, ""));
+  expect(stored.path).toContain("run.db.artifacts");
+  expect(stored.preview).toContain("artifact saved");
+  const body = readFileSync(stored.path, "utf8");
   expect(body).toContain("normal output");
   expect(body).not.toContain("private-value");
-  expect(statSync(stored?.path).mode & 0o077).toBe(0);
+  expect(statSync(stored.path).mode & 0o077).toBe(0);
 });
 
 test("small output stays inline without creating an artifact", async () => {

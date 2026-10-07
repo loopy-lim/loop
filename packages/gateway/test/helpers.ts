@@ -564,6 +564,11 @@ export async function readSseUntil(
   return { frames: collector.frames, closedByServer: collector.closedByServer, raw: collector.raw };
 }
 
+function must<T>(value: T | undefined | null): T {
+  if (value === undefined || value === null) throw new Error("expected value to be defined");
+  return value;
+}
+
 /** Incremental SSE reader that keeps its position across multiple awaits. */
 export class SseCollector {
   readonly #reader: ReadableStreamDefaultReader<Uint8Array>;
@@ -572,7 +577,7 @@ export class SseCollector {
   closedByServer = false;
 
   constructor(response: Response) {
-    this.#reader = response.body?.getReader();
+    this.#reader = must(response.body?.getReader());
   }
 
   get raw(): string {

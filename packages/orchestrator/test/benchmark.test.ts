@@ -45,9 +45,9 @@ test("every profile DAG keeps the same gate shape with a workflow-specific front
     expect(scenario.tasks).toHaveLength(3);
     expect(scenario.tasks[0]?.kind).toBe("research");
     expect(scenario.tasks[1]?.kind).toBe("implementation");
-    expect(scenario.tasks[1]?.dependencies).toEqual([scenario.tasks[0]?.id]);
+    expect(scenario.tasks[1]?.dependencies).toEqual([must(scenario.tasks[0]).id]);
     expect(scenario.tasks[2]?.kind).toBe("verification");
-    expect(scenario.tasks[2]?.dependencies).toEqual([scenario.tasks[1]?.id]);
+    expect(scenario.tasks[2]?.dependencies).toEqual([must(scenario.tasks[1]).id]);
     expect(scenario.tasks[2]?.writeScope).toEqual([]);
     for (const task of scenario.tasks) {
       expect(task.completionChecks).toHaveLength(1);
@@ -141,7 +141,7 @@ test("scripted worker failures surface in the trace and demote the ranking", asy
 
   const combined = await protocol.compareTraces({
     databasePath: shared,
-    runIds: [passed.runs[0]?.runId, flakyRun.runId],
+    runIds: [must(passed.runs[0]).runId, flakyRun.runId],
   });
   expect(combined.comparison.rankings[0]?.label).toBe(passed.runs[0]?.runId);
   expect(combined.comparison.rankings[1]?.label).toBe(flakyRun.runId);

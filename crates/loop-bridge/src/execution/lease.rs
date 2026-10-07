@@ -5,6 +5,7 @@ use crate::commands::{OperationOutput, bridge_error, store};
 use loop_core::attention::{AttentionKind, AttentionResolution, AttentionState};
 use loop_core::event::{Event, EventKind};
 use loop_core::task::TaskId;
+use loop_store::RenewalOutcome;
 use rustra::prelude::*;
 use std::collections::BTreeSet;
 
@@ -82,11 +83,15 @@ pub fn claim_execution(input: ExecutionLeaseInput) -> Result<OperationOutput> {
 #[command]
 pub fn renew_execution(input: ExecutionLeaseInput) -> Result<OperationOutput> {
     let _ignored_client_clock = input.now_ms;
-    let accepted = store(&input.database_path)?
-        .renew_execution(&input.run_id, &input.owner, input.ttl_ms)
-        .map_err(|e| bridge_error("execution_lease_failed", e))?;
+    // Bounded automatic retry (diag-rust C3): a transient renewal failure is
+    // retried inside the renewal threshold before the owner gives up. Only a
+    // lost lease or an exhausted budget reaches the durable hand-off path.
+    let renewed = store(&input.database_path)?
+        .renew_execution_retrying(&input.run_id, &input.owner, input.ttl_ms)
+        .map_err(|e| bridge_error("execution_lease_failed", e))?
+        == RenewalOutcome::Renewed;
     Ok(OperationOutput {
-        accepted,
+        accepted: renewed,
         ..OperationOutput::default()
     })
 }

@@ -889,10 +889,7 @@ mod prompt_limit_classification_tests {
         })
         .unwrap();
 
-        let projection = store(&database_path)
-            .unwrap()
-            .projection(run_id)
-            .unwrap();
+        let projection = store(&database_path).unwrap().projection(run_id).unwrap();
         let task = projection.tasks.get(&TaskId::from("t1")).unwrap();
         assert_eq!(
             task.state,

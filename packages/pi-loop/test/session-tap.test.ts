@@ -249,7 +249,7 @@ describe("register-first ingress (D1)", () => {
     expect(scripted.handles).toHaveLength(2);
     scripted.handles[1]?.handlers.onConnected();
 
-    const lines = parseLines(scripted.handles[1]?.writes);
+    const lines = parseLines(must(scripted.handles[1]).writes);
     expect(lines[0]).toMatchObject({ type: "register", sessionId: "sess-1" });
     expect(lines[1]).toMatchObject({ type: "lifecycle", phase: "sessionStarted" });
     expect(tap.connected).toBe(true);
@@ -520,10 +520,10 @@ describe("fail-open and shutdown", () => {
     scripted.last.handlers.onConnected();
 
     tap.startSession({ sessionManager: { getSessionId: () => "sess-2" } });
-    expect(parseLines(scripted.handles[0]?.writes).at(-1)).toEqual({ type: "session_shutdown" }); // old tap closed honestly
+    expect(parseLines(must(scripted.handles[0]).writes).at(-1)).toEqual({ type: "session_shutdown" }); // old tap closed honestly
     expect(scripted.handles).toHaveLength(2);
     scripted.last.handlers.onConnected(); // the new connection registers on connect
-    expect(parseLines(scripted.handles[1]?.writes)[0]).toMatchObject({
+    expect(parseLines(must(scripted.handles[1]).writes)[0]).toMatchObject({
       type: "register",
       sessionId: "sess-2",
     });

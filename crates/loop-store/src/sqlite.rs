@@ -265,6 +265,28 @@ impl SqliteStore {
         Ok(updated == 1)
     }
 
+    /// Renew with bounded automatic retry (diag-rust C3): one missed renewal
+    /// must not revoke the owner's append rights while the lease can still be
+    /// saved. Retries are finite and sized to land inside the renewal
+    /// threshold — one third of the lease TTL; once the budget is spent, or
+    /// the lease itself lapsed or changed owner, the caller gives up to the
+    /// existing durable hand-off (`recycle_interrupted_execution`), which
+    /// stays the last resort.
+    pub fn renew_execution_retrying(
+        &self,
+        run_id: &str,
+        owner: &str,
+        ttl: i64,
+    ) -> Result<RenewalOutcome, StoreError> {
+        if owner.is_empty() || !(1_000..=60_000).contains(&ttl) {
+            return Err(StoreError::InvalidLease);
+        }
+        bounded_renewal(
+            || self.renew_execution_at(run_id, owner, database_now_ms(&self.connection)?, ttl),
+            || std::thread::sleep(std::time::Duration::from_millis(RENEW_RETRY_DELAY_MS)),
+        )
+    }
+
     pub fn require_execution_owner(
         &self,
         run_id: &str,
@@ -420,6 +442,56 @@ impl SqliteStore {
             .collect::<Result<BTreeSet<_>, _>>()?;
         Ok(names)
     }
+}
+
+// Renewal retry envelope: retries are only attempted while the lease is
+// alive, and the whole budget must fit inside the renewal threshold — one
+// third of the TTL — so even the minimum 1 s TTL leaves room (2 delays of
+// 100 ms against a 333 ms threshold). A lease that lapses despite the budget
+// is dead by durable fact and belongs to the recovery path, not to renewal.
+pub const RENEW_THRESHOLD_DIVISOR: i64 = 3;
+/// Total renewal attempts per retrying sequence, including the first.
+pub const RENEW_MAX_ATTEMPTS: u32 = 3;
+/// Pause between renewal retries.
+pub const RENEW_RETRY_DELAY_MS: u64 = 100;
+
+/// Outcome of a bounded renewal sequence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenewalOutcome {
+    /// The lease was renewed; owned appends keep succeeding.
+    Renewed,
+    /// The lease lapsed or changed owner. Renewal cannot recover a lapsed
+    /// lease — that is what makes the lapse a durable proof of death for the
+    /// recycle recovery path — so the caller must give up to it.
+    Lost,
+}
+
+/// Drive bounded renewal retries over `attempt`. A renewal that reports the
+/// lease lapsed or taken (`Ok(false)`) is terminal: the store-level judgment
+/// is deterministic, so retrying cannot help. Only transient store failures
+/// are retried, a finite number of times, with `delay` between attempts;
+/// when the budget is exhausted the final failure surfaces as
+/// [`StoreError::RenewalExhausted`] and the caller must record the existing
+/// durable hand-off.
+pub fn bounded_renewal(
+    mut attempt: impl FnMut() -> Result<bool, StoreError>,
+    mut delay: impl FnMut(),
+) -> Result<RenewalOutcome, StoreError> {
+    for attempts_used in 1..=RENEW_MAX_ATTEMPTS {
+        match attempt() {
+            Ok(true) => return Ok(RenewalOutcome::Renewed),
+            Ok(false) => return Ok(RenewalOutcome::Lost),
+            Err(error) if attempts_used == RENEW_MAX_ATTEMPTS => {
+                return Err(StoreError::RenewalExhausted {
+                    attempts: attempts_used,
+                    source: Box::new(error),
+                });
+            }
+            Err(_) => delay(),
+        }
+    }
+    // Every branch above returns; this arm exists only for a zero budget.
+    Ok(RenewalOutcome::Lost)
 }
 
 fn database_now_ms(connection: &Connection) -> Result<i64, StoreError> {
@@ -835,6 +907,12 @@ pub enum StoreError {
     InvalidLease,
     #[error("an active, matching execution owner is required")]
     ExecutionOwnerRequired,
+    #[error("lease renewal retry budget exhausted after {attempts} attempts")]
+    RenewalExhausted {
+        attempts: u32,
+        #[source]
+        source: Box<StoreError>,
+    },
     #[error("database error: {0}")]
     Database(#[from] rusqlite::Error),
     #[error("serialization error: {0}")]

@@ -70,11 +70,13 @@ function fakeControl() {
   const activities: string[] = [];
   const workerResults: Array<Record<string, unknown>> = [];
   const attentions: Array<Record<string, unknown>> = [];
+  const verifications: Array<Record<string, unknown>> = [];
   const recordedAt: number[] = [];
   return {
     activities,
     workerResults,
     attentions,
+    verifications,
     recordedAt,
     control: {
       recordActivity: async (event: { activity: string }) => {
@@ -92,7 +94,10 @@ function fakeControl() {
         return {};
       },
       recordCheckReceipts: async () => ({}),
-      recordVerification: async () => ({}),
+      recordVerification: async (input: Record<string, unknown>) => {
+        verifications.push(input);
+        return {};
+      },
       recordTaskOutput: async () => ({}),
       stopVerification: async () => ({}),
     },
@@ -232,4 +237,39 @@ test("the orchestrator threads the configured stall timeout into the watchdog", 
   expect(["failed", "attention"]).toContain(result.status);
   const snapshot = await protocol.getSnapshot(input);
   expect(snapshot.tasks.every((task) => task.state !== "done")).toBe(true);
+});
+
+test("a hung same-session repair is failed by the stall watchdog", async () => {
+  // The first check run fails, the worker's repair call never settles: the
+  // watchdog must fail the attempt instead of hanging the verification stage.
+  const failingVerifier = new CompletionVerifier({
+    run: async () => ({ exitCode: 1, stdout: "", stderr: "check failed", timedOut: false }),
+  });
+  class HungRepairProvider extends FakeProvider {
+    repair(): Promise<WorkerResult> {
+      return new Promise<WorkerResult>(() => {});
+    }
+  }
+  const provider = new HungRepairProvider("hanging-repair", ["fast"]);
+  const directory = mkdtempSync(join(tmpdir(), "loop-stall-repair-"));
+  const fake = fakeControl();
+  const execution = executeTask({
+    input: { databasePath: join(directory, "run.db"), runId: "run-1", executionOwner: "owner" },
+    context: stallContext(directory),
+    workerId: "w1",
+    provider,
+    control: fake.control as never,
+    verifier: failingVerifier,
+    stallTimeoutMs: 60,
+  });
+  await execution.done;
+  expect(execution.error).toBeUndefined();
+  // The stalled repair is durable evidence on the verification record — the
+  // existing verification-failure path, not a silent hang, with no attention
+  // noise and no retry-class wording lost.
+  expect(fake.attentions).toEqual([]);
+  expect(fake.verifications).toHaveLength(1);
+  expect(fake.verifications[0]).toMatchObject({ passed: false });
+  expect(String(fake.verifications[0]?.reason)).toContain("stalled");
+  expect(String(fake.verifications[0]?.reason)).toContain("retry policy");
 });

@@ -104,6 +104,7 @@ test("resolveMailboxOptions keeps documented defaults and rejects nonsense", () 
     coalescingWindowMs: 2000,
     pollIntervalMs: 100,
     maxMessageBytes: 16000,
+    steerDeliveryBudgetMs: 15_000,
   });
   expect(resolveMailboxOptions({ enabled: false, coalescingWindowMs: -5 }).coalescingWindowMs).toBe(
     2000,
@@ -471,4 +472,44 @@ test("disabling the mailbox leaves the run untouched by live delivery", async ()
   expect(provider.steered).toEqual([]);
   provider.completeAll();
   expect((await pending).status).toBe("completed");
+});
+
+test("a steer channel that never settles cannot park the tap or the shutdown", async () => {
+  const { directory, input } = workspace("hung-steer");
+  await protocol.prepareRun({
+    ...input,
+    intent: "",
+    workingDirectory: directory,
+    tasks: [fixture("a")],
+  });
+  await addGuidance(input, "a", "guidance for a hung channel");
+  const steered: string[] = [];
+  const mailbox = new GuidanceMailbox(protocol, input.databasePath, input.runId, {
+    coalescingWindowMs: 40,
+    pollIntervalMs: 5,
+    // Test budget: expiry keeps the batch pending and backs off one window.
+    steerDeliveryBudgetMs: 50,
+  });
+  mailbox.register({
+    taskId: "a",
+    workerId: "w1",
+    deliveredThroughSequence: 0,
+    steer: () => {
+      steered.push("call");
+      return new Promise<void>(() => {});
+    },
+  });
+  mailbox.start();
+  // The first delivery hangs; the budget must expire and the tap must keep
+  // ticking: the retry after one backoff window proves the loop survived.
+  await until(() => steered.length >= 2, 3_000);
+  // Nothing was dropped or persisted as delivered by the hung channel.
+  expect(mailbox.delivered).toBe(0);
+  // mailbox.stop() (the owner's shutdown path) still settles.
+  await Promise.race([
+    mailbox.stop(),
+    Bun.sleep(2_000).then(() => {
+      throw new Error("mailbox.stop() did not settle after a hung steer");
+    }),
+  ]);
 });

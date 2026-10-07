@@ -22,9 +22,21 @@ interface ZaiApiProviderOptions {
   generalPath?: string;
   codingPlanPath?: string;
   fetch?: FetchLike;
+  /**
+   * Wall-clock budget for one worker request (headers plus body read). An
+   * endpoint that accepts the connection and then never responds must fail
+   * the attempt as a retryable timeout so the orchestrator's fallback chain
+   * takes over instead of the run waiting forever (ts C5 timeout coverage).
+   * Mirrors the AGY stream driver's per-turn budget and stays under the
+   * orchestrator stall watchdog's 15-minute default so this lane classifies
+   * first. `0` disables the deadline. Default 600000ms.
+   */
+  requestTimeoutMs?: number;
   /** Compute-class stance comes from configuration at construction time. */
   computeClasses: ComputeClass[];
 }
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 600_000;
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -32,12 +44,15 @@ interface Session {
   status: WorkerState;
   abort: AbortController;
   result: Promise<WorkerResult>;
+  /** Set when the request deadline fired; distinguishes deadline aborts from cancel. */
+  timedOut: boolean;
 }
 
 export class ZaiApiProvider implements AgentProvider {
   readonly id: string;
   readonly #options: ZaiApiProviderOptions;
   readonly #fetch: FetchLike;
+  readonly #requestTimeoutMs: number;
   readonly #sessions = new Map<string, Session>();
 
   constructor(options: ZaiApiProviderOptions) {
@@ -47,6 +62,7 @@ export class ZaiApiProvider implements AgentProvider {
     this.id = options.id ?? `zai-${options.mode}`;
     this.#options = options;
     this.#fetch = options.fetch ?? fetch;
+    this.#requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   }
 
   async capabilities(): Promise<ProviderCapabilities> {
@@ -75,29 +91,53 @@ export class ZaiApiProvider implements AgentProvider {
     const session: Session = {
       status: "running",
       abort,
+      timedOut: false,
       result: Promise.resolve({
         success: false,
         summary: "not started",
         failure: { kind: "process_error", retryable: true },
       }),
     };
-    session.result = this.#request(input, abort.signal).then(
-      (result) => {
-        session.status = result.success ? "completed" : "lost";
-        return result;
-      },
-      (error) => {
-        session.status = abort.signal.aborted ? "cancelled" : "lost";
-        return {
-          success: false,
-          summary: redact(error instanceof Error ? error.message : String(error)),
-          failure: {
-            kind: abort.signal.aborted ? "cancelled" : "process_error",
-            retryable: !abort.signal.aborted,
-          },
-        };
-      },
-    );
+    // Bounded request: the deadline aborts the same signal the fetch and its
+    // body read observe, so an unresponsive endpoint settles the result within
+    // the budget as a retryable timeout (the existing stall-timeout outcome).
+    const deadlineMs = this.#requestTimeoutMs;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    if (deadlineMs > 0) {
+      deadline = setTimeout(() => {
+        session.timedOut = true;
+        abort.abort();
+      }, deadlineMs);
+    }
+    session.result = this.#request(input, abort.signal)
+      .finally(() => {
+        if (deadline) clearTimeout(deadline);
+      })
+      .then(
+        (result) => {
+          session.status = result.success ? "completed" : "lost";
+          return result;
+        },
+        (error) => {
+          if (session.timedOut) {
+            session.status = "lost";
+            return {
+              success: false,
+              summary: `Z.AI request timed out after ${deadlineMs}ms`,
+              failure: { kind: "timeout" as const, retryable: true },
+            };
+          }
+          session.status = abort.signal.aborted ? "cancelled" : "lost";
+          return {
+            success: false,
+            summary: redact(error instanceof Error ? error.message : String(error)),
+            failure: {
+              kind: abort.signal.aborted ? "cancelled" : "process_error",
+              retryable: !abort.signal.aborted,
+            },
+          };
+        },
+      );
     this.#sessions.set(id, session);
     return { id };
   }

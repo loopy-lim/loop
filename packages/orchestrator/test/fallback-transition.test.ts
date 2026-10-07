@@ -119,8 +119,12 @@ test("an exhausted fallback chain stops the run clearly instead of hanging", asy
     workingDirectory: directory,
   });
   expect(result.status).toBe("attention");
-  expect(result.providersByTask.a).toEqual(["zai", "openai-codex"]);
+  // Retry policy: every attempt walks the full fallback chain, so the two
+  // attempt budget (maxAttempts: 2) records two chains before parking.
+  expect(result.providersByTask.a).toEqual(["zai", "openai-codex", "zai", "openai-codex"]);
   const snapshot = await protocol.getSnapshot(input);
   expect(snapshot.activeWorkers).toEqual([]);
-  expect(snapshot.attention.some((item) => item.summary.includes("fallback exhausted"))).toBe(true);
+  expect(
+    snapshot.attention.some((item) => item.summary.includes("Provider fallback exhausted or unavailable")),
+  ).toBe(true);
 });

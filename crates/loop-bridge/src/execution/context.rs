@@ -8,7 +8,7 @@ use crate::commands::{
 };
 use loop_core::event::{CheckReceipt, Event, EventKind};
 use loop_core::policy::{
-    ContextBudgetPolicy, ClampedText, PROMPT_OVERHEAD_CHARS, ReductionPass, utf16_len,
+    ClampedText, ContextBudgetPolicy, PROMPT_OVERHEAD_CHARS, ReductionPass, utf16_len,
 };
 use loop_core::task::{TaskId, TaskState};
 use rustra::prelude::*;
@@ -221,7 +221,11 @@ fn estimate_essential_chars(context: &TaskContextOutput) -> usize {
     }
     for check in &task.completion_checks {
         total += utf16_len(&check.id) + utf16_len(&check.command) + 64;
-        total += check.args.iter().map(|arg| utf16_len(arg) + 1).sum::<usize>();
+        total += check
+            .args
+            .iter()
+            .map(|arg| utf16_len(arg) + 1)
+            .sum::<usize>();
         if let Some(directory) = &check.working_directory {
             total += utf16_len(directory) + 4;
         }
@@ -273,13 +277,17 @@ fn apply_context_budget(context: &mut TaskContextOutput) -> Option<ContextReduct
 
     for dependency in &mut context.dependency_results {
         let reference = dependency_reference(&dependency.task_id);
-        dependency.summary =
-            compact_into(&mut record, policy.compact_body(&dependency.summary, Some(&reference)));
+        dependency.summary = compact_into(
+            &mut record,
+            policy.compact_body(&dependency.summary, Some(&reference)),
+        );
     }
-    context.result_summary = context
-        .result_summary
-        .take()
-        .map(|summary| compact_into(&mut record, policy.clamp_body(&summary, Some(RESULT_SUMMARY_REFERENCE))));
+    context.result_summary = context.result_summary.take().map(|summary| {
+        compact_into(
+            &mut record,
+            policy.clamp_body(&summary, Some(RESULT_SUMMARY_REFERENCE)),
+        )
+    });
 
     // (b) A retry after a stall/limit failure continues on a compacted
     // context: bulky bodies become bounded heads plus the artifact
@@ -291,19 +299,27 @@ fn apply_context_budget(context: &mut TaskContextOutput) -> Option<ContextReduct
                 .output_artifact
                 .clone()
                 .unwrap_or_else(|| format!("check {} output in the run store", receipt.id));
-            receipt.stdout =
-                compact_into(&mut record, policy.compact_body(&receipt.stdout, Some(&reference)));
-            receipt.stderr =
-                compact_into(&mut record, policy.compact_body(&receipt.stderr, Some(&reference)));
+            receipt.stdout = compact_into(
+                &mut record,
+                policy.compact_body(&receipt.stdout, Some(&reference)),
+            );
+            receipt.stderr = compact_into(
+                &mut record,
+                policy.compact_body(&receipt.stderr, Some(&reference)),
+            );
         }
-        context.result_summary = context
-            .result_summary
-            .take()
-            .map(|summary| compact_into(&mut record, policy.compact_body(&summary, Some(RESULT_SUMMARY_REFERENCE))));
+        context.result_summary = context.result_summary.take().map(|summary| {
+            compact_into(
+                &mut record,
+                policy.compact_body(&summary, Some(RESULT_SUMMARY_REFERENCE)),
+            )
+        });
         for dependency in &mut context.dependency_results {
             let reference = dependency_reference(&dependency.task_id);
-            dependency.summary =
-                compact_into(&mut record, policy.compact_body(&dependency.summary, Some(&reference)));
+            dependency.summary = compact_into(
+                &mut record,
+                policy.compact_body(&dependency.summary, Some(&reference)),
+            );
         }
     }
 
@@ -312,9 +328,7 @@ fn apply_context_budget(context: &mut TaskContextOutput) -> Option<ContextReduct
     // deterministic limit plus the InvalidContract classification as the
     // safety net (structurally unreachable for store-sourced content).
     let mut passes = 0;
-    while let Some(pass) =
-        policy.next_total_reduction(estimate_essential_chars(context), passes)
-    {
+    while let Some(pass) = policy.next_total_reduction(estimate_essential_chars(context), passes) {
         passes += 1;
         match pass {
             ReductionPass::CompactAdvisory => {
@@ -325,12 +339,12 @@ fn apply_context_budget(context: &mut TaskContextOutput) -> Option<ContextReduct
                         policy.compact_body(&dependency.summary, Some(&reference)),
                     );
                 }
-                context.result_summary = context
-                    .result_summary
-                    .take()
-                    .map(|summary| {
-                        compact_into(&mut record, policy.compact_body(&summary, Some(RESULT_SUMMARY_REFERENCE)))
-                    });
+                context.result_summary = context.result_summary.take().map(|summary| {
+                    compact_into(
+                        &mut record,
+                        policy.compact_body(&summary, Some(RESULT_SUMMARY_REFERENCE)),
+                    )
+                });
             }
             ReductionPass::CompactGuidance => {
                 context.guidance = context
@@ -653,7 +667,10 @@ mod context_budget_repros {
         );
         assert_eq!(receipt.exit_code, 1);
         let reduction = context.context_reduction.expect("compaction recorded");
-        assert!(reduction.retry_compaction, "stall retry must be marked as a compacted continuation");
+        assert!(
+            reduction.retry_compaction,
+            "stall retry must be marked as a compacted continuation"
+        );
         assert!(reduction.body_compactions >= 2);
     }
 
@@ -754,7 +771,10 @@ mod context_budget_repros {
                 "ladder must compact guidance bodies: got {} chars",
                 item.chars().count()
             );
-            assert!(item.contains("truncated"), "compacted guidance keeps a marker: {item}");
+            assert!(
+                item.contains("truncated"),
+                "compacted guidance keeps a marker: {item}"
+            );
         }
     }
 }
