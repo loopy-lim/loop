@@ -17,9 +17,22 @@ import { Icon } from "../ui/Icon";
 import { type IconRole } from "../ui/glyphs";
 import {
   ACTIVE_HEADING,
+  COUNTS_CANCELLED,
+  COUNTS_DONE,
+  COUNTS_FAILED,
+  COUNTS_NEED_REPLY,
+  COUNTS_NO_TASKS,
+  COUNTS_QUEUED,
+  COUNTS_SEPARATOR,
+  COUNTS_WORKING,
   EARLIER_HEADING,
   EMPTY_ACTIVE_NOTICE,
   EMPTY_RUNS_NOTICE,
+  RUN_STATUS_CANCELLED,
+  RUN_STATUS_DONE,
+  RUN_STATUS_FAILED,
+  RUN_STATUS_NEEDS_REPLY,
+  RUN_STATUS_WORKING,
   SHOW_ALL_LABEL,
   TODAY_HEADING,
   UNTITLED_RUN_LABEL,
@@ -65,17 +78,42 @@ export function shortRunId(runId: string): string {
 }
 
 /** Non-zero task counts, closed readout vocabulary (§2 system readout):
- * quiet when nothing is pending — zero rows are never spelled out. */
+ * quiet when nothing is pending — zero rows are never spelled out. Units
+ * are the owned user-language map (usability audit v9 §어휘: pending/
+ * attention are internal task-state words; the surface reads working /
+ * need reply), composed here — no inline literals. */
 export function countsText(run: { taskCounts: RemoteRunSummary["taskCounts"] }): string {
   const c = run.taskCounts;
   const parts: string[] = [];
-  if (c.pending > 0) parts.push(`${c.pending} pending`);
-  if (c.running > 0) parts.push(`${c.running} running`);
-  if (c.attention > 0) parts.push(`${c.attention} attention`);
-  if (c.done > 0) parts.push(`${c.done} done`);
-  if (c.failed > 0) parts.push(`${c.failed} failed`);
-  if (c.cancelled > 0) parts.push(`${c.cancelled} cancelled`);
-  return parts.length > 0 ? parts.join(", ") : "no tasks";
+  if (c.pending > 0) parts.push(`${c.pending} ${COUNTS_QUEUED}`);
+  if (c.running > 0) parts.push(`${c.running} ${COUNTS_WORKING}`);
+  if (c.attention > 0) parts.push(`${c.attention} ${COUNTS_NEED_REPLY}`);
+  if (c.done > 0) parts.push(`${c.done} ${COUNTS_DONE}`);
+  if (c.failed > 0) parts.push(`${c.failed} ${COUNTS_FAILED}`);
+  if (c.cancelled > 0) parts.push(`${c.cancelled} ${COUNTS_CANCELLED}`);
+  return parts.length > 0 ? parts.join(COUNTS_SEPARATOR) : COUNTS_NO_TASKS;
+}
+
+/** Raw status enum → display word (usability audit v9 §어휘): the internal
+ * status vocabulary never reaches the screen. Exported: the run screen's
+ * status line reuses the SAME table as the color mapping above — one
+ * status→word table for the app, next to the one status→color table. */
+export function runStatusWord(status: RemoteRunStatus): string {
+  switch (status) {
+    case "planning":
+    case "running":
+      return RUN_STATUS_WORKING;
+    case "attention":
+      return RUN_STATUS_NEEDS_REPLY;
+    case "completed":
+      return RUN_STATUS_DONE;
+    case "failed":
+      return RUN_STATUS_FAILED;
+    case "cancelled":
+      return RUN_STATUS_CANCELLED;
+    default:
+      return status;
+  }
 }
 
 /** Closed status → color mapping (§1; anything unknown stays muted).

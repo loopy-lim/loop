@@ -38,13 +38,11 @@ export const TERMINAL_MIN_HEIGHT = 320;
  * scrolling, and the meta line (rev / following) must stay visible below it. */
 export const TERMINAL_VIEWPORT_HEIGHT = 430;
 
-/** Upper bound on pane-view re-renders per second: pane frames are whole
- * screen-buffer snapshots, so only the latest one needs to reach the UI. */
+/** Render throttle: pane frames are whole screen-buffer snapshots, so only
+ * the latest one needs to reach the UI. */
 export const TERMINAL_RENDER_INTERVAL_MS = 300;
 
-/** Notice lines shown above the terminal surface (honest labeling, D6). */
-export const SNAPSHOT_ORIGIN_NOTICE = "screen-buffer snapshots — not a lossless transcript";
-export const LIFECYCLE_ONLY_NOTICE =
-  "Status only — this terminal has no live output stream yet.";
-export const UNOBSERVED_NOTICE = "not observed — pane is above the gateway observation cap";
-export const PANE_GONE_NOTICE = "pane closed — worker lifetime ended";
+// The honesty notices that used to live here (snapshot origin, status-only,
+// unobserved, pane-gone) are COPY, not layout — they are owned by ui/copy.ts
+// (SNAPSHOT_ORIGIN_NOTICE / LIFECYCLE_ONLY_NOTICE / UNOBSERVED_NOTICE /
+// PANE_GONE_NOTICE) since the P1 vocabulary transition.

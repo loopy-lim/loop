@@ -39,6 +39,7 @@ import {
   ATTACH_LIMIT_NOTICE,
   ATTACH_SESSION_REQUIRED_NOTICE,
   CAMERA_DENIED_NOTICE,
+  CHAT_TOGGLE_LABEL,
   EMPTY_TIMELINE_HINT,
   EMPTY_TIMELINE_TITLE,
   JUMP_TO_BOTTOM_LABEL,
@@ -49,6 +50,7 @@ import {
   STREAM_DISCONNECTED_NOTICE,
   WAITING_FOR_SESSION_NOTICE,
   TERMINALS_HEADING,
+  TERMINAL_TITLE,
   READOUT_STYLE,
   NO_PANES_NOTICE,
   PANE_LOADING_NOTICE,
@@ -324,7 +326,11 @@ export function ConversationScreen(props: {
   }, [following, mode, view?.items.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sendText = (text: string) => {
-    const target = composerTarget({ running: view?.running ?? false, runId: props.runId ?? null });
+    const target = composerTarget({
+      running: view?.running ?? false,
+      runId: props.runId ?? null,
+      sessionId,
+    });
     setBusy(true);
     setComposerError(null);
     // First send and Resend (C10) share this one path: the draft is only
@@ -611,7 +617,7 @@ export function ConversationScreen(props: {
               {/* S-08: the toggle is a chip — hairline-bordered surface fill
                * marks it as a control, and the label names the DESTINATION. */}
               <View style={styles.toggleChip}>
-                <DynText style={styles.toggle}>{mode === "chat" ? "Raw" : "Chat"}</DynText>
+                <DynText style={styles.toggle}>{mode === "chat" ? TERMINAL_TITLE : CHAT_TOGGLE_LABEL}</DynText>
               </View>
             </TouchableOpacity>
           </>

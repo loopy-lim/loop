@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { StyleSheet, TextInput, TouchableOpacity, View } from "react-native";
 
 import type { GatewayClient } from "../gateway-client/client";
-import { countsText, runStatusColor, shortRunId } from "../features/run-list";
+import { countsText, runStatusColor, runStatusWord, shortRunId } from "../features/run-list";
 import { relativeTime } from "../features/time-format";
 import { RunProjection, type OutputEntry, type RunProjectionState } from "../state/runProjection";
 import type { RemotePaneSummary } from "../gateway-client/wire";
@@ -213,7 +213,7 @@ export function RunScreen(props: {
           <DynText style={styles.heading}>{RUN_TITLE}</DynText>
           <View style={styles.statusRow}>
             <Icon role="statusDot" size={type.captionStrong.fontSize} color={statusColor} />
-            <DynText style={[styles.statusWord, { color: statusColor }]}>{run.status}</DynText>
+            <DynText style={[styles.statusWord, { color: statusColor }]}>{runStatusWord(run.status)}</DynText>
             <DynText style={styles.statusCounts}>{countsText(run)}</DynText>
           </View>
           <DynText style={styles.runId} numberOfLines={1}>

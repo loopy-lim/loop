@@ -49,7 +49,9 @@ export const RUN_STALE_NOTICE = "reconnecting — recent output may be incomplet
  * constant — the raw transport message never renders. */
 export const RESOLVE_FAILED_NOTICE = "Couldn't send the reply — try again.";
 export const ATTENTION_RESPONSE_PLACEHOLDER = "Your response";
-export const SUBMITTING_LABEL = "Submitting…";
+/** Progress verb, not the internal act name (usability audit v9 §어휘:
+ * "submit" never reaches the surface — every in-flight send reads Sending). */
+export const SUBMITTING_LABEL = "Sending…";
 /** Attention CTA (usability audit v9 U-5, user-approved): the button names
  * the act — "Reply"; the response word stays in the placeholder. */
 export const SUBMIT_RESPONSE_LABEL = "Reply";
@@ -66,8 +68,44 @@ export const READOUT_STYLE = { letterSpacing: 0.6 } as const;
 /** Visible steer affordance (visibility contract): the one-word mark shown
  * above the composer input while the turn is running and sends route to
  * the steer mailbox. The placeholder carries the sentence; this mark stays
- * visible while typing. */
-export const STEER_MARK_LABEL = "steer";
+ * visible while typing. Progressive form (usability audit v9 §어휘, DP-U2):
+ * the mark names the ongoing act, never the internal routing noun. */
+export const STEER_MARK_LABEL = "steering";
+
+/** Run-status display words (usability audit v9 §어휘): the raw status enum
+ * (planning/running/attention/…) is an internal vocabulary — the screen
+ * renders this closed table instead. planning collapses into Working (the
+ * user needs one in-progress word, not the planner's phase). */
+export const RUN_STATUS_WORKING = "Working…";
+export const RUN_STATUS_NEEDS_REPLY = "Needs your reply";
+export const RUN_STATUS_DONE = "Done";
+export const RUN_STATUS_FAILED = "Failed";
+export const RUN_STATUS_CANCELLED = "Cancelled";
+
+/** Task-count readout units (usability audit v9 §어휘: "1 working · 3 need
+ * reply"-class map — pending/attention are internal task-state words).
+ * countsText composes numbers with these units; the separator joins them. */
+export const COUNTS_QUEUED = "queued";
+export const COUNTS_WORKING = "working";
+export const COUNTS_NEED_REPLY = "need reply";
+export const COUNTS_DONE = "done";
+export const COUNTS_FAILED = "failed";
+export const COUNTS_CANCELLED = "cancelled";
+export const COUNTS_NO_TASKS = "no tasks";
+export const COUNTS_SEPARATOR = " · ";
+
+/** Terminal-view honesty notices (terminal mirror v1, decision D6 — moved
+ * here from terminalLayout.ts: they are copy, not layout values). Each
+ * notice keeps its honesty fact in user language — the mirror is live and
+ * NOT a transcript; a status-only/unobserved terminal says why it is quiet;
+ * a closed terminal names the closing (usability audit v9 §5: operator
+ * vocabulary — snapshot/pane/observation cap/worker — never surfaces). */
+export const SNAPSHOT_ORIGIN_NOTICE =
+  "Live mirror of the terminal screen — not a full transcript.";
+export const LIFECYCLE_ONLY_NOTICE =
+  "Status only — this terminal has no live output stream yet.";
+export const UNOBSERVED_NOTICE = "No live feed — this terminal is over the watch limit.";
+export const PANE_GONE_NOTICE = "Terminal closed — its session ended.";
 
 /** Jump-to-bottom pill (C11). */
 export const JUMP_TO_BOTTOM_LABEL = "Jump to latest";
@@ -147,12 +185,15 @@ export const LOGOUT_CONFIRM_MESSAGE =
 export const LOGOUT_CONFIRM_CANCEL = "Cancel";
 
 /** Remote spawn surface (task `spawn-app-ui`, decision
- * 2026-xx-session-spawn §D-D). Owned phrases — never composed inline at
- * call sites. The honest grammar: the app opens the window; the SESSION is
- * discovered from the session list once the tap registers, and every waiting
- * message says so instead of claiming a session that is not observed yet. */
-export const SPAWN_TUI_LABEL = "New task";
-export const SPAWN_TUI_SPAWNING = "Opening a new task on your computer…";
+ * 2026-xx-session-spawn §D-D; re-aligned to the session-centric IA approved
+ * 2026-10-07: the + is the ONLY creation entry and it OPENS A SESSION —
+ * every creation phrase says session, never task/run). Owned phrases —
+ * never composed inline at call sites. The honest grammar: the app opens
+ * the window; the SESSION is discovered from the session list once the tap
+ * registers, and every waiting message says so instead of claiming a
+ * session that is not observed yet. */
+export const SPAWN_TUI_LABEL = "New session";
+export const SPAWN_TUI_SPAWNING = "Opening a new session on your computer…";
 export const SPAWN_TUI_WAITING = "Window opened — waiting for the session to appear…";
 /** `tmuxTarget` is display-only per the spawn contract; naming the target
  * here is exactly the evidence an operator checks in `tmux ls`. */
@@ -162,5 +203,46 @@ export const SPAWN_TUI_TIMEOUT_SUFFIX = ").";
 export const SPAWN_TUI_LIST_UNAVAILABLE =
   "Window opened — the session list is unavailable, so the session cannot be auto-opened. Check the Sessions list once it recovers.";
 export const SPAWN_TUI_BLOCKED =
-  "New tasks are turned off for this connection — ask the owner to enable them.";
-export const SPAWN_TUI_FAILED_PREFIX = "Couldn't open a new task — ";
+  "New sessions are turned off for this connection — ask the owner to enable them.";
+export const SPAWN_TUI_FAILED_PREFIX = "Couldn't open a new session — ";
+
+/** Home surfaces (session-centric IA, DP decision 2026-10-07): the home is
+ * the OPEN SESSION list; runs and remote submission live behind one explicit
+ * history toggle. The remote-submit card keeps its honesty: it sends a task
+ * to Loop and does NOT open a terminal session (the wire contract says so
+ * before the user commits). Owned phrases — no screen-inline literals. */
+export const SESSIONS_VIEW_LABEL = "Sessions";
+export const HISTORY_VIEW_LABEL = "Task history";
+export const LIVE_SESSIONS_HEADING = "Live sessions";
+export const ENDED_SESSIONS_HEADING = "Ended sessions";
+export const SESSION_ROW_LIVE_LABEL = "Live";
+export const SESSION_ROW_ENDED_LABEL = "Ended";
+export const NO_OPEN_SESSIONS_NOTICE = "No open sessions";
+/** Quiet group (task `home-cleanup`): sessions whose live feed the gateway
+ * lost (tap dropped without a shutdown) are neither live nor honestly
+ * ended — they get their own section, never mixed into the ended list.
+ * "Quiet" states the observable fact without internal vocabulary (the
+ * observation/tap machinery never surfaces). */
+export const UNOBSERVED_SESSIONS_HEADING = "Quiet sessions";
+export const SESSION_ROW_QUIET_LABEL = "Quiet";
+/** Ended-list cap toggle (task `home-cleanup`): the recent window renders
+ * by default; the control names the act and carries the hidden count.
+ * Numbers compose with owned fragments (the countsText precedent) — the
+ * count itself is never an inline literal at the call site. */
+export const ENDED_SESSIONS_EXPAND_PREFIX = "Show ";
+export const ENDED_SESSIONS_EXPAND_SUFFIX = " older sessions";
+export const ENDED_SESSIONS_COLLAPSE_LABEL = "Show recent only";
+export const SESSIONS_LIST_ERROR_NOTICE = "Sessions unavailable. Tap to retry.";
+export const REMOTE_SUBMIT_NOTICE =
+  "Sends a task to Loop — this does not open a terminal session.";
+export const REMOTE_PROMPT_PLACEHOLDER = "Describe the task…";
+export const REMOTE_SUBMIT_LABEL = "Start task";
+
+/** Conversation header mode toggle (usability audit v9 §어휘): the chip
+ * names the DESTINATION — the terminal view (same word as the pane screen
+ * title, one vocabulary) or the chat timeline. "Raw" never surfaces. */
+export const CHAT_TOGGLE_LABEL = "Chat";
+
+/** Run detail, empty state (Files tab split viewer): the next action names
+ * where tasks live now — the history list on the Chats tab. */
+export const NO_RUN_OPEN_HINT = "No task open — open one from Task history in Chats.";

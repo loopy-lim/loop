@@ -16,10 +16,12 @@ import { composerTarget, sendComposerText } from "../src/state/composer";
 function fakeClient(options: {
   steer: (runId: string, text: string) => Promise<void>;
   submit: (text: string) => Promise<{ run: { runId: string } }>;
+  input?: (sessionId: string, input: { text: string; attachments: readonly { attachmentId: string }[] }) => Promise<{ inputId: string }>;
 }): GatewayClient {
   return {
     steerRun: options.steer,
     submitPrompt: options.submit,
+    submitSessionInput: options.input,
   } as unknown as GatewayClient;
 }
 
@@ -29,6 +31,60 @@ const draftClearingOnSuccess = (_result: { runId: string | null }): never => {
 };
 
 describe("retry shares the submit path (C10, AC10-3)", () => {
+  test("a live session without a run sends text through session input, not a new run", async () => {
+    const delivered: string[] = [];
+    const client = fakeClient({
+      steer: async () => { throw new Error("unexpected steer"); },
+      submit: async () => { throw new Error("unexpected new run"); },
+      input: async (sessionId, input) => {
+        delivered.push(`${sessionId}:${input.text}:${input.attachments.length}`);
+        return { inputId: "in_1" };
+      },
+    });
+    const failures: string[] = [];
+    await sendComposerText(client, {
+      target: composerTarget({ running: true, runId: null, sessionId: "session-1" }),
+      text: "hello",
+      onSuccess: () => undefined,
+      onFailure: (message) => failures.push(message),
+    });
+    expect(delivered).toEqual(["session-1:hello:0"]);
+    expect(failures).toEqual([]);
+  });
+
+  test("session input refusal surfaces an error without clearing the draft", async () => {
+    const failures: string[] = [];
+    let cleared = false;
+    const client = fakeClient({
+      steer: async () => { throw new Error("unexpected steer"); },
+      submit: async () => { throw new Error("unexpected new run"); },
+      input: async () => { throw new Error("session_not_live"); },
+    });
+    await sendComposerText(client, {
+      target: composerTarget({ running: false, runId: null, sessionId: "ended-session" }),
+      text: "hello",
+      onSuccess: () => { cleared = true; },
+      onFailure: (message) => failures.push(message),
+    });
+    expect(cleared).toBe(false);
+    expect(failures).toEqual(["session_not_live"]);
+  });
+
+  test("a correlated idle session sends text to that session instead of spawning a run", async () => {
+    const delivered: string[] = [];
+    const client = fakeClient({
+      steer: async () => { throw new Error("unexpected steer"); },
+      submit: async () => { throw new Error("unexpected new run"); },
+      input: async (id) => { delivered.push(id); return { inputId: "in_2" }; },
+    });
+    await sendComposerText(client, {
+      target: composerTarget({ running: false, runId: "run-1", sessionId: "session-1" }),
+      text: "again",
+      onSuccess: () => undefined,
+      onFailure: () => undefined,
+    });
+    expect(delivered).toEqual(["session-1"]);
+  });
   test("steer failure → onFailure once, onSuccess never (draft preserved); retry hits the same steer endpoint with the same text", async () => {
     const steerCalls: Array<[string, string]> = [];
     let failFirst = true;

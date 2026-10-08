@@ -20,6 +20,7 @@ import { ViewerBottomSheet } from "../features/viewer-sheet";
 import { resolveSplitLayout } from "../features/split-layout";
 import { RunScreen } from "./RunScreen";
 import { DynText } from "../ui/DynText";
+import { FILES_REPORTS_LABEL, NO_RUN_OPEN_HINT } from "../ui/copy";
 import { colors, press, radius, space, type } from "../ui/tokens";
 
 /** GatewayClient → FileApi adapter: the viewer knows the port, the client
@@ -47,9 +48,7 @@ export function RunSplitScreen(props: {
   const left =
     props.runId === null ? (
       <View style={styles.hintPane}>
-        <DynText style={styles.hint}>
-          No run open — submit a prompt to see its task tree here.
-        </DynText>
+        <DynText style={styles.hint}>{NO_RUN_OPEN_HINT}</DynText>
       </View>
     ) : (
       <View style={styles.treePane}>
@@ -81,7 +80,7 @@ export function RunSplitScreen(props: {
         onPress={() => setSheetOpen(true)}
         activeOpacity={press.activeOpacity}
       >
-        <DynText style={styles.filesButtonText}>Files &amp; reports</DynText>
+        <DynText style={styles.filesButtonText}>{FILES_REPORTS_LABEL}</DynText>
       </TouchableOpacity>
       <ViewerBottomSheet
         open={sheetOpen}

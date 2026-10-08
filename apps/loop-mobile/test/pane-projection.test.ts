@@ -13,6 +13,9 @@ import {
   LIFECYCLE_ONLY_NOTICE,
   PANE_GONE_NOTICE,
   SNAPSHOT_ORIGIN_NOTICE,
+  UNOBSERVED_NOTICE,
+} from "../src/ui/copy";
+import {
   TERMINAL_BACKGROUND,
   TERMINAL_COLUMN_MAX_WIDTH,
   TERMINAL_FONT_FAMILY,
@@ -126,10 +129,19 @@ describe("layout contract (monospace + centered column, D6)", () => {
   });
 
   test("honest-labeling notices exist for snapshot origin and status-only lanes", () => {
-    expect(SNAPSHOT_ORIGIN_NOTICE).toContain("snapshot");
-    expect(SNAPSHOT_ORIGIN_NOTICE).toContain("not a lossless transcript");
+    // The mirror fact stays honest in user language (P1 vocabulary): live
+    // screen mirror, and explicitly NOT a transcript.
+    expect(SNAPSHOT_ORIGIN_NOTICE).toContain("mirror");
+    expect(SNAPSHOT_ORIGIN_NOTICE).toContain("not a full transcript");
     expect(LIFECYCLE_ONLY_NOTICE).toContain("Status only");
     expect(LIFECYCLE_ONLY_NOTICE).toContain("no live output stream");
-    expect(PANE_GONE_NOTICE).toContain("pane closed");
+    expect(UNOBSERVED_NOTICE).toContain("No live feed");
+    expect(UNOBSERVED_NOTICE).toContain("watch limit");
+    expect(PANE_GONE_NOTICE).toContain("Terminal closed");
+    // Internal vocabulary (pane, snapshot, worker, observation cap) never
+    // reaches the notices (usability audit v9 §어휘).
+    for (const notice of [SNAPSHOT_ORIGIN_NOTICE, UNOBSERVED_NOTICE, PANE_GONE_NOTICE]) {
+      expect(notice).not.toMatch(/pane|snapshot|worker|observation cap/i);
+    }
   });
 });

@@ -7,6 +7,9 @@ import {
   LIFECYCLE_ONLY_NOTICE,
   PANE_GONE_NOTICE,
   SNAPSHOT_ORIGIN_NOTICE,
+  UNOBSERVED_NOTICE,
+} from "../ui/copy";
+import {
   TERMINAL_BACKGROUND,
   TERMINAL_COLUMN_MAX_WIDTH,
   TERMINAL_FONT_FAMILY,
@@ -15,7 +18,6 @@ import {
   TERMINAL_PADDING,
   TERMINAL_TEXT_COLOR,
   TERMINAL_VIEWPORT_HEIGHT,
-  UNOBSERVED_NOTICE,
 } from "../ui/terminalLayout";
 import { colors, radius, space, type } from "../ui/tokens";
 import { STREAM_DISCONNECTED_NOTICE } from "../ui/copy";
