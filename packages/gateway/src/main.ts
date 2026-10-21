@@ -82,8 +82,9 @@ import {
   type GatewayConfig,
   type GatewayIdentityMode,
 } from "./config";
-import { defaultHerdrSocketPath, HerdrPaneSource } from "./herdr-pane-source";
+import { defaultHerdrSocketPath, HerdrControlClient, HerdrPaneSource } from "./herdr-pane-source";
 import { HerdrAgentSessionRegistrar } from "./herdr-agent-session";
+import { HerdrStateMonitor } from "./herdr-state";
 import { RunEventLog } from "./events";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -237,6 +238,19 @@ function bootPaneMirror(
       ? null
       : new HerdrAgentSessionRegistrar({ port: source });
   return { mirror, source, agentSessions };
+}
+
+/** Herdr surface env gate (rebuild brief §4): same socket-presence rule as
+ * the pane mirror, with its own off switch. Returns null when disabled or
+ * when the herdr socket is absent (fail-closed, feature off). */
+function bootHerdrSurface(
+  env: Record<string, string | undefined>,
+): { monitor: HerdrStateMonitor; control: HerdrControlClient } | null {
+  if (env.LOOP_GATEWAY_HERDR === "off") return null;
+  const socketPath = env.LOOP_GATEWAY_HERDR_SOCKET ?? defaultHerdrSocketPath();
+  if (!existsSync(socketPath)) return null;
+  const control = new HerdrControlClient({ socketPath });
+  return { monitor: new HerdrStateMonitor(control), control };
 }
 
 /** Steer delivery seam over the generated protocol (decision
@@ -482,6 +496,12 @@ export async function bootGatewayFromEnv(
   const paneSource = paneAssembly?.source ?? null;
   const agentSessions = paneAssembly?.agentSessions ?? null;
 
+  // Herdr surface (rebuild brief docs/design/rebuild-brief-herdr-first.md §4):
+  // state monitor + control port over the same socket gate as the pane
+  // mirror. Fail-observer — an unreachable herdr degrades to an honest
+  // `available: false` view; the app renders an offline state.
+  const herdrSurface = bootHerdrSurface(env);
+
   // GUI conversation v1 (decision 2026-xx-gui-conversation): the third SSE
   // family. The collector is fail-observer — a bind failure disables the
   // conversation surface only; runs and panes above are unaffected.
@@ -547,6 +567,7 @@ export async function bootGatewayFromEnv(
     // Read-only working-directory file surface (split-viewer design §A):
     // rooted at the configured project root, same confinement as spawn.
     files: new FileViewer({ root: projectRoot }),
+    ...(herdrSurface === null ? {} : { herdr: herdrSurface }),
   });
   // Well-known runtime record (loop pair port fallback): written only AFTER
   // startGateway returned, so the file always describes a successful bind and
@@ -570,11 +591,14 @@ export async function bootGatewayFromEnv(
 
   panes?.start();
   agentSessions?.start(AGENT_SESSION_POLL_MS);
+  herdrSurface?.monitor.start();
   const innerStop = server.stop.bind(server); // capture before Object.assign overwrites it
   return Object.assign(server, {
     abortRuns: () => abort.abort(),
     stop: () => {
       innerStop();
+      herdrSurface?.monitor.stop();
+      herdrSurface?.control.close();
       panes?.stop();
       agentSessions?.stop();
       paneSource?.close();

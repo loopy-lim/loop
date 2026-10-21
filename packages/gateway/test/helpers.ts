@@ -13,6 +13,8 @@ import type { GatewayAuthEnvNames, GatewayAuthMode, GatewayIdentityMode } from "
 import { RunEventLog } from "../src/events";
 import type { OutboundFrame } from "../src/events";
 import { FileViewer } from "../src/files";
+import { HerdrControlClient } from "../src/herdr-pane-source";
+import { HerdrStateMonitor } from "../src/herdr-state";
 import { PaneEventLog } from "../src/pane-events";
 import { PaneMirror } from "../src/pane-mirror";
 import type { PaneObservationPort, PaneReading } from "../src/pane-port";
@@ -194,6 +196,9 @@ export type TestGateway = {
   /** Steer spy: records every accepted steer (bridge-call parity, M-GC2). */
   steer: ScriptedSteer;
   attention: ScriptedResolveAttention;
+  /** Herdr surface (rebuild brief §4); null when booted without it. The
+   * monitor is started; tests await `waitUntilHerdr` for the first snapshot. */
+  herdr: { monitor: HerdrStateMonitor; control: HerdrControlClient } | null;
 };
 
 /** Steer port spy (M-GC2: exactly one steer_run bridge call per accepted
@@ -267,6 +272,10 @@ export function bootTestGateway(
      * to wire a FileViewer over a test root; default absent → file routes
      * 404 (fail-closed). */
     files?: { root: string; maxFileBytes?: number } | false;
+    /** Herdr surface (rebuild brief §4): pass a control client (over a fake
+     * herdr unix socket); the monitor is built here. Default absent →
+     * /v1/herdr routes 404 (fail-closed). */
+    herdr?: { control: HerdrControlClient } | false;
   } = {},
 ): TestGateway {
   bootCounter += 1;
@@ -357,6 +366,15 @@ export function bootTestGateway(
   }
   const steer = new ScriptedSteer();
   const attention = new ScriptedResolveAttention();
+  let herdrSurface: { monitor: HerdrStateMonitor; control: HerdrControlClient } | null = null;
+  if (overrides.herdr !== undefined && overrides.herdr !== false) {
+    const monitor = new HerdrStateMonitor(overrides.herdr.control, {
+      pollMs: 60_000,
+      coalesceMs: 5,
+    });
+    herdrSurface = { monitor, control: overrides.herdr.control };
+    monitor.start();
+  }
   const server = startGateway(config, {
     service,
     verifier: new Hs256BearerVerifier(authNames, () => clock.now),
@@ -371,6 +389,7 @@ export function bootTestGateway(
     ...(overrides.files === undefined || overrides.files === false
       ? {}
       : { files: new FileViewer(overrides.files) }),
+    ...(herdrSurface === null ? {} : { herdr: herdrSurface }),
   });
 
   return {
@@ -414,6 +433,7 @@ export function bootTestGateway(
     sessionLog,
     steer,
     attention,
+    herdr: herdrSurface,
   };
 }
 

@@ -8,6 +8,9 @@
 
 import type { RunGraphOutput } from "@loop/protocol";
 import type { GatewayAuthEnvNames, GatewayAuthMode, GatewayConfig } from "./config";
+import type { HerdrAgentStartSpec, HerdrControlClient, HerdrReadSource } from "./herdr-pane-source";
+import { HERDR_DEFAULT_READ_SOURCE, HERDR_READ_SOURCES } from "./herdr-pane-source";
+import type { HerdrStateMonitor } from "./herdr-state";
 import { DEFAULT_AUTH_ENV_NAMES } from "./config";
 import type { OutboundFrame } from "./events";
 import { ProblemError, problemResponse } from "./problem";
@@ -55,6 +58,14 @@ export interface GraphPort {
   get(runId: string): Promise<RunGraphOutput>;
 }
 
+/** Herdr surface port (rebuild brief §4): the state monitor plus the control
+ * client, both implemented over the single herdr socket adapter. Absent →
+ * /v1/herdr routes 404 (fail-closed, like every optional surface). */
+export type HerdrSurface = {
+  monitor: HerdrStateMonitor;
+  control: HerdrControlClient;
+};
+
 export type GatewayServerDeps = {
   service: GatewayService;
   /** Bearer verification; consulted only in "bearer-fallback" mode
@@ -83,6 +94,8 @@ export type GatewayServerDeps = {
    * absent → file routes 404 (fail-closed, same as every optional surface).
    * All path policy lives in the viewer; the server only frames HTTP. */
   files?: FileViewer;
+  /** Herdr surface (rebuild brief §4); absent → /v1/herdr routes 404. */
+  herdr?: HerdrSurface;
 };
 
 export type GatewayServer = {
@@ -279,6 +292,9 @@ async function handle(
   if (segments[1] === "files") {
     return handleFileRoute(request, url, segments, deps, requestId);
   }
+  if (segments[1] === "herdr") {
+    return handleHerdrRoute(request, url, segments, config, deps, requestId);
+  }
   return problemResponse(404, "not_found", requestId);
 }
 
@@ -356,7 +372,12 @@ async function handleRunRoute(
   }
   if (segments.length === 5 && segments[3] === "attention" && segments[4] === "resolve") {
     if (request.method !== "POST") return problemResponse(405, "method_not_allowed", requestId);
-    return handleResolveAttention(request, decodeSegment(routeSegment(segments, 2)), deps, requestId);
+    return handleResolveAttention(
+      request,
+      decodeSegment(routeSegment(segments, 2)),
+      deps,
+      requestId,
+    );
   }
   return problemResponse(404, "not_found", requestId);
 }
@@ -631,6 +652,400 @@ async function handlePaneEvents(
 
 function normalizePath(pathname: string): string {
   return pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+}
+
+// ——— /v1/herdr (rebuild brief docs/design/rebuild-brief-herdr-first.md §4) ———
+// The herdr surface speaks gateway vocabulary only: every herdr protocol
+// shape was mapped inside the single socket adapter. The monitor is the one
+// feed subscriber; these handlers frame HTTP/SSE around its view and the
+// control port. Absent dep → 404 (fail-closed, like every optional surface).
+
+const HERDR_READ_SOURCE_SET = new Set<string>(HERDR_READ_SOURCES);
+const HERDR_READ_FORMATS = new Set(["text", "ansi"]);
+const HERDR_READ_LINES_MAX = 2000;
+const HERDR_PROMPT_MAX_BYTES = 64 * 1024;
+const HERDR_KEYS_MAX = 8;
+const HERDR_KEY_PATTERN = /^[a-z0-9]+(?:\+[a-z0-9]+)*$/i;
+const HERDR_AGENT_KIND_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
+const HERDR_AGENT_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
+
+function herdrStateFrame(state: ReturnType<HerdrStateMonitor["current"]>): {
+  id: string;
+  event: string;
+  data: unknown;
+} {
+  return { id: `herdr-${state.version}`, event: "herdr_state", data: state };
+}
+
+async function handleHerdrRoute(
+  request: Request,
+  url: URL,
+  segments: string[],
+  config: GatewayConfig,
+  deps: GatewayServerDeps,
+  requestId: string,
+): Promise<Response> {
+  const herdr = deps.herdr;
+  if (herdr === undefined) return problemResponse(404, "not_found", requestId);
+  const { monitor, control } = herdr;
+
+  // GET /v1/herdr/state — the full mapped view (honest `available: false`
+  // when herdr is unreachable; never an error for reachability).
+  if (segments.length === 3 && segments[2] === "state") {
+    if (request.method !== "GET") return problemResponse(405, "method_not_allowed", requestId);
+    return jsonResponse(monitor.current(), 200, requestId);
+  }
+
+  // GET /v1/herdr/events — SSE state feed. State frames are idempotent full
+  // snapshots addressed by the monitor version, so reconnects never need a
+  // cursor: the intro always carries fresh state (Last-Event-ID is ignored).
+  if (segments.length === 3 && segments[2] === "events") {
+    if (request.method !== "GET") return problemResponse(405, "method_not_allowed", requestId);
+    const accept = request.headers.get("accept") ?? "";
+    if (!accept.toLowerCase().includes("text/event-stream")) {
+      return problemResponse(406, "stream_not_acceptable", requestId);
+    }
+    const stream = new SseClientStream({
+      maxFrames: config.queueMaxFrames ?? QUEUE_MAX_FRAMES,
+      maxBytes: config.queueMaxBytes ?? QUEUE_MAX_BYTES,
+    });
+    stream.write(herdrStateFrame(monitor.current()), "control");
+    const unsubscribe: { current: (() => void) | null } = { current: null };
+    const transport = sseTransport(stream, config, unsubscribe, request.signal, requestId);
+    unsubscribe.current = monitor.subscribe((state) => {
+      // State frames are idempotent full snapshots; a queue overflow closes
+      // the stream and the client reconnects straight into a fresh intro.
+      stream.write(herdrStateFrame(state), "control");
+      transport.flush();
+    });
+    return transport.response;
+  }
+
+  // GET /v1/herdr/panes/{paneId}/read?lines=&source=&format=
+  if (segments.length === 5 && segments[2] === "panes" && segments[4] === "read") {
+    if (request.method !== "GET") return problemResponse(405, "method_not_allowed", requestId);
+    const paneId = decodeHerdrSegment(routeSegment(segments, 3));
+    const params = url.searchParams;
+    const lines = parseBoundedInt(params.get("lines"), 400, 1, HERDR_READ_LINES_MAX);
+    const source = params.get("source") ?? HERDR_DEFAULT_READ_SOURCE;
+    if (!HERDR_READ_SOURCE_SET.has(source)) {
+      throw invalid({ source: "source must be visible, recent, or recent_unwrapped" });
+    }
+    const format = params.get("format") ?? "text";
+    if (!HERDR_READ_FORMATS.has(format)) {
+      throw invalid({ format: "format must be text or ansi" });
+    }
+    const reading = await control.readPane(paneId, {
+      lines,
+      source: source as HerdrReadSource,
+      format: format as "text" | "ansi",
+    });
+    if (reading === null) return problemResponse(404, "pane_not_found", requestId);
+    return jsonResponse(reading, 200, requestId);
+  }
+
+  // POST /v1/herdr/panes/{paneId}/prompt — deliver text to the pane's agent.
+  if (segments.length === 5 && segments[2] === "panes" && segments[4] === "prompt") {
+    if (request.method !== "POST") return problemResponse(405, "method_not_allowed", requestId);
+    const paneId = decodeHerdrSegment(routeSegment(segments, 3));
+    const body = await readJsonBody(request);
+    const text = body.text;
+    if (typeof text !== "string" || text.length === 0) {
+      throw invalid({ text: "text is required" });
+    }
+    if (Buffer.byteLength(text, "utf8") > HERDR_PROMPT_MAX_BYTES) {
+      return problemResponse(413, "prompt_too_large", requestId);
+    }
+    const outcome = await control.promptAgent(paneId, text);
+    if (outcome === "blocked") return problemResponse(409, "agent_blocked", requestId);
+    if (outcome === "not_found") return problemResponse(404, "agent_not_found", requestId);
+    if (outcome === "unavailable") return problemResponse(503, "herdr_unavailable", requestId);
+    return jsonResponse({ paneId, accepted: true }, 202, requestId);
+  }
+
+  // POST /v1/herdr/panes/{paneId}/keys — logical keys (esc, ctrl+c, …).
+  if (segments.length === 5 && segments[2] === "panes" && segments[4] === "keys") {
+    if (request.method !== "POST") return problemResponse(405, "method_not_allowed", requestId);
+    const paneId = decodeHerdrSegment(routeSegment(segments, 3));
+    const body = await readJsonBody(request);
+    const keys = body.keys;
+    if (!Array.isArray(keys) || keys.length === 0 || keys.length > HERDR_KEYS_MAX) {
+      throw invalid({ keys: `keys must be 1-${HERDR_KEYS_MAX} logical key names` });
+    }
+    for (const key of keys) {
+      if (typeof key !== "string" || !HERDR_KEY_PATTERN.test(key)) {
+        throw invalid({ keys: "each key must be a logical key name like esc or ctrl+c" });
+      }
+    }
+    const delivered = await control.sendAgentKeys(paneId, keys);
+    if (!delivered) return problemResponse(503, "herdr_unavailable", requestId);
+    return new Response(null, { status: 204, headers: { "X-Request-Id": requestId } });
+  }
+
+  // POST /v1/herdr/panes/{paneId}/focus — foreground the pane on the desktop.
+  if (segments.length === 5 && segments[2] === "panes" && segments[4] === "focus") {
+    if (request.method !== "POST") return problemResponse(405, "method_not_allowed", requestId);
+    const paneId = decodeHerdrSegment(routeSegment(segments, 3));
+    const focused = await control.focusPane(paneId);
+    if (!focused) return problemResponse(503, "herdr_unavailable", requestId);
+    return new Response(null, { status: 204, headers: { "X-Request-Id": requestId } });
+  }
+
+  // POST /v1/herdr/agents/start — resolve a target tab, find or split a
+  // shell pane, and start the requested agent kind there.
+  if (segments.length === 4 && segments[2] === "agents" && segments[3] === "start") {
+    if (request.method !== "POST") return problemResponse(405, "method_not_allowed", requestId);
+    const body = await readJsonBody(request);
+    const kind = body.kind;
+    if (typeof kind !== "string" || !HERDR_AGENT_KIND_PATTERN.test(kind)) {
+      throw invalid({ kind: "kind must be a supported agent kind name" });
+    }
+    if (body.name !== undefined && body.name !== null) {
+      if (typeof body.name !== "string" || !HERDR_AGENT_NAME_PATTERN.test(body.name)) {
+        throw invalid({ name: "name must match [a-z][a-z0-9_-]{0,31}" });
+      }
+    }
+    if (
+      body.workspaceId !== undefined &&
+      body.workspaceId !== null &&
+      typeof body.workspaceId !== "string"
+    ) {
+      throw invalid({ workspaceId: "workspaceId must be a string" });
+    }
+    if (body.tabId !== undefined && body.tabId !== null && typeof body.tabId !== "string") {
+      throw invalid({ tabId: "tabId must be a string" });
+    }
+    if (body.cwd !== undefined && body.cwd !== null && typeof body.cwd !== "string") {
+      throw invalid({ cwd: "cwd must be a string" });
+    }
+    const started = await startHerdrAgent(monitor, control, {
+      kind,
+      name: typeof body.name === "string" ? body.name : null,
+      workspaceId: typeof body.workspaceId === "string" ? body.workspaceId : null,
+      tabId: typeof body.tabId === "string" ? body.tabId : null,
+      cwd: typeof body.cwd === "string" ? body.cwd : null,
+      createWorkspace: body.createWorkspace === true,
+    });
+    if (started === null) return problemResponse(503, "herdr_unavailable", requestId);
+    if (started.kind === "rejected") {
+      return problemResponse(409, "agent_start_rejected", requestId, {
+        code: started.code ?? "unknown",
+      });
+    }
+    return jsonResponse(started.value, 201, requestId);
+  }
+
+  // POST /v1/herdr/workspaces — create a workspace (root tab + pane).
+  if (segments.length === 3 && segments[2] === "workspaces") {
+    if (request.method !== "POST") return problemResponse(405, "method_not_allowed", requestId);
+    const body = await readJsonBody(request);
+    if (body.label !== undefined && body.label !== null && typeof body.label !== "string") {
+      throw invalid({ label: "label must be a string" });
+    }
+    if (body.cwd !== undefined && body.cwd !== null && typeof body.cwd !== "string") {
+      throw invalid({ cwd: "cwd must be a string" });
+    }
+    const created = await control.createWorkspace(
+      typeof body.label === "string" && body.label.length > 0 ? body.label : null,
+      typeof body.cwd === "string" && body.cwd.length > 0 ? body.cwd : null,
+    );
+    if (created === null) return problemResponse(503, "herdr_unavailable", requestId);
+    return jsonResponse(created, 201, requestId);
+  }
+
+  // GET /v1/herdr/integrations — installed agent kinds for the picker.
+  if (segments.length === 3 && segments[2] === "integrations") {
+    if (request.method !== "GET") return problemResponse(405, "method_not_allowed", requestId);
+    const integrations = await control.listIntegrations();
+    if (integrations === null) return problemResponse(503, "herdr_unavailable", requestId);
+    return jsonResponse({ integrations }, 200, requestId);
+  }
+
+  return problemResponse(404, "not_found", requestId);
+}
+
+type HerdrStartSuccess = {
+  paneId: string;
+  name: string | null;
+  kind: string;
+  ready: boolean;
+  createdPane: boolean;
+  workspaceId: string | null;
+  tabId: string | null;
+};
+
+/** Start orchestration (rebuild brief §4): resolve the target tab from the
+ * explicit ids or the focused workspace, start in an available shell pane,
+ * and fall back to a split when the tab has none. Returns null when herdr is
+ * unreachable or the state view is not available yet. */
+async function startHerdrAgent(
+  monitor: HerdrStateMonitor,
+  control: HerdrControlClient,
+  spec: {
+    kind: string;
+    name: string | null;
+    workspaceId: string | null;
+    tabId: string | null;
+    cwd: string | null;
+    createWorkspace: boolean;
+  },
+): Promise<
+  | { kind: "started"; value: HerdrStartSuccess }
+  | { kind: "rejected"; code: string | null; message: string | null }
+  | null
+> {
+  let state = monitor.current();
+  if (!state.available) return null;
+
+  // 0) Explicit "new workspace" request: create it and start in its root.
+  if (spec.createWorkspace && spec.tabId === null) {
+    const created = await control.createWorkspace(null, spec.cwd);
+    if (created === null) return null;
+    return await startInPane(
+      control,
+      created.rootPaneId,
+      created.workspaceId,
+      created.tabId,
+      spec,
+      false,
+    );
+  }
+
+  // 1) Resolve the target tab. An explicit id the view has not seen yet (just
+  // created through another connection) re-hydrates the view once before the
+  // honest 404.
+  if (
+    (spec.tabId !== null && !state.tabs.some((tab) => tab.id === spec.tabId)) ||
+    (spec.tabId === null &&
+      spec.workspaceId !== null &&
+      !state.workspaces.some((workspace) => workspace.id === spec.workspaceId))
+  ) {
+    state = await monitor.refresh();
+  }
+  let workspaceId: string | null = spec.workspaceId;
+  let tabId: string | null = spec.tabId;
+  if (tabId !== null && !state.tabs.some((tab) => tab.id === tabId)) {
+    throw new ProblemError(404, "not_found");
+  }
+  if (tabId !== null) {
+    const tab = state.tabs.find((entry) => entry.id === tabId);
+    workspaceId = tab?.workspaceId ?? workspaceId;
+  } else if (workspaceId !== null) {
+    if (!state.workspaces.some((workspace) => workspace.id === workspaceId)) {
+      throw new ProblemError(404, "not_found");
+    }
+    tabId =
+      state.workspaces.find((workspace) => workspace.id === workspaceId)?.activeTabId ??
+      state.tabs.find((tab) => tab.workspaceId === workspaceId)?.id ??
+      null;
+  } else {
+    workspaceId = state.focused.workspaceId ?? state.workspaces[0]?.id ?? null;
+    if (workspaceId === null) {
+      // No workspace exists: create one and start in its root pane.
+      const created = await control.createWorkspace(null, spec.cwd);
+      if (created === null) return null;
+      return await startInPane(
+        control,
+        created.rootPaneId,
+        created.workspaceId,
+        created.tabId,
+        spec,
+        false,
+      );
+    }
+    tabId =
+      state.workspaces.find((workspace) => workspace.id === workspaceId)?.activeTabId ??
+      state.tabs.find((tab) => tab.workspaceId === workspaceId)?.id ??
+      null;
+  }
+  if (tabId === null) return null;
+
+  // 2) Find a candidate shell pane (no agent detected/managed in it). herdr
+  // has the final say on availability — a rejected candidate falls back to
+  // one split from the candidate before the rejection surfaces.
+  const tabPanes = state.panes.filter((pane) => pane.tabId === tabId);
+  const candidate = tabPanes.find((pane) => pane.agent === null) ?? null;
+  if (candidate !== null) {
+    const outcome = await startInPane(control, candidate.id, workspaceId, tabId, spec, false);
+    if (outcome.kind !== "rejected") return outcome;
+  }
+
+  // 3) Fall back: split the first pane of the tab and start there.
+  const anchor = tabPanes[tabPanes.length - 1] ?? null;
+  if (anchor === null) return null;
+  const splitPaneId = await control.splitPane(anchor.id, {
+    direction: "right",
+    cwd: spec.cwd ?? anchor.cwd,
+  });
+  if (splitPaneId === null) return null;
+  return await startInPane(control, splitPaneId, workspaceId, tabId, spec, true);
+}
+
+async function startInPane(
+  control: HerdrControlClient,
+  paneId: string,
+  workspaceId: string | null,
+  tabId: string | null,
+  spec: { kind: string; name: string | null; cwd: string | null },
+  createdPane: boolean,
+): Promise<
+  | { kind: "started"; value: HerdrStartSuccess }
+  | { kind: "rejected"; code: string | null; message: string | null }
+> {
+  const startSpec: HerdrAgentStartSpec = {
+    kind: spec.kind,
+    paneId,
+    name: spec.name,
+    timeoutMs: 30_000,
+  };
+  const outcome = await control.startAgent(startSpec);
+  if (!outcome.ok) {
+    return { kind: "rejected", code: outcome.code, message: outcome.message };
+  }
+  return {
+    kind: "started",
+    value: {
+      paneId: outcome.paneId,
+      name: outcome.name,
+      kind: spec.kind,
+      ready: outcome.ready,
+      createdPane,
+      workspaceId,
+      tabId,
+    },
+  };
+}
+
+async function readJsonBody(request: Request): Promise<Record<string, unknown>> {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw invalid({ "content-type": "application/json is required" });
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await request.text());
+  } catch {
+    throw invalid({ body: "must be valid JSON" });
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw invalid({ body: "must be a JSON object" });
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function parseBoundedInt(raw: string | null, fallback: number, min: number, max: number): number {
+  if (raw === null || raw.length === 0) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function decodeHerdrSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    throw new ProblemError(404, "pane_not_found");
+  }
 }
 
 function decodeSegment(segment: string): string {

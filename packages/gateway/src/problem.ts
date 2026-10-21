@@ -40,12 +40,17 @@ export type ProblemCode =
   | "spawn_cwd_missing"
   | "spawn_tmux_unavailable"
   | "spawn_tmux_session_missing"
-  | "spawn_launch_failed";
+  | "spawn_launch_failed"
+  | "herdr_unavailable"
+  | "agent_blocked"
+  | "agent_not_found"
+  | "agent_start_rejected";
 
 const RETRYABLE: ReadonlySet<ProblemCode> = new Set([
   "capacity_exhausted",
   "planner_unavailable",
   "runtime_unavailable",
+  "herdr_unavailable",
 ]);
 
 const TITLES: Record<ProblemCode, string> = {
@@ -81,6 +86,10 @@ const TITLES: Record<ProblemCode, string> = {
   spawn_tmux_unavailable: "tmux unavailable",
   spawn_tmux_session_missing: "tmux session missing",
   spawn_launch_failed: "Spawn launch failed",
+  herdr_unavailable: "Herdr unavailable",
+  agent_blocked: "Agent is waiting on an approval dialog",
+  agent_not_found: "Agent not found",
+  agent_start_rejected: "Agent start rejected",
 };
 
 function kebab(code: string): string {
