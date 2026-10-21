@@ -93,9 +93,11 @@ export default function App() {
     }
   };
   useEffect(() => {
-    const subscription = Linking.addEventListener("url", (event) => adoptPairUrl(event.url));
+    const subscription = Linking.addEventListener("url", (event) => {
+      if (event.url !== undefined) adoptPairUrl(event.url);
+    });
     void Linking.getInitialURL().then((url) => {
-      if (url !== null) adoptPairUrl(url);
+      if (url != null) adoptPairUrl(url);
     });
     return () => subscription.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -111,7 +113,7 @@ export default function App() {
   const chrome = (children: React.ReactNode): React.ReactNode => (
     <SafeAreaProvider>
       <View style={styles.root}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.bg} hidden={false} />
+        <StatusBar barStyle="light-content" hidden={false} />
         {children}
       </View>
     </SafeAreaProvider>

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { Camera, useCameraDevice, useCodeScanner, useCameraPermission } from "react-native-vision-camera";
+import { Camera, useCameraPermission, useObjectOutput } from "react-native-vision-camera";
 
 import { ScanGate, type ScannerPermission } from "../features/qrScanModel";
 import { mapCameraPermission } from "../features/qrScanModel";
@@ -30,40 +30,35 @@ export function QRScannerScreen(props: {
   onCancel: () => void;
 }) {
   const insets = useSafeAreaInsets();
-  // v4's hook exposes hasPermission/requestPermission; the raw status comes
-  // from Camera so "denied forever" (Settings) is distinguishable from the
-  // initial not-determined ask.
-  const { hasPermission, requestPermission } = useCameraPermission();
-  const [permission, setPermission] = useState<ScannerPermission>(() =>
-    hasPermission ? "ready" : mapCameraPermission(Camera.getCameraPermissionStatus()),
-  );
+  // v5's hook exposes the reactive status, so "denied forever" (Settings)
+  // is distinguishable from the initial not-determined ask without any
+  // imperative status probe.
+  const { status, hasPermission, requestPermission } = useCameraPermission();
+  const permission: ScannerPermission = hasPermission
+    ? "ready"
+    : mapCameraPermission(status);
   const [invalidMessage, setInvalidMessage] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState(false);
   const pairedRef = useRef(false);
   // One gate per mount: identical frames inside 1.5s are the same physical
   // scan; a re-aim at another code is evaluated immediately.
   const gateRef = useRef(new ScanGate(1500));
-  const device = useCameraDevice("back");
 
-  // Request once when still undetermined; re-fold whenever the hook's
-  // permission flips (it also refreshes on AppState changes, so
-  // Settings→allow→return recovers without remount).
+  // Request once when still undetermined; the hook stays reactive across
+  // AppState changes, so Settings→allow→return recovers without remount.
   useEffect(() => {
-    if (!hasPermission && Camera.getCameraPermissionStatus() === "not-determined") {
-      void requestPermission();
-    }
-  }, [hasPermission, requestPermission]);
-  useEffect(() => {
-    setPermission(
-      hasPermission ? "ready" : mapCameraPermission(Camera.getCameraPermissionStatus()),
-    );
-  }, [hasPermission]);
+    if (!hasPermission && status === "not-determined") void requestPermission();
+  }, [hasPermission, status, requestPermission]);
 
-  const codeScanner = useCodeScanner({
-    codeTypes: ["qr"],
-    onCodeScanned: (codes) => {
+  // AVCaptureMetadataOutput 기반 코어 QR 감지 — MLKit 프리빌트(arm64 슬라이스가
+  // 기기 전용)를 들이지 않고 시뮬레이터와 실기기 모두를 커버한다.
+  const objectOutput = useObjectOutput({
+    types: ["qr"],
+    onObjectsScanned: (objects) => {
       if (pairedRef.current) return; // one accepted scan per screen life
-      const value = codes[0]?.value;
-      if (value === undefined) return;
+      const first = objects[0];
+      const value = first !== undefined && "value" in first ? first.value : undefined;
+      if (typeof value !== "string") return;
       const outcome = gateRef.current.offer(value, Date.now());
       if (outcome.kind === "idle") return;
       if (outcome.kind === "invalid") {
@@ -76,12 +71,18 @@ export function QRScannerScreen(props: {
     },
   });
 
-  const cameraActive = permission === "ready" && device != null && !pairedRef.current;
+  const cameraActive = permission === "ready" && !pairedRef.current;
 
   return (
     <View style={styles.root}>
       {cameraActive ? (
-        <Camera style={StyleSheet.absoluteFill} device={device} isActive codeScanner={codeScanner} />
+        <Camera
+          style={StyleSheet.absoluteFill}
+          device="back"
+          isActive
+          outputs={[objectOutput]}
+          onError={() => setCameraError(true)}
+        />
       ) : null}
 
       {/* Scan target: a quiet centered frame over the preview (guidance §4 —
@@ -105,7 +106,7 @@ export function QRScannerScreen(props: {
           <Text style={styles.blocked}>
             Camera access is off. Enable it in Settings → LoopMobile, or enter host/port manually.
           </Text>
-        ) : permission === "checking" || device == null ? (
+        ) : permission === "checking" || cameraError ? (
           <Text style={styles.hint}>Starting camera…</Text>
         ) : (
           <Text style={styles.hint}>Point at the loop://connect QR code</Text>
@@ -120,7 +121,7 @@ const FRAME = 240;
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  frameLayer: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  frameLayer: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" },
   frame: {
     width: FRAME,
     height: FRAME,

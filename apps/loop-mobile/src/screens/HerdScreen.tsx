@@ -56,7 +56,7 @@ export function HerdScreen(props: {
           </View>
         )}
         ListEmptyComponent={
-          loading ? null : <HerdEmpty state={state} />
+          loading ? undefined : <HerdEmpty state={state} />
         }
         refreshControl={
           <NativeRefresh

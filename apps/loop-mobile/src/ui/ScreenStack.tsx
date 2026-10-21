@@ -259,10 +259,18 @@ const styles = StyleSheet.create({
   // SPLIT the column with the tab screen (the bug where pushed screens
   // covered only half the stage).
   fill: {
-    ...StyleSheet.absoluteFillObject,
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   layer: {
-    ...StyleSheet.absoluteFillObject,
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: colors.bg,
   },
   layerEdge: {

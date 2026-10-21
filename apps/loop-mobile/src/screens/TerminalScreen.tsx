@@ -4,7 +4,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View, type ScrollViewInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { copy } from "../copy";
@@ -59,7 +59,7 @@ export function TerminalScreen(props: {
     void refresh();
   }, [pane, refresh]);
 
-  const scrollRef = useRef<ScrollView | null>(null);
+  const scrollRef = useRef<ScrollViewInstance | null>(null);
   useEffect(() => {
     if (follow.following) scrollRef.current?.scrollToEnd({ animated: true });
   }, [transcript.text, follow.following]);

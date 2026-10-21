@@ -13,22 +13,24 @@
     "pod": "cd ios && pod install"
   },
   "dependencies": {
-    "react": "19.1.0",
-    "react-native": "0.81.4",
+    "react": "19.3.0",
+    "react-native": "0.88.0",
+    "react-native-haptic-feedback": "^3.0.0",
     "react-native-keychain": "^10.0.0",
-    "react-native-safe-area-context": "^5.6.1",
-    "react-native-haptic-feedback": "^2.3.3",
-    "react-native-vision-camera": "^4.7.3"
+    "react-native-nitro-image": "^0.15.2",
+    "react-native-nitro-modules": "^0.37.1",
+    "react-native-safe-area-context": "^5.10.1",
+    "react-native-vision-camera": "^5.2.3"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@babel/preset-env": "^7.25.3",
     "@babel/runtime": "^7.25.0",
-    "@react-native-community/cli": "20.0.0",
-    "@react-native-community/cli-platform-ios": "20.0.0",
-    "@react-native/babel-preset": "0.81.4",
-    "@react-native/metro-config": "0.81.4",
-    "@types/react": "19.1.16",
+    "@react-native-community/cli": "20.2.0",
+    "@react-native-community/cli-platform-ios": "20.2.0",
+    "@react-native/babel-preset": "0.88.0",
+    "@react-native/metro-config": "0.88.0",
+    "@types/react": "^19.2.0",
     "react-test-renderer": "19.1.0"
   },
   "engines": {

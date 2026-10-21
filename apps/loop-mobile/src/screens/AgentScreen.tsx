@@ -18,6 +18,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  type ScrollViewInstance,
   StyleSheet,
   Text,
   TextInput,
@@ -101,7 +102,7 @@ export function AgentScreen(props: {
 
   // Follow the tail when new transcript text lands while the user is at the
   // bottom (follow-scroll machine owns the verdict).
-  const scrollRef = useRef<ScrollView | null>(null);
+  const scrollRef = useRef<ScrollViewInstance | null>(null);
   useEffect(() => {
     if (follow.following) scrollRef.current?.scrollToEnd({ animated: true });
   }, [transcript.text, follow.following]);

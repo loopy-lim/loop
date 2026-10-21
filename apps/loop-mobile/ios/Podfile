@@ -31,5 +31,18 @@ target 'LoopMobile' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+    # iOS 26+ 시뮬레이터 런타임은 arm64 전용 — podspec이 심은 인텔 시대의
+    # EXCLUDED_ARCHS arm64 제외는 무효화한다(남으면 슬라이스가 x86_64만 나와
+    # installd가 설치를 거절한다).
+    installer.pods_project.targets.each do |t|
+      t.build_configurations.each do |cfg|
+        cfg.build_settings.delete("EXCLUDED_ARCHS[sdk=iphonesimulator*]")
+      end
+    end
+    # podspec이 xcconfig에 심은 것까지 전부 — 생성된 파일을 직접 스크럽한다.
+    Dir.glob(Pod::Config.instance.installation_root.join("Pods/Target Support Files/**/*.xcconfig")).each do |path|
+      text = File.read(path)
+      File.write(path, text.gsub(/^EXCLUDED_ARCHS\[sdk=iphonesimulator\*\].*\n/, "")) if text.include?("EXCLUDED_ARCHS")
+    end
   end
 end
