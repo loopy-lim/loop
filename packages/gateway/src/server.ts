@@ -755,7 +755,7 @@ async function handleHerdrRoute(
     if (pane === undefined || pane.agent === null || pane.cwd === null) {
       return problemResponse(404, "conversation_unavailable", requestId);
     }
-    const conversation = resolveAgentConversation(pane.agent, pane.cwd);
+    const conversation = resolveAgentConversation(pane.agent, pane.cwd, undefined, pane.agentSession);
     if (conversation === null) return problemResponse(404, "conversation_unavailable", requestId);
     return jsonResponse({ paneId, ...conversation }, 200, requestId);
   }

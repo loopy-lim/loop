@@ -217,11 +217,22 @@ function claudeTurns(file: string): AgentConversationTurn[] | null {
   return turns;
 }
 
-function claudeConversation(kind: string, cwd: string, home: string): AgentConversation | null {
+function claudeConversation(
+  kind: string,
+  cwd: string,
+  home: string,
+  session: AgentSessionRef | null,
+): AgentConversation | null {
   const dir = join(home, ".claude", "projects", claudeProjectDirName(cwd));
-  const newest = newestEntries(dir, ".jsonl", 1)[0];
-  if (newest === undefined) return null;
-  const source = join(dir, newest);
+  let source: string | null = null;
+  if (session !== null && session.kind === "id") {
+    source = claudeSessionById(home, cwd, session.value); // the pane's own session
+  }
+  if (source === null) {
+    const newest = newestEntries(dir, ".jsonl", 1)[0];
+    if (newest === undefined) return null;
+    source = join(dir, newest);
+  }
   const turns = claudeTurns(source);
   if (turns === null || turns.length === 0) return null;
   const truncated = turns.length > TURN_BUDGET;
@@ -403,9 +414,21 @@ function codexTurns(file: string): AgentConversationTurn[] | null {
   return turns;
 }
 
-function codexConversation(kind: string, cwd: string, home: string): AgentConversation | null {
-  for (const file of newestCodexRollouts(home)) {
-    if (codexSessionCwd(file) !== cwd) continue;
+function codexConversation(
+  kind: string,
+  cwd: string,
+  home: string,
+  session: AgentSessionRef | null,
+): AgentConversation | null {
+  const rollouts = newestCodexRollouts(home);
+  // herdr's codex integration reports the session id; rollout filenames end
+  // with it, so the pane's own file matches deterministically.
+  const named =
+    session !== null && session.kind === "id"
+      ? rollouts.find((file) => file.includes(session.value))
+      : undefined;
+  for (const file of named !== undefined ? [named] : rollouts) {
+    if (named === undefined && codexSessionCwd(file) !== cwd) continue;
     const turns = codexTurns(file);
     if (turns === null || turns.length === 0) continue;
     const truncated = turns.length > TURN_BUDGET;
@@ -473,6 +496,11 @@ function agyConversation(kind: "agy", cwd: string, home: string): AgentConversat
 
 // ——— resolution ———
 
+/** herdr's agent_session record (the integration-reported session identity:
+ * kind "id"|"path", opaque value). When present it keys the session file
+ * deterministically; cwd+mtime stays the fallback. */
+export type AgentSessionRef = { kind: string; value: string };
+
 /** Resolve the newest structured conversation for a herdr pane. Returns null
  * when the kind has no adapter or no usable source — the caller answers 404
  * and the app keeps its ANSI transcript. */
@@ -480,11 +508,23 @@ export function resolveAgentConversation(
   kind: string,
   cwd: string,
   deps?: AgentConversationDeps,
+  session?: AgentSessionRef | null,
 ): AgentConversation | null {
   const home = homeDir(deps);
   if (home === null || cwd.length === 0) return null;
-  if (kind === "claude") return claudeConversation(kind, cwd, home);
-  if (kind === "codex") return codexConversation(kind, cwd, home);
+  if (kind === "claude") return claudeConversation(kind, cwd, home, session ?? null);
+  if (kind === "codex") return codexConversation(kind, cwd, home, session ?? null);
   if (kind === "agy") return agyConversation("agy", cwd, home);
   return null;
+}
+
+/** A readable claude session file for an explicit session id, else null. */
+function claudeSessionById(home: string, cwd: string, sessionId: string): string | null {
+  const file = join(home, ".claude", "projects", claudeProjectDirName(cwd), `${sessionId}.jsonl`);
+  try {
+    statSync(file);
+    return file;
+  } catch {
+    return null;
+  }
 }

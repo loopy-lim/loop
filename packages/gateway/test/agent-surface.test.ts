@@ -123,6 +123,24 @@ test("claude: error tool_result folds to error state", () => {
   expect(tool.state).toBe("error");
 });
 
+test("claude: herdr's session id keys the pane's own file over the newest", () => {
+  const dir = join(home, ".claude", "projects", claudeProjectDirName("/tmp/proj-s"));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "newest.jsonl"), `${JSON.stringify({ type: "user", uuid: "u-n", message: { role: "user", content: "최신 파일" } })}\n`);
+  writeFileSync(join(dir, "pinned.jsonl"), `${JSON.stringify({ type: "user", uuid: "u-p", message: { role: "user", content: "페인 고정 세션" } })}\n`);
+  const later = new Date("2026-10-21T12:00:00Z");
+  utimesSync(join(dir, "newest.jsonl"), later, later);
+
+  const conversation = resolveAgentConversation("claude", "/tmp/proj-s", { home }, {
+    kind: "id",
+    value: "pinned",
+  });
+  if (conversation === null || conversation.surface !== "turns") throw new Error("expected turns");
+  expect(conversation.source.endsWith("pinned.jsonl")).toBe(true);
+  const first = conversation.turns[0];
+  expect(first && first.kind === "user" ? first.text : null).toBe("페인 고정 세션");
+});
+
 test("claude: no project dir → null", () => {
   expect(resolve("claude", "/tmp/never existed")).toBeNull();
 });

@@ -443,6 +443,10 @@ export type HerdrPaneView = {
   /** Decimal string (u64 rule). */
   revision: string;
   focused: boolean;
+  /** herdr's agent_session record for the pane (integration-reported session
+   * id/path) — the conversation adapter's deterministic key. Null when the
+   * integration hasn't reported one. */
+  agentSession: { kind: string; value: string } | null;
 };
 
 export type HerdrSnapshotView = {
@@ -1043,7 +1047,18 @@ function mapPane(entry: Record<string, unknown>): HerdrPaneView | null {
         ? revision.toString(10)
         : "0",
     focused: entry.focused === true,
+    agentSession: mapAgentSession(entry.agent_session),
   };
+}
+
+/** herdr's agent_session passthrough (kind "id"|"path", opaque value). */
+function mapAgentSession(value: unknown): { kind: string; value: string } | null {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value as Record<string, unknown>;
+  const kind = record.kind;
+  const v = record.value;
+  if (typeof kind !== "string" || typeof v !== "string" || v.length === 0) return null;
+  return { kind, value: v };
 }
 
 function mapAgentStart(result: unknown, fallbackPaneId: string): HerdrAgentStartOutcome | null {
