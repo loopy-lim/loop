@@ -58,6 +58,12 @@ describe("chatBody", () => {
     const body = chatBody(PANE, summaryConversation);
     expect(body.view).toBe("summary");
   });
+
+  test("agy with turns renders turns view", () => {
+    const agyTurns: HerdrConversation = { ...turnsConversation, kind: "agy" };
+    const body = chatBody(PANE, agyTurns);
+    expect(body.view).toBe("turns");
+  });
 });
 
 describe("nextConversation", () => {

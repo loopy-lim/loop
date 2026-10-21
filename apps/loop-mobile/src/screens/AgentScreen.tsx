@@ -13,7 +13,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { memo } from "react";
 import {
+  FlatList,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -37,11 +39,13 @@ import { paneDisplayName } from "../herdr/store";
 import type { HerdrAppState, HerdrStore } from "../herdr/store";
 import { impactLight } from "../ui/haptics";
 import { Icon } from "../ui/Icon";
+import type { IconRole } from "../ui/glyphs";
 import { AnimatedView, Entrance, PressableScale, springTo, useMotionValue } from "../ui/motion";
 import { colors, radius, space, type as typeScale, COLUMN_GUTTER } from "../ui/tokens";
 import { useFollowScroll } from "../ui/followScroll";
 import { useKeyboardVisible } from "../ui/useKeyboardVisible";
 import { useStore } from "../app/storeContext";
+import { MarkdownView } from "../features/markdown-view";
 
 const READ_LINES = 400;
 
@@ -67,6 +71,7 @@ export function AgentScreen(props: {
   const [segment, setSegment] = useState<"chat" | "terminal">("chat");
   const [transcript, setTranscript] = useState<Transcript>({ ...EMPTY_TRANSCRIPT, paneId: props.paneId });
   const [conversation, setConversation] = useState<HerdrConversation | null>(null);
+  const body: ChatBody = segment === "chat" ? chatBody(props.paneId, conversation) : { view: "transcript" };
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [composerValue, setComposerValue] = useState("");
@@ -111,12 +116,27 @@ export function AgentScreen(props: {
     void refresh();
   }, [pane, refresh]);
 
-  // Follow the tail when new transcript text lands while the user is at the
-  // bottom (follow-scroll machine owns the verdict).
+  // Follow the tail when new content lands while the user is at the bottom
+  // (follow-scroll machine owns the verdict); detached users stay anchored
+  // where they are — appended content grows below without moving the view.
   const scrollRef = useRef<ScrollViewInstance | null>(null);
+  const listRef = useRef<FlatList<HerdrConversationTurn> | null>(null);
   useEffect(() => {
-    if (follow.following) scrollRef.current?.scrollToEnd({ animated: true });
-  }, [transcript.text, conversation, follow.following]);
+    if (!follow.following) return;
+    if (body.view === "turns") listRef.current?.scrollToEnd({ animated: true });
+    else scrollRef.current?.scrollToEnd({ animated: true });
+  }, [transcript.text, conversation, body.view, follow.following]);
+
+  // Entering the screen lands on the newest content: the first non-empty
+  // layout snaps to the bottom, no animation (re-render budget: once).
+  const enteredRef = useRef(false);
+  const snapToNewest = useCallback(() => {
+    if (enteredRef.current) return;
+    enteredRef.current = true;
+    follow.followNow();
+    if (body.view === "turns") listRef.current?.scrollToEnd({ animated: false });
+    else scrollRef.current?.scrollToEnd({ animated: false });
+  }, [body.view, follow]);
 
   const send = useCallback(async () => {
     const text = composerValue.trim();
@@ -132,6 +152,7 @@ export function AgentScreen(props: {
       void refresh();
       return;
     }
+    setComposerValue(text);
     if (outcome.reason === "blocked") setNotice(copy.sendBlocked);
     else if (outcome.reason === "not_found") setNotice(copy.sendNotFound);
     else setNotice(copy.sendFailed);
@@ -156,7 +177,6 @@ export function AgentScreen(props: {
   }, [props.paneId, store]);
 
   const blocked = pane?.status === "blocked";
-  const body: ChatBody = segment === "chat" ? chatBody(props.paneId, conversation) : { view: "transcript" };
 
   if (paneGone) {
     return (
@@ -228,35 +248,47 @@ export function AgentScreen(props: {
         <Text style={styles.notice}>{notice}</Text>
       ) : null}
 
-      <ScrollView
-        style={styles.body}
-        contentContainerStyle={styles.bodyContent}
-        onScroll={follow.onScroll}
-        scrollEventThrottle={64}
-        keyboardDismissMode="interactive"
-        ref={scrollRef}
-      >
-        {body.view === "turns" ? (
-          <>
-            {body.turns.turns.map((turn) => (
-              <ChatTurnRow key={turn.id} turn={turn} />
-            ))}
-            {body.turns.truncated ? (
-              <Text style={styles.truncateNotice}>{copy.truncateNotice}</Text>
-            ) : null}
-          </>
-        ) : body.view === "summary" ? (
-          <AgySummaryCard summary={body.summary.summary} statusLabel={statusLabel} />
-        ) : (
-          <>
+      {body.view === "turns" ? (
+        <FlatList
+          style={styles.body}
+          contentContainerStyle={styles.bodyContent}
+          data={body.turns.turns}
+          keyExtractor={(turn) => turn.id}
+          renderItem={({ item }) => <ChatTurnRow turn={item} />}
+          onScroll={follow.onScroll}
+          scrollEventThrottle={64}
+          keyboardDismissMode="interactive"
+          ref={listRef}
+          onContentSizeChange={snapToNewest}
+          maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
+          ListFooterComponent={
+            <View style={{ height: keyboardVisible ? space.m : space.xxl }} />
+          }
+        />
+      ) : (
+        <ScrollView
+          style={styles.body}
+          contentContainerStyle={styles.bodyContent}
+          onScroll={follow.onScroll}
+          scrollEventThrottle={64}
+          keyboardDismissMode="interactive"
+          ref={scrollRef}
+          onContentSizeChange={snapToNewest}
+        >
+          {body.view === "summary" ? (
+            <>
+              <AgySummaryCard summary={body.summary.summary} statusLabel={statusLabel} />
+              <TerminalText text={transcript.text} />
+            </>
+          ) : (
             <TerminalText text={transcript.text} />
-            {transcript.truncated ? (
-              <Text style={styles.truncateNotice}>{copy.truncateNotice}</Text>
-            ) : null}
-          </>
-        )}
-        <View style={{ height: keyboardVisible ? space.m : space.xxl }} />
-      </ScrollView>
+          )}
+          {transcript.truncated ? (
+            <Text style={styles.truncateNotice}>{copy.truncateNotice}</Text>
+          ) : null}
+          <View style={{ height: keyboardVisible ? space.m : space.xxl }} />
+        </ScrollView>
+      )}
 
       <Hairline />
       <View style={[styles.composerRow, { paddingBottom: insets.bottom + space.s }]}>
@@ -380,7 +412,7 @@ function TextInputStyled(props: {
 
 /** One structured conversation turn: user bubble right, assistant text left,
  * tool calls as collapsed state rows — tokens only, no inline colors. */
-function ChatTurnRow({ turn }: { turn: HerdrConversationTurn }) {
+const ChatTurnRow = memo(function ChatTurnRow({ turn }: { turn: HerdrConversationTurn }) {
   if (turn.kind === "user") {
     return (
       <Entrance>
@@ -394,18 +426,21 @@ function ChatTurnRow({ turn }: { turn: HerdrConversationTurn }) {
     return (
       <Entrance>
         <View style={styles.turnAssistant}>
-          <Text style={styles.turnAssistantText}>{turn.text}</Text>
+          <MarkdownView text={turn.text} style={styles.turnAssistantText} />
         </View>
       </Entrance>
     );
   }
-  const glyph = turn.state === "error" ? "✕" : turn.state === "running" ? "…" : "✓";
+  const iconRole: IconRole =
+    turn.state === "error" ? "statusError" : turn.state === "running" ? "statusRunning" : "statusDone";
+  const iconColor =
+    turn.state === "error" ? colors.danger : turn.state === "running" ? colors.accent : colors.ok;
   return (
     <Entrance>
       <View style={[styles.turnTool, turn.state === "error" && styles.turnToolError]}>
-        <Text style={[styles.turnToolGlyph, turn.state === "error" && styles.turnToolGlyphError]}>
-          {glyph}
-        </Text>
+        <View style={styles.turnToolGlyphWrap}>
+          <Icon role={iconRole} size={14} color={iconColor} />
+        </View>
         <View style={styles.turnToolBody}>
           <Text style={styles.turnToolTitle} numberOfLines={1}>{turn.title}</Text>
           {turn.detail !== null ? (
@@ -415,7 +450,7 @@ function ChatTurnRow({ turn }: { turn: HerdrConversationTurn }) {
       </View>
     </Entrance>
   );
-}
+});
 
 /** agy summary card (documented SQL summary only — the bodies are
  * undocumented blobs, so the ANSI transcript stays underneath). */
@@ -629,6 +664,7 @@ const styles = StyleSheet.create({
     marginBottom: space.s,
   },
   turnToolError: { borderColor: colors.danger },
+  turnToolGlyphWrap: { width: 16, alignItems: "center", justifyContent: "center" },
   turnToolGlyph: {
     ...typeScale.captionStrong,
     color: colors.inkMute,
