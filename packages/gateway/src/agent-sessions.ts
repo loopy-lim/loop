@@ -9,12 +9,10 @@
  * on-disk format knowledge lives here and only here — claude's project JSONL
  * (~/.claude/projects/<munged-cwd>/<session>.jsonl), codex's rollout JSONL
  * (~/.codex/sessions/Y/M/D/rollout-*.jsonl, cwd in session_meta), and agy's
- * summaries SQLite (~/.gemini/antigravity-cli/conversation_summaries.db).
+ * transcripts (~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl)
+ * with SQL summaries fallback (~/.gemini/antigravity-cli/conversation_summaries.db).
  * No screen-buffer heuristics: a turn exists only because the agent wrote
- * it to its own documented storage. agy's conversation bodies are protobuf
- * blobs without a public schema, so agy gets its documented SQL summary
- * (title · status · step count · preview) — the adapter slot is ready for a
- * real export if the CLI ever grows one.
+ * it to its own documented storage.
  *
  * Mapping discipline (the conversation decision D4 lineage):
  * - Turns are identity-keyed (agent-native message/call ids) and replace
@@ -443,9 +441,137 @@ function codexConversation(
   return null;
 }
 
-// ——— agy (~/.gemini/antigravity-cli/conversation_summaries.db) ———
+// ——— agy (~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl) ———
 
-function agyConversation(kind: "agy", cwd: string, home: string): AgentConversation | null {
+/** Strips internal <USER_REQUEST> framing so the user bubble shows clean text. */
+export function cleanUserText(text: string): string {
+  const match = /<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/.exec(text);
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+  return text.trim();
+}
+
+/** Parses Antigravity (~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl)
+ * into structured turns (user prompt, assistant response, and tool calls/results). */
+export function agyTurns(file: string): AgentConversationTurn[] | null {
+  type ToolTurn = Extract<AgentConversationTurn, { kind: "tool" }>;
+  const turns: AgentConversationTurn[] = [];
+  let lines: string[];
+  try {
+    lines = readFileSync(file, "utf8").split("\n");
+  } catch {
+    return null;
+  }
+  for (const line of lines) {
+    if (line.length === 0) continue;
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const stepIndex = entry.step_index !== undefined ? String(entry.step_index) : `${turns.length}`;
+    const at = typeof entry.created_at === "string" ? entry.created_at : null;
+    const type = entry.type;
+
+    if (type === "USER_INPUT") {
+      const raw = typeof entry.content === "string" ? entry.content : "";
+      const text = cleanUserText(raw);
+      if (text.length > 0) {
+        turns.push({
+          kind: "user",
+          id: `u_${stepIndex}`,
+          text: capText(text, TURN_TEXT_CAP),
+          at,
+        });
+      }
+      continue;
+    }
+
+    if (type === "PLANNER_RESPONSE") {
+      // 1. Text content from assistant
+      if (typeof entry.content === "string" && entry.content.trim().length > 0) {
+        turns.push({
+          kind: "assistant",
+          id: `a_${stepIndex}`,
+          text: capText(entry.content, TURN_TEXT_CAP),
+          at,
+        });
+      }
+      // 2. Tool calls
+      if (Array.isArray(entry.tool_calls)) {
+        for (const [callIdx, call] of entry.tool_calls.entries()) {
+          const c = call as Record<string, unknown>;
+          const name = typeof c.name === "string" ? c.name : "tool";
+          const toolId = `t_${stepIndex}_${callIdx}`;
+          let detail: string | null = null;
+          if (c.args !== undefined && c.args !== null) {
+            detail = typeof c.args === "string" ? c.args : JSON.stringify(c.args);
+          }
+          const toolTurn: ToolTurn = {
+            kind: "tool",
+            id: toolId,
+            title: name,
+            detail: detail !== null ? capText(detail, TOOL_DETAIL_CAP) : null,
+            state: "running",
+            at,
+          };
+          turns.push(toolTurn);
+        }
+      }
+      continue;
+    }
+
+    if (type === "GENERIC" && entry.source === "MODEL") {
+      // Tool execution result following tool calls:
+      const runningTools = turns.filter((t): t is ToolTurn => t.kind === "tool" && t.state === "running");
+      const lastTool = runningTools[runningTools.length - 1];
+      if (lastTool !== undefined) {
+        const isError = entry.status === "ERROR";
+        lastTool.state = isError ? "error" : "done";
+        if (typeof entry.content === "string" && entry.content.trim().length > 0) {
+          lastTool.detail = capText(entry.content, TOOL_DETAIL_CAP);
+        }
+      }
+      continue;
+    }
+  }
+  return turns;
+}
+
+function agyConversation(
+  kind: "agy",
+  cwd: string,
+  home: string,
+  session: AgentSessionRef | null,
+): AgentConversation | null {
+  // 1. Try explicit session id if provided
+  if (session !== null && session.kind === "id") {
+    const transcriptFile = join(
+      home,
+      ".gemini",
+      "antigravity-cli",
+      "brain",
+      session.value,
+      ".system_generated",
+      "logs",
+      "transcript.jsonl",
+    );
+    const turns = agyTurns(transcriptFile);
+    if (turns !== null && turns.length > 0) {
+      const truncated = turns.length > TURN_BUDGET;
+      return {
+        surface: "turns",
+        kind,
+        source: transcriptFile,
+        turns: truncated ? turns.slice(-TURN_BUDGET) : turns,
+        truncated,
+      };
+    }
+  }
+
+  // 2. Look up conversation_summaries.db by workspace cwd
   const dbPath = join(home, ".gemini", "antigravity-cli", "conversation_summaries.db");
   let db: Database;
   try {
@@ -469,6 +595,34 @@ function agyConversation(kind: "agy", cwd: string, home: string): AgentConversat
         continue;
       }
       if (!workspaces.includes(cwd)) continue;
+
+      // If conversation_id has a transcript file, prefer structured turns
+      const convId = String(row.conversation_id ?? "");
+      if (convId.length > 0) {
+        const transcriptFile = join(
+          home,
+          ".gemini",
+          "antigravity-cli",
+          "brain",
+          convId,
+          ".system_generated",
+          "logs",
+          "transcript.jsonl",
+        );
+        const turns = agyTurns(transcriptFile);
+        if (turns !== null && turns.length > 0) {
+          const truncated = turns.length > TURN_BUDGET;
+          return {
+            surface: "turns",
+            kind,
+            source: transcriptFile,
+            turns: truncated ? turns.slice(-TURN_BUDGET) : turns,
+            truncated,
+          };
+        }
+      }
+
+      // Fall back to documented SQL summary when transcript is absent
       const rawStatus = String(row.status ?? "");
       const status = rawStatus.startsWith("CASCADE_RUN_STATUS_")
         ? rawStatus.slice("CASCADE_RUN_STATUS_".length).toLowerCase()
@@ -514,7 +668,7 @@ export function resolveAgentConversation(
   if (home === null || cwd.length === 0) return null;
   if (kind === "claude") return claudeConversation(kind, cwd, home, session ?? null);
   if (kind === "codex") return codexConversation(kind, cwd, home, session ?? null);
-  if (kind === "agy") return agyConversation("agy", cwd, home);
+  if (kind === "agy") return agyConversation("agy", cwd, home, session ?? null);
   return null;
 }
 

@@ -36,10 +36,13 @@ function resolve(kind: string, cwd: string): AgentConversation | null {
 test("claude: newest project jsonl maps user/assistant/tool turns with result pairing", () => {
   const dir = join(home, ".claude", "projects", claudeProjectDirName("/Users/loopy/dev/ll3/loop"));
   mkdirSync(dir, { recursive: true });
+  const older = join(dir, "older.jsonl");
   writeFileSync(
-    join(dir, "older.jsonl"),
+    older,
     JSON.stringify({ type: "user", uuid: "u1", timestamp: "2026-10-20T00:00:00Z", message: { role: "user", content: "이전 세션" } }) + "\n",
   );
+  const earlier = new Date("2026-10-20T00:00:00Z");
+  utimesSync(older, earlier, earlier);
   const lines = [
     { type: "mode", mode: "normal" }, // meta line: skipped
     { type: "user", uuid: "u0", timestamp: "2026-10-21T01:00:00Z", isMeta: true, message: { role: "user", content: "command wrapper" } }, // skipped
@@ -256,6 +259,72 @@ test("agy: newest summary whose workspace matches yields a summary card", () => 
 
 test("agy: no summaries db → null", () => {
   expect(resolve("agy", "/tmp/proj-agy")).toBeNull();
+});
+
+test("agy: transcript.jsonl yields structured turns with clean user text", () => {
+  mkdirSync(join(home, ".gemini", "antigravity-cli", "conversations"), { recursive: true });
+  const db = new Database(join(home, ".gemini", "antigravity-cli", "conversation_summaries.db"), { create: true });
+  db.run(
+    "CREATE TABLE conversation_summaries (conversation_id text PRIMARY KEY, title text NOT NULL DEFAULT '', preview text NOT NULL DEFAULT '', step_count integer NOT NULL DEFAULT 0, last_modified_time datetime NOT NULL, workspace_uris text NOT NULL, status text NOT NULL DEFAULT '')",
+  );
+  db.run(
+    "INSERT INTO conversation_summaries VALUES ('c-agy-1','테스트 작업','미리보기',2,'2026-10-21 12:00:00','[\"file:///tmp/proj-agy-turns\"]','CASCADE_RUN_STATUS_DONE')",
+  );
+  db.close();
+
+  const logDir = join(home, ".gemini", "antigravity-cli", "brain", "c-agy-1", ".system_generated", "logs");
+  mkdirSync(logDir, { recursive: true });
+  const transcriptLines = [
+    {
+      step_index: 0,
+      source: "USER_EXPLICIT",
+      type: "USER_INPUT",
+      status: "DONE",
+      created_at: "2026-10-21T12:00:01Z",
+      content: "<USER_REQUEST>\n빌드 확인해줘\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\ninfo\n</ADDITIONAL_METADATA>",
+    },
+    {
+      step_index: 1,
+      source: "MODEL",
+      type: "PLANNER_RESPONSE",
+      status: "DONE",
+      created_at: "2026-10-21T12:00:02Z",
+      content: "확인할게요.",
+      tool_calls: [{ name: "run_command", args: { CommandLine: "cargo test" } }],
+    },
+    {
+      step_index: 2,
+      source: "MODEL",
+      type: "GENERIC",
+      status: "DONE",
+      created_at: "2026-10-21T12:00:05Z",
+      content: "test passed",
+    },
+    {
+      step_index: 3,
+      source: "MODEL",
+      type: "PLANNER_RESPONSE",
+      status: "DONE",
+      created_at: "2026-10-21T12:00:06Z",
+      content: "테스트 모두 통과했습니다.",
+    },
+  ];
+  writeFileSync(join(logDir, "transcript.jsonl"), transcriptLines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+
+  const conversation = resolve("agy", "/tmp/proj-agy-turns");
+  if (conversation === null || conversation.surface !== "turns") throw new Error("expected turns surface");
+  expect(conversation.kind).toBe("agy");
+  expect(conversation.turns.map((t) => t.kind)).toEqual(["user", "assistant", "tool", "assistant"]);
+
+  // Clean user text unnested from <USER_REQUEST>
+  expect(conversation.turns[0]?.kind === "user" ? conversation.turns[0].text : null).toBe("빌드 확인해줘");
+  expect(conversation.turns[1]?.kind === "assistant" ? conversation.turns[1].text : null).toBe("확인할게요.");
+  const tool = conversation.turns[2];
+  if (tool === undefined || tool.kind !== "tool") throw new Error("expected tool turn");
+  expect(tool.title).toBe("run_command");
+  expect(tool.state).toBe("done");
+  expect(tool.detail).toBe("test passed");
+  expect(conversation.turns[3]?.kind === "assistant" ? conversation.turns[3].text : null).toBe("테스트 모두 통과했습니다.");
 });
 
 // ——— resolution edges ———
