@@ -88,6 +88,8 @@ export const copy = {
 
   // Structured chat (agent-session adapters)
   summarySteps: "스텝",
+  copyCode: "복사",
+  copiedCode: "복사됨",
 } as const;
 
 export function statusLabel(status: string): string {
