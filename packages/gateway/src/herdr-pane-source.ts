@@ -4,7 +4,7 @@
  * live here:
  *
  * 1. `HerdrPaneSource` implements the herdr-agnostic `PaneObservationPort`
- *    over the herdr socket protocol (pinned: protocol 20) for the terminal
+ *    over the herdr socket protocol (live: herdr 0.9.5, protocol 22) for the terminal
  *    mirror.
  * 2. `HerdrControlClient` is the herdr-surface port (rebuild brief
  *    docs/design/rebuild-brief-herdr-first.md §4): full-session snapshot,
@@ -16,7 +16,14 @@
  * - Any connect/read/timeout/protocol failure → `null`/`false`/`"unavailable"`
  *   from the port → callers degrade honestly instead of guessing.
  * - Revision polling: `pane.list` for inventory + `pane.read` per pane; the
- *   pane's monotonic `revision` is the change hook (S1 in decision D2).
+ *   change hook (S1 in decision D2) is the pane's monotonic `revision` —
+ *   which herdr's own counters do NOT provide (verified live on herdr 0.9.5:
+ *   `pane.read` reports 0 throughout a pane's life and `session.snapshot`
+ *   revisions freeze after the first renders — decision
+ *   2026-10-21-herdr-content-revision), so every read that crosses this file
+ *   carries a gateway-SYNTHESIZED monotonic revision derived from text
+ *   comparison (`SyntheticPaneRevisions`; the technique validated in the
+ *   simulator showcase, evidence D-c).
  * - The wire `revision` (uint64) crosses this boundary as a DECIMAL STRING
  *   (ADR §4.1 u64 rule).
  * - herdr serves ONE request per connection and closes the socket after the
@@ -38,8 +45,42 @@ import type { RemotePaneSummary } from "@loop/protocol";
 
 import type { PaneObservationPort, PaneReading } from "./pane-port";
 
-/** herdr socket protocol this adapter speaks (herdr 0.8.2 → protocol 20). */
-export const HERDR_PROTOCOL_VERSION = 20;
+/** herdr socket protocol this adapter speaks (herdr 0.9.5 → protocol 22). */
+export const HERDR_PROTOCOL_VERSION = 22;
+
+/**
+ * Gateway-synthesized pane revision — the change hook herdr fails to provide.
+ * Text comparison only: identical text keeps the counter, changed text draws
+ * the next value from a client-global sequence. Two isolation axes keep the
+ * counters honest:
+ * - per CLIENT OBJECT: revisions are compared only WITHIN one observation
+ *   stream (mirror feed, state monitor + pane-read route), never across paths;
+ * - per READ WINDOW: the same pane read through different shapes (the
+ *   monitor's small text tail vs the route's wide ansi window) yields
+ *   different text for the same content — window-keyed streams stop those
+ *   reads from bumping each other into a permanent spurious-change loop.
+ * The global sequence also makes eviction safe: a pane churned out of the
+ * bounded table re-seeds ABOVE every value already issued, so no consumer's
+ * stale observed revision can mask a real change.
+ */
+export class SyntheticPaneRevisions {
+  static readonly #CAP = 128;
+  #seq = 0;
+  readonly #last = new Map<string, { text: string; counter: number }>();
+
+  next(paneId: string, window: string, text: string): string {
+    const key = `${paneId}\u0000${window}`;
+    if (!this.#last.has(key) && this.#last.size >= SyntheticPaneRevisions.#CAP) {
+      const oldest = this.#last.keys().next();
+      if (oldest.done !== true) this.#last.delete(oldest.value);
+    }
+    const prior = this.#last.get(key);
+    if (prior !== undefined && prior.text === text) return prior.counter.toString(10);
+    this.#seq += 1;
+    this.#last.set(key, { text, counter: this.#seq });
+    return this.#seq.toString(10);
+  }
+}
 
 /** Default herdr socket path (herdr status reports this location). */
 export function defaultHerdrSocketPath(): string {
@@ -106,6 +147,7 @@ export class HerdrPaneSource implements PaneObservationPort {
   readonly #socketPath: string;
   readonly #requestTimeoutMs: number;
   readonly #readLines: number;
+  readonly #synthetic = new SyntheticPaneRevisions();
   #socket: Socket | null = null;
   #connectPromise: Promise<void> | null = null;
   readonly #pending = new Map<string, PendingRequest>();
@@ -171,7 +213,17 @@ export class HerdrPaneSource implements PaneObservationPort {
     ) {
       return null;
     }
-    return { revision: read.revision.toString(10), text: read.text, truncated: read.truncated };
+    // herdr's counter is validated for shape drift but not trusted as the
+    // hook — the synthesized revision is what the mirror dedupes on.
+    return {
+      revision: this.#synthetic.next(
+        read.pane_id,
+        `${this.#readLines}|recent_unwrapped|text`,
+        read.text,
+      ),
+      text: read.text,
+      truncated: read.truncated,
+    };
   }
 
   /**
@@ -458,11 +510,13 @@ export type HerdrSnapshotView = {
   panes: HerdrPaneView[];
 };
 
-/** Subscription feed, collapsed to the two signals the surface needs:
- * structural change (re-snapshot) and one pane's agent-state transition. */
+/** Subscription feed, collapsed to the three signals the surface needs:
+ * structural change (re-snapshot), one pane's agent-state transition, and
+ * output arrival on a watched pane (content change trigger). */
 export type HerdrSurfaceEvent =
   | { kind: "structure" }
-  | { kind: "pane_state"; paneId: string; status: HerdrAgentState };
+  | { kind: "pane_state"; paneId: string; status: HerdrAgentState }
+  | { kind: "pane_output"; paneId: string };
 
 export type HerdrPaneReading = {
   paneId: string;
@@ -615,7 +669,7 @@ type HerdrSurfaceOptions = {
 
 export type HerdrSubscription = {
   stop(): void;
-  /** Drop the feed connection; it reopens (and re-reads `paneIds`). */
+  /** Drop the feed connection; it reopens (and re-reads `paneSpecs`). */
   restart(): void;
 };
 
@@ -624,6 +678,7 @@ export class HerdrControlClient {
   readonly #requestTimeoutMs: number;
   readonly #reconnectMs: number;
   readonly #reconnectMaxMs: number;
+  readonly #synthetic = new SyntheticPaneRevisions();
 
   constructor(options: HerdrSurfaceOptions = {}) {
     this.#socketPath = options.socketPath ?? defaultHerdrSocketPath();
@@ -712,10 +767,24 @@ export class HerdrControlClient {
     }
     return {
       paneId: raw.pane_id,
-      revision: raw.revision.toString(10),
+      // Synthesized for the same reason as the observation port above, and
+      // window-keyed so heterogeneous read shapes (the monitor's small text
+      // tail vs this route's wide ansi window) never bump each other.
+      revision: this.#synthetic.next(
+        raw.pane_id,
+        `${options.lines}|${options.source}|${options.format}`,
+        raw.text,
+      ),
       text: raw.text,
       truncated: raw.truncated,
     };
+  }
+
+  /** Small tail read for content change detection (the state monitor's
+   * per-refresh probe). Read source/format are adapter policy so wire
+   * literals never leave this file; `lines` only bounds the payload. */
+  async readTail(paneId: string, lines: number): Promise<HerdrPaneReading | null> {
+    return await this.readPane(paneId, { lines, source: "recent_unwrapped", format: "text" });
   }
 
   /** Submit a prompt to the agent occupying a pane (pane id is a valid
@@ -871,12 +940,14 @@ export class HerdrControlClient {
 
   /** Long-lived subscription feed. herdr pushes `{"event", "data"}` frames on
    * the subscription connection (verified live); the connection is re-opened
-   * with backoff and the subscription re-sent after any close. Per-pane state
+   * with backoff and the subscription re-sent after any close. Per-pane
    * subscriptions are pane-addressed in herdr, so the pane set is read fresh
-   * from `paneIds` on every (re)connect, and `restart()` re-opens the feed
-   * when the pane set changes (the caller learns that from structure events). */
+   * from `paneSpecs` on every (re)connect, and `restart()` re-opens the feed
+   * when the pane set changes (the caller learns that from structure events).
+   * `watchOutput` adds an output-matched subscription (any-line matcher,
+   * minimal window) so content arrival itself becomes a push signal. */
   subscribe(
-    paneIds: () => string[],
+    paneSpecs: () => Array<{ paneId: string; watchOutput: boolean }>,
     onEvent: (event: HerdrSurfaceEvent) => void,
     onError?: (error: Error) => void,
   ): HerdrSubscription {
@@ -893,7 +964,7 @@ export class HerdrControlClient {
       sock.setEncoding("utf8");
       sock.on("connect", () => {
         attempt = 0;
-        const subscriptions: Array<Record<string, string>> = [
+        const subscriptions: Array<Record<string, unknown>> = [
           ...[
             "workspace.created",
             "workspace.updated",
@@ -916,9 +987,22 @@ export class HerdrControlClient {
             "pane.agent_detected",
             "layout.updated",
           ].map((type) => ({ type })),
-          ...paneIds().flatMap((paneId) => [
-            { type: "pane.agent_status_changed", pane_id: paneId },
-          ]),
+          ...paneSpecs().flatMap((spec) => {
+            const perPane: Array<Record<string, unknown>> = [
+              { type: "pane.agent_status_changed", pane_id: spec.paneId },
+            ];
+            if (spec.watchOutput) {
+              perPane.push({
+                type: "pane.output_matched",
+                pane_id: spec.paneId,
+                source: "recent_unwrapped",
+                match: { type: "regex", value: "." },
+                lines: 1,
+                strip_ansi: true,
+              });
+            }
+            return perPane;
+          }),
         ];
         sock.write(
           `${JSON.stringify({ id: "herdr-feed", method: "events.subscribe", params: { subscriptions } })}\n`,
@@ -1089,6 +1173,14 @@ function mapSurfaceEvent(event: unknown, data: unknown): HerdrSurfaceEvent | nul
       paneId: raw.pane_id,
       status: agentStateOrUnknown(raw.agent_status),
     };
+  }
+  if (event === "pane.output_matched") {
+    // Trigger only: the event's embedded read carries herdr's unusable
+    // revision, so the monitor re-reads the tail itself instead of trusting it.
+    if (data === null || typeof data !== "object") return null;
+    const raw = data as { pane_id?: unknown };
+    if (typeof raw.pane_id !== "string") return null;
+    return { kind: "pane_output", paneId: raw.pane_id };
   }
   if (
     event.startsWith("workspace.") ||

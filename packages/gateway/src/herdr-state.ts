@@ -1,7 +1,8 @@
 /**
  * Herdr state monitor (rebuild brief docs/design/rebuild-brief-herdr-first.md
  * §4) — turns the herdr surface port into one observable state view for the
- * app: initial snapshot, prompt refresh on subscription events, and a slow
+ * app: initial snapshot, prompt refresh on subscription events (structure,
+ * agent-status transitions, and output arrival on agent panes), and a 1s
  * safety poll that converges any missed event.
  *
  * Contract:
@@ -10,6 +11,12 @@
  *   mirror).
  * - `version` increments only when the mapped view actually changes, so SSE
  *   clients and the app can ignore no-op frames.
+ * - Agent panes carry a content-derived `revision`: each refresh re-reads a
+ *   small tail whose synthesized revision tracks actual output (herdr's own
+ *   counters freeze — decision 2026-10-21-herdr-content-revision). This is
+ *   what makes the app's conversation refetch hook fire while an agent
+ *   streams. A failed tail read keeps the snapshot revision (fail-open to
+ *   snapshot-only behavior).
  * - The monitor is the ONLY subscriber to the herdr feed; route handlers see
  *   the monitor alone. Structure events also restart the feed so per-pane
  *   state subscriptions track the current pane set.
@@ -32,13 +39,18 @@ export type HerdrStateView = HerdrSnapshotView & {
 };
 
 export type HerdrStateMonitorOptions = {
-  /** Safety poll interval (default 10s) — events stay the fast path. */
+  /** Safety poll interval (default 1s) — feed events stay the fast path. */
   pollMs?: number;
   /** Coalescing window for refresh bursts (default 200ms). */
   coalesceMs?: number;
 };
 
 const FEED_RESTART_COALESCE_MS = 400;
+
+/** Agent-pane tail window for content revisions: enough lines that appended
+ * output always moves the fingerprint, small enough that a per-refresh read
+ * stays cheap. */
+const CONTENT_TAIL_LINES = 12;
 
 export class HerdrStateMonitor {
   readonly #client: HerdrControlClient;
@@ -53,20 +65,33 @@ export class HerdrStateMonitor {
   #refreshing = false;
   #refreshQueued = false;
   #started = false;
+  /** Last watch signature the feed was (re)opened with — a refresh that
+   * changes it (a pane gained/lost its agent) schedules a feed restart so
+   * the output watch follows the pane set even without a structure event. */
+  #lastWatch = "";
+  /** Last content revision applied per pane — a failed tail read must keep
+   * it instead of flipping back to herdr's frozen snapshot counter. */
+  #lastContentRevision = new Map<string, string>();
 
   constructor(client: HerdrControlClient, options: HerdrStateMonitorOptions = {}) {
     this.#client = client;
-    this.#pollMs = options.pollMs ?? 10_000;
+    this.#pollMs = options.pollMs ?? 1_000;
     this.#coalesceMs = options.coalesceMs ?? 200;
   }
 
   /** Begin observing: one immediate refresh, the feed, and the safety poll.
-   * Idempotent; never throws (herdr may be absent at boot). */
+   * Idempotent; never throws (herdr may be absent at boot). Agent panes also
+   * get the output-arrival subscription — the push trigger for streaming. */
   start(): void {
     if (this.#started) return;
     this.#started = true;
+    this.#lastWatch = this.#watchSignature();
     this.#feed = this.#client.subscribe(
-      () => this.#view.panes.map((pane) => pane.id),
+      () =>
+        this.#view.panes.map((pane) => ({
+          paneId: pane.id,
+          watchOutput: pane.agent !== null,
+        })),
       (event) => this.#onFeedEvent(event),
     );
     this.#pollTimer = setInterval(() => void this.#refresh(), this.#pollMs);
@@ -107,6 +132,8 @@ export class HerdrStateMonitor {
 
   #onFeedEvent(event: HerdrSurfaceEvent): void {
     if (event.kind === "structure") this.#scheduleFeedRestart();
+    // Every event kind (structure, pane_state, pane_output) is a refresh
+    // trigger; whether the view actually changed is decided by #refresh.
     this.#scheduleRefresh();
   }
 
@@ -128,6 +155,35 @@ export class HerdrStateMonitor {
     }, this.#coalesceMs);
   }
 
+  /** Pane set + agent-ness, as the feed subscription sees it. */
+  #watchSignature(): string {
+    return this.#view.panes.map((pane) => `${pane.id}:${pane.agent !== null ? 1 : 0}`).join(",");
+  }
+
+  /** Overwrite agent panes' `revision` with the synthesized content revision
+   * from a small tail read. herdr's snapshot revision freezes after a pane's
+   * first renders (verified live on 0.9.5), so without this the app's refetch
+   * hook never fires while an agent streams. A failed read keeps the pane's
+   * last applied content revision — reverting to the snapshot counter would
+   * flip-flop the view into two spurious version bumps. `mapPane` produced
+   * fresh objects, so mutating them cannot alias the previous view. */
+  async #applyContentRevisions(view: HerdrStateView): Promise<void> {
+    await Promise.all(
+      view.panes
+        .filter((pane) => pane.agent !== null)
+        .map(async (pane) => {
+          const reading = await this.#client.readTail(pane.id, CONTENT_TAIL_LINES);
+          if (reading !== null) this.#lastContentRevision.set(pane.id, reading.revision);
+          const applied = this.#lastContentRevision.get(pane.id);
+          if (applied !== undefined) pane.revision = applied;
+        }),
+    );
+    const live = new Set(view.panes.map((pane) => pane.id));
+    for (const paneId of this.#lastContentRevision.keys()) {
+      if (!live.has(paneId)) this.#lastContentRevision.delete(paneId);
+    }
+  }
+
   async #refresh(): Promise<HerdrStateView> {
     if (!this.#started) return this.#view;
     if (this.#refreshing) {
@@ -146,6 +202,17 @@ export class HerdrStateMonitor {
         snapshot === null
           ? { ...emptyView(), available: false, version: this.#view.version }
           : { ...snapshot, available: true, version: this.#view.version };
+      if (next.available) {
+        await this.#applyContentRevisions(next);
+        // A pane gaining/losing its agent must re-open the feed so the
+        // output watch follows — herdr does not emit a structure event for
+        // every agent appearance (e.g. registrar-reported sessions).
+        const watch = this.#watchSignature();
+        if (watch !== this.#lastWatch) {
+          this.#lastWatch = watch;
+          this.#scheduleFeedRestart();
+        }
+      }
       if (viewUnchanged(this.#view, next)) return this.#view;
       next.version = this.#view.version + 1;
       this.#view = next;

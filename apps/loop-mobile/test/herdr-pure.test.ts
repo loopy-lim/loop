@@ -93,6 +93,14 @@ describe("nextTranscript", () => {
     expect(nextTranscript(current, reading("5", "x"))).toBe(current);
   });
 
+  test("compares revisions numerically across the 9→10 boundary", () => {
+    const current = { paneId: "w1:p1", revision: "9", text: "x", truncated: false };
+    // lexicographically "10" < "9"; the gateway's synthesized revisions
+    // cross this boundary within the first streaming minute
+    expect(nextTranscript(current, reading("10", "newer"))?.revision).toBe("10");
+    expect(nextTranscript(current, reading("8", "older"))).toBeNull();
+  });
+
   test("rejects a foreign pane", () => {
     const current = { paneId: "w1:p1", revision: "5", text: "x", truncated: false };
     expect(nextTranscript(current, reading("9", "y", "w2:p1"))).toBeNull();

@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { authHeader, bootTestGateway, type TestGateway } from "./helpers";
-import { HerdrControlClient } from "../src/herdr-pane-source";
+import { HerdrControlClient, HerdrPaneSource } from "../src/herdr-pane-source";
 
 function must<T>(value: T | undefined | null): T {
   if (value === undefined || value === null) throw new Error("expected value to be defined");
@@ -32,6 +32,7 @@ type FakeHerdr = {
   path: string;
   setSnapshot: (snapshot: JsonRecord) => void;
   calls: { method: string; params: JsonRecord }[];
+  subscribeCalls: { id: string; params: JsonRecord }[];
   respond: (method: string, response: (params: JsonRecord) => JsonRecord) => void;
   push: (frame: JsonRecord) => void;
   subscriberCount: () => number;
@@ -46,6 +47,7 @@ function startFakeHerdrSocket(initialSnapshot: JsonRecord): FakeHerdr {
   mkdirSync(dir, { recursive: true });
   const socketPath = join(dir, "herdr.sock");
   const calls: { method: string; params: JsonRecord }[] = [];
+  const subscribeCalls: { id: string; params: JsonRecord }[] = [];
   const responders = new Map<string, (params: JsonRecord) => JsonRecord>();
   const subscribers = new Set<{ write(bytes: string): void }>();
   let snapshot = initialSnapshot;
@@ -67,6 +69,7 @@ function startFakeHerdrSocket(initialSnapshot: JsonRecord): FakeHerdr {
           if (typeof message.id !== "string" || typeof message.method !== "string") continue;
           const params = (message.params ?? {}) as JsonRecord;
           if (message.method === "events.subscribe") {
+            subscribeCalls.push({ id: String(message.id), params });
             subscribers.add({
               write: (out: string) => {
                 _socket.write(out);
@@ -107,6 +110,7 @@ function startFakeHerdrSocket(initialSnapshot: JsonRecord): FakeHerdr {
       snapshot = next;
     },
     calls,
+    subscribeCalls,
     respond(method, response) {
       responders.set(method, response);
     },
@@ -280,7 +284,9 @@ describe("herdr surface (M1)", () => {
     expect(panes[0]?.title).toBe("hardening");
     expect(panes[0]?.status).toBe("working");
     expect(panes[0]?.agent).toBe("claude");
-    expect(panes[0]?.revision).toBe("12"); // u64 decimal-string rule
+    // u64 decimal-string rule; the agent pane's revision is the gateway's
+    // synthesized content revision (herdr's own counter is not a change hook)
+    expect(panes[0]?.revision).toBe("1");
     expect(panes[1]?.agent).toBeNull();
     expect(panes[1]?.status).toBe("unknown");
     const workspaces = state.workspaces as Record<string, unknown>[];
@@ -332,7 +338,14 @@ describe("herdr surface (M1)", () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
     expect(body.paneId).toBe("w1:p1");
-    expect(body.revision).toBe("12");
+    // the route read is its own window-keyed stream: same window + same
+    // content must hold the revision (no fabricated change per poll)
+    expect(body.revision).toMatch(/^\d+$/);
+    const again = await fetch(
+      `${gateway.baseUrl}/v1/herdr/panes/${encodeURIComponent("w1:p1")}/read?lines=99999&source=visible&format=ansi`,
+      { headers: authHeader(gateway.token()) },
+    );
+    expect(((await again.json()) as Record<string, unknown>).revision).toBe(body.revision);
     expect(body.text).toContain("green");
     const readCall = fake.calls.findLast((call) => call.method === "pane.read");
     must(readCall);
@@ -568,6 +581,206 @@ describe("herdr surface fail-closed paths", () => {
       expect(((await prompt.json()) as Record<string, unknown>).code).toBe("herdr_unavailable");
     } finally {
       gateway.stop();
+    }
+  });
+});
+
+describe("herdr content revisions and output watch", () => {
+  let fake: FakeHerdr;
+  let gateway: TestGateway;
+  let tail: string;
+
+  beforeAll(() => {
+    tail = "first output";
+    fake = startFakeHerdrSocket(fixtureSnapshot());
+    // herdr 0.9.5 live behavior: pane.read's revision never moves
+    fake.respond("pane.read", (params) => ({
+      read: { pane_id: params.pane_id, revision: 0, text: tail, truncated: false },
+    }));
+    gateway = bootWithHerdr(fake);
+  });
+
+  afterAll(async () => {
+    gateway.stop();
+    await fake.close();
+  });
+
+  test("agent pane carries the synthesized content revision; non-agent keeps the snapshot one", async () => {
+    await waitUntilHerdr(gateway, () => gateway.herdr?.monitor.current().available === true);
+    const state = must(gateway.herdr?.monitor.current());
+    expect(state.panes.find((pane) => pane.id === "w1:p1")?.revision).toBe("1"); // first tail read seeds the counter
+    expect(state.panes.find((pane) => pane.id === "w1:p2")?.revision).toBe("0"); // no agent → no tail read
+    const readCall = must(fake.calls.findLast((call) => call.method === "pane.read"));
+    expect(readCall.params.pane_id).toBe("w1:p1");
+    expect(readCall.params.lines).toBe(12);
+  });
+
+  test("changed tail content bumps the state version and the pane revision", async () => {
+    const before = must(gateway.herdr?.monitor.current()).version;
+    tail = "second output";
+    await gateway.herdr?.monitor.refresh();
+    const state = must(gateway.herdr?.monitor.current());
+    expect(state.version).toBe(before + 1);
+    expect(state.panes.find((pane) => pane.id === "w1:p1")?.revision).toBe("2");
+  });
+
+  test("identical content stays a no-op frame (version stable)", async () => {
+    const before = must(gateway.herdr?.monitor.current()).version;
+    await gateway.herdr?.monitor.refresh();
+    expect(must(gateway.herdr?.monitor.current()).version).toBe(before);
+  });
+
+  test("an output_matched push converges the view without waiting for the poll", async () => {
+    const before = must(gateway.herdr?.monitor.current()).version;
+    await waitUntilHerdr(gateway, () => fake.subscriberCount() > 0);
+    tail = "third output";
+    fake.push({
+      event: "pane.output_matched",
+      data: {
+        pane_id: "w1:p1",
+        matched_line: "third output",
+        read: { pane_id: "w1:p1", revision: 0, text: tail, truncated: false },
+      },
+    });
+    await waitUntilHerdr(gateway, () => must(gateway.herdr?.monitor.current()).version > before);
+    expect(must(gateway.herdr?.monitor.current()).panes.find((pane) => pane.id === "w1:p1")?.revision).toBe("3");
+  });
+
+  test("a pane gaining its agent re-opens the feed with the output watch", async () => {
+    await waitUntilHerdr(gateway, () => fake.subscriberCount() > 0);
+    const subsBefore = fake.subscribeCalls.length;
+    fake.setSnapshot(
+      fixtureSnapshotWithPanes([
+        {
+          pane_id: "w1:p1",
+          workspace_id: "w1",
+          tab_id: "w1:t1",
+          agent_status: "working",
+          agent: "claude",
+          cwd: "/tmp",
+          revision: 3,
+          focused: true,
+        },
+        {
+          pane_id: "w1:p2",
+          workspace_id: "w1",
+          tab_id: "w1:t1",
+          agent_status: "idle",
+          agent: "codex",
+          cwd: "/tmp",
+          revision: 0,
+          focused: false,
+        },
+      ]),
+    );
+    await gateway.herdr?.monitor.refresh(); // view converges; watch signature changes
+    await waitUntilHerdr(gateway, () => fake.subscribeCalls.length > subsBefore);
+    const subs = (must(fake.subscribeCalls.at(-1)).params.subscriptions ?? []) as JsonRecord[];
+    const watched = subs.filter((entry) => entry.type === "pane.output_matched");
+    expect(watched.map((entry) => entry.pane_id).toSorted()).toEqual(["w1:p1", "w1:p2"]);
+  });
+
+  test("a transient tail-read failure keeps the last content revision (no flip-flop)", async () => {
+    const good = (params: JsonRecord): JsonRecord => ({
+      read: { pane_id: params.pane_id, revision: 0, text: tail, truncated: false },
+    });
+    let failing = true;
+    fake.respond("pane.read", (params) =>
+      failing ? { failure: { code: "transient", message: "boom" } } : good(params),
+    );
+    const before = must(gateway.herdr?.monitor.current()).version;
+    await gateway.herdr?.monitor.refresh(); // both reads fail → cached revisions hold
+    expect(must(gateway.herdr?.monitor.current()).version).toBe(before);
+    failing = false;
+    await gateway.herdr?.monitor.refresh(); // recovery: unchanged content stays a no-op
+    expect(must(gateway.herdr?.monitor.current()).version).toBe(before);
+    fake.respond("pane.read", good); // restore for any later test
+  });
+});
+
+describe("herdr feed subscription and event mapping", () => {
+  test("output watch subscribes only agent panes and maps the three signals", async () => {
+    const fake = startFakeHerdrSocket(fixtureSnapshot());
+    try {
+      const control = new HerdrControlClient({ socketPath: fake.path, requestTimeoutMs: 1_000 });
+      const events: { kind: string; paneId?: string; status?: string }[] = [];
+      const subscription = control.subscribe(
+        () => [
+          { paneId: "w1:p1", watchOutput: true },
+          { paneId: "w1:p2", watchOutput: false },
+        ],
+        (event) => events.push(event),
+      );
+      await Bun.sleep(50);
+      const subs = (must(fake.subscribeCalls.at(-1)).params.subscriptions ?? []) as JsonRecord[];
+      const watched = subs.filter((entry) => entry.type === "pane.output_matched");
+      expect(watched).toHaveLength(1);
+      expect(watched[0]?.pane_id).toBe("w1:p1");
+      expect(watched[0]?.source).toBe("recent_unwrapped");
+      expect(watched[0]?.lines).toBe(1);
+      expect((watched[0]?.match as JsonRecord)?.value).toBe(".");
+      expect(subs.filter((entry) => entry.type === "pane.agent_status_changed")).toHaveLength(2);
+
+      fake.push({ event: "pane.output_matched", data: { pane_id: "w1:p1", matched_line: "x", read: {} } });
+      fake.push({ event: "pane.agent_status_changed", data: { pane_id: "w1:p2", agent_status: "working" } });
+      fake.push({ event: "layout.updated", data: {} });
+      fake.push({ event: "irrelevant.event", data: {} });
+      await Bun.sleep(50);
+      expect(events).toEqual([
+        { kind: "pane_output", paneId: "w1:p1" },
+        { kind: "pane_state", paneId: "w1:p2", status: "working" },
+        { kind: "structure" },
+      ]);
+      subscription.stop();
+    } finally {
+      await fake.close();
+    }
+  });
+
+  test("pane reads carry the synthesized revision per read window", async () => {
+    const fake = startFakeHerdrSocket(fixtureSnapshot());
+    try {
+      let text = "a";
+      // real herdr returns window- and format-dependent text for the same
+      // content; the fake reproduces that so cross-window isolation is real
+      fake.respond("pane.read", (params) => ({
+        read: {
+          pane_id: params.pane_id,
+          revision: 0,
+          text: `${String(params.lines)}:${String(params.format)}:${text}`,
+          truncated: false,
+        },
+      }));
+      const control = new HerdrControlClient({ socketPath: fake.path, requestTimeoutMs: 1_000 });
+      // the state monitor's tail stream
+      expect((await control.readTail("w1:p1", 12))?.revision).toBe("1");
+      expect((await control.readTail("w1:p1", 12))?.revision).toBe("1");
+      text = "b";
+      expect((await control.readTail("w1:p1", 12))?.revision).toBe("2");
+      // an interleaved route read through a different window seeds its own
+      // stream and must NOT bump the monitor's stream (refetch-loop guard)
+      expect(
+        (
+          await control.readPane("w1:p1", {
+            lines: 400,
+            source: "recent_unwrapped",
+            format: "ansi",
+          })
+        )?.revision,
+      ).toBe("3");
+      expect((await control.readTail("w1:p1", 12))?.revision).toBe("2");
+
+      // the observation port (mirror path) keeps its own stream-local table
+      const source = new HerdrPaneSource({ socketPath: fake.path });
+      try {
+        expect((await source.readPane("w1:p1"))?.revision).toBe("1");
+        text = "c";
+        expect((await source.readPane("w1:p1"))?.revision).toBe("2");
+      } finally {
+        source.close();
+      }
+    } finally {
+      await fake.close();
     }
   });
 });

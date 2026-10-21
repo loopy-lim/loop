@@ -22,11 +22,19 @@ export const EMPTY_TRANSCRIPT: Transcript = {
   truncated: false,
 };
 
+/** u64 decimal strings compare numerically, not lexicographically — the
+ * gateway's synthesized revisions now actually advance ("9" → "10"), so a
+ * string compare would drop every reading past the "9"/"10" boundary. */
+function revisionMovesBackward(next: string, current: string): boolean {
+  if (next.length !== current.length) return next.length < current.length;
+  return next < current;
+}
+
 /** Merge one reading into the transcript. Returns the next transcript, or
  * null when the reading is stale (older pane, older revision). */
 export function nextTranscript(current: Transcript, reading: HerdrPaneReading): Transcript | null {
   if (reading.paneId !== current.paneId && current.paneId !== "") return null;
-  if (reading.revision < current.revision) return null;
+  if (revisionMovesBackward(reading.revision, current.revision)) return null;
   if (
     reading.paneId === current.paneId &&
     reading.revision === current.revision &&
