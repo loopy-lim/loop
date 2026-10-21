@@ -26,11 +26,13 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { copy } from "../copy";
+import { copy, statusLabel } from "../copy";
 import { EmptyState, Hairline, PressableRow, StatusPill } from "../design/primitives";
 import { TerminalText } from "../design/TerminalText";
 import { kindLabel } from "../herdr/kinds";
 import { nextTranscript, EMPTY_TRANSCRIPT, type Transcript } from "../herdr/transcript";
+import { chatBody, nextConversation, summaryStatus, type ChatBody } from "../herdr/conversation";
+import type { HerdrConversation, HerdrConversationTurn } from "../herdr/wire";
 import { paneDisplayName } from "../herdr/store";
 import type { HerdrAppState, HerdrStore } from "../herdr/store";
 import { impactLight } from "../ui/haptics";
@@ -64,6 +66,7 @@ export function AgentScreen(props: {
 
   const [segment, setSegment] = useState<"chat" | "terminal">("chat");
   const [transcript, setTranscript] = useState<Transcript>({ ...EMPTY_TRANSCRIPT, paneId: props.paneId });
+  const [conversation, setConversation] = useState<HerdrConversation | null>(null);
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [composerValue, setComposerValue] = useState("");
@@ -86,6 +89,14 @@ export function AgentScreen(props: {
       // Offline or pane gone: keep the last transcript on screen; the state
       // feed re-renders the header honestly (pane disappears → 404 title).
     }
+    try {
+      const fetched = await store.client.conversation(props.paneId);
+      setConversation((current) => nextConversation(props.paneId, current, fetched));
+    } catch {
+      // 404 (no structured source for this kind) or offline: the ANSI
+      // transcript stays the chat body — the structured layer is additive.
+      setConversation((current) => (current?.paneId === props.paneId ? current : null));
+    }
   }, [applyReading, props.paneId, store]);
 
   // Initial read, then read whenever the pane's revision advances.
@@ -105,7 +116,7 @@ export function AgentScreen(props: {
   const scrollRef = useRef<ScrollViewInstance | null>(null);
   useEffect(() => {
     if (follow.following) scrollRef.current?.scrollToEnd({ animated: true });
-  }, [transcript.text, follow.following]);
+  }, [transcript.text, conversation, follow.following]);
 
   const send = useCallback(async () => {
     const text = composerValue.trim();
@@ -145,6 +156,7 @@ export function AgentScreen(props: {
   }, [props.paneId, store]);
 
   const blocked = pane?.status === "blocked";
+  const body: ChatBody = segment === "chat" ? chatBody(props.paneId, conversation) : { view: "transcript" };
 
   if (paneGone) {
     return (
@@ -216,10 +228,25 @@ export function AgentScreen(props: {
         keyboardDismissMode="interactive"
         ref={scrollRef}
       >
-        <TerminalText text={transcript.text} />
-        {transcript.truncated ? (
-          <Text style={styles.truncateNotice}>{copy.truncateNotice}</Text>
-        ) : null}
+        {body.view === "turns" ? (
+          <>
+            {body.turns.turns.map((turn) => (
+              <ChatTurnRow key={turn.id} turn={turn} />
+            ))}
+            {body.turns.truncated ? (
+              <Text style={styles.truncateNotice}>{copy.truncateNotice}</Text>
+            ) : null}
+          </>
+        ) : body.view === "summary" ? (
+          <AgySummaryCard summary={body.summary.summary} statusLabel={statusLabel} />
+        ) : (
+          <>
+            <TerminalText text={transcript.text} />
+            {transcript.truncated ? (
+              <Text style={styles.truncateNotice}>{copy.truncateNotice}</Text>
+            ) : null}
+          </>
+        )}
         <View style={{ height: keyboardVisible ? space.m : space.xxl }} />
       </ScrollView>
 
@@ -339,6 +366,61 @@ function TextInputStyled(props: {
       style={styles.input}
       multiline
     />
+  );
+}
+
+/** One structured conversation turn: user bubble right, assistant text left,
+ * tool calls as collapsed state rows — tokens only, no inline colors. */
+function ChatTurnRow({ turn }: { turn: HerdrConversationTurn }) {
+  if (turn.kind === "user") {
+    return (
+      <View style={styles.turnUser}>
+        <Text style={styles.turnUserText}>{turn.text}</Text>
+      </View>
+    );
+  }
+  if (turn.kind === "assistant") {
+    return (
+      <View style={styles.turnAssistant}>
+        <Text style={styles.turnAssistantText}>{turn.text}</Text>
+      </View>
+    );
+  }
+  const glyph = turn.state === "error" ? "✕" : turn.state === "running" ? "…" : "✓";
+  return (
+    <View style={[styles.turnTool, turn.state === "error" && styles.turnToolError]}>
+      <Text style={[styles.turnToolGlyph, turn.state === "error" && styles.turnToolGlyphError]}>
+        {glyph}
+      </Text>
+      <View style={styles.turnToolBody}>
+        <Text style={styles.turnToolTitle} numberOfLines={1}>{turn.title}</Text>
+        {turn.detail !== null ? (
+          <Text style={styles.turnToolDetail} numberOfLines={2}>{turn.detail}</Text>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+/** agy summary card (documented SQL summary only — the bodies are
+ * undocumented blobs, so the ANSI transcript stays underneath). */
+function AgySummaryCard(props: {
+  summary: { title: string; status: string; stepCount: number; preview: string };
+  statusLabel: (status: string) => string;
+}) {
+  return (
+    <View style={styles.summaryCard}>
+      <Text style={styles.summaryTitle} numberOfLines={2}>{props.summary.title}</Text>
+      <View style={styles.summaryMeta}>
+        <StatusPill status={summaryStatus(props.summary.status)} />
+        <Text style={styles.summarySteps}>
+          {`${copy.summarySteps} ${props.summary.stepCount}`}
+        </Text>
+      </View>
+      {props.summary.preview.length > 0 ? (
+        <Text style={styles.summaryPreview} numberOfLines={4}>{props.summary.preview}</Text>
+      ) : null}
+    </View>
   );
 }
 
@@ -489,4 +571,87 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   sendDisabled: { backgroundColor: colors.ctaDisabled },
+  turnUser: {
+    alignSelf: "flex-end",
+    maxWidth: "85%",
+    backgroundColor: colors.surface,
+    borderColor: colors.hairline,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.l,
+    borderBottomRightRadius: radius.s,
+    paddingHorizontal: space.m,
+    paddingVertical: space.s,
+    marginBottom: space.s,
+  },
+  turnUserText: {
+    ...typeScale.body,
+    color: colors.ink,
+  },
+  turnAssistant: {
+    alignSelf: "flex-start",
+    maxWidth: "92%",
+    marginBottom: space.s,
+  },
+  turnAssistantText: {
+    ...typeScale.body,
+    color: colors.ink,
+  },
+  turnTool: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.s,
+    alignSelf: "flex-start",
+    maxWidth: "92%",
+    backgroundColor: colors.surface,
+    borderColor: colors.hairline,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.m,
+    paddingHorizontal: space.m,
+    paddingVertical: space.s,
+    marginBottom: space.s,
+  },
+  turnToolError: { borderColor: colors.danger },
+  turnToolGlyph: {
+    ...typeScale.captionStrong,
+    color: colors.inkMute,
+    fontFamily: "Menlo",
+  },
+  turnToolGlyphError: { color: colors.danger },
+  turnToolBody: { flexShrink: 1, gap: 2 },
+  turnToolTitle: {
+    ...typeScale.captionStrong,
+    color: colors.ink,
+    fontFamily: "Menlo",
+  },
+  turnToolDetail: {
+    ...typeScale.caption,
+    color: colors.inkFaint,
+    fontFamily: "Menlo",
+  },
+  summaryCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.hairline,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.l,
+    padding: space.m,
+    gap: space.s,
+    marginBottom: space.m,
+  },
+  summaryTitle: {
+    ...typeScale.bodyStrong,
+    color: colors.ink,
+  },
+  summaryMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.s,
+  },
+  summarySteps: {
+    ...typeScale.caption,
+    color: colors.inkFaint,
+  },
+  summaryPreview: {
+    ...typeScale.caption,
+    color: colors.inkMute,
+  },
 });

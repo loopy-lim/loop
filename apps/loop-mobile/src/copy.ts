@@ -83,6 +83,9 @@ export const copy = {
   statusBlocked: "승인 대기",
   statusDone: "완료",
   statusUnknown: "알 수 없음",
+
+  // Structured chat (agent-session adapters)
+  summarySteps: "스텝",
 } as const;
 
 export function statusLabel(status: string): string {

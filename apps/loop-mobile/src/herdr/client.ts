@@ -12,6 +12,7 @@ import type { ConnectionConfig } from "../auth/connection";
 import { GatewayError, responseError } from "../gateway-client/problem";
 import type {
   HerdrAgentStarted,
+  HerdrConversation,
   HerdrIntegration,
   HerdrPaneReading,
   HerdrState,
@@ -98,6 +99,15 @@ export class HerdrClient {
     const query = params.size > 0 ? `?${params.toString()}` : "";
     return await this.#json<HerdrPaneReading>(
       `/v1/herdr/panes/${encodeURIComponent(paneId)}/read${query}`,
+    );
+  }
+
+  /** GET /v1/herdr/panes/{paneId}/conversation — structured turns or a
+   * summary card; 404 (GatewayError) when the kind has no usable source and
+   * the ANSI transcript stays the surface. */
+  async conversation(paneId: string): Promise<HerdrConversation> {
+    return await this.#json<HerdrConversation>(
+      `/v1/herdr/panes/${encodeURIComponent(paneId)}/conversation`,
     );
   }
 

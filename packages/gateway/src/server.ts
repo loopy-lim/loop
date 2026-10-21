@@ -14,6 +14,7 @@ import type { HerdrStateMonitor } from "./herdr-state";
 import { DEFAULT_AUTH_ENV_NAMES } from "./config";
 import type { OutboundFrame } from "./events";
 import { ProblemError, problemResponse } from "./problem";
+import { resolveAgentConversation } from "./agent-sessions";
 import type { AuthVerifier, PeerIdentityVerifier } from "./auth";
 import { decodeListCursor } from "./cursor";
 import type { PaneMirror } from "./pane-mirror";
@@ -742,6 +743,21 @@ async function handleHerdrRoute(
     });
     if (reading === null) return problemResponse(404, "pane_not_found", requestId);
     return jsonResponse(reading, 200, requestId);
+  }
+
+  // GET /v1/herdr/panes/{paneId}/conversation — the pane's agent session as
+  // structured turns (claude/codex session files) or a summary card (agy).
+  // Unmapped kinds and missing sources 404: the app keeps its ANSI mirror.
+  if (segments.length === 5 && segments[2] === "panes" && segments[4] === "conversation") {
+    if (request.method !== "GET") return problemResponse(405, "method_not_allowed", requestId);
+    const paneId = decodeHerdrSegment(routeSegment(segments, 3));
+    const pane = monitor.current().panes.find((entry) => entry.id === paneId);
+    if (pane === undefined || pane.agent === null || pane.cwd === null) {
+      return problemResponse(404, "conversation_unavailable", requestId);
+    }
+    const conversation = resolveAgentConversation(pane.agent, pane.cwd);
+    if (conversation === null) return problemResponse(404, "conversation_unavailable", requestId);
+    return jsonResponse({ paneId, ...conversation }, 200, requestId);
   }
 
   // POST /v1/herdr/panes/{paneId}/prompt — deliver text to the pane's agent.

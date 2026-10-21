@@ -17,6 +17,7 @@ export type ProblemCode =
   | "method_not_allowed"
   | "run_not_found"
   | "pane_not_found"
+  | "conversation_unavailable"
   | "session_not_found"
   | "attachment_not_found"
   | "attachment_too_large"
@@ -62,6 +63,7 @@ const TITLES: Record<ProblemCode, string> = {
   method_not_allowed: "Method not allowed",
   run_not_found: "Run not found",
   pane_not_found: "Pane not found",
+  conversation_unavailable: "No structured conversation for this pane",
   session_not_found: "Session not found",
   attachment_not_found: "Attachment not found",
   attachment_too_large: "Attachment too large",

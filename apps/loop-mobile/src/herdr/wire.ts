@@ -69,6 +69,34 @@ export type HerdrPaneReading = {
   truncated: boolean;
 };
 
+/** One structured conversation turn (agent-session adapters; the gateway
+ * normalizes claude/codex session files into this shape). */
+export type HerdrConversationTurn =
+  | { kind: "user"; id: string; text: string; at: string | null }
+  | { kind: "assistant"; id: string; text: string; at: string | null }
+  | {
+      kind: "tool";
+      id: string;
+      title: string;
+      detail: string | null;
+      state: "running" | "done" | "error";
+      at: string | null;
+    };
+
+export type HerdrConversationSummary = {
+  title: string;
+  status: string;
+  stepCount: number;
+  preview: string;
+  modifiedAt: string | null;
+};
+
+/** GET /v1/herdr/panes/{paneId}/conversation response body: structured turns
+ * (claude/codex) or a summary card (agy — bodies are undocumented blobs). */
+export type HerdrConversation =
+  | { paneId: string; surface: "turns"; kind: string; source: string; turns: HerdrConversationTurn[]; truncated: boolean }
+  | { paneId: string; surface: "summary"; kind: "agy"; source: string; summary: HerdrConversationSummary };
+
 /** GET /v1/herdr/integrations response body entry. */
 export type HerdrIntegration = {
   target: string;
