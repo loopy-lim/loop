@@ -31,6 +31,7 @@ import { useHerdrState, useStore } from "./storeContext";
 import { impactLight } from "../ui/haptics";
 import { Icon } from "../ui/Icon";
 import type { IconRole } from "../ui/glyphs";
+import { TabScaleIcon } from "../ui/motion";
 import { ScreenStack } from "../ui/ScreenStack";
 import { colors, space, type as typeScale } from "../ui/tokens";
 
@@ -151,7 +152,9 @@ function TabBar(props: { tab: TabName; onSwitch: (tab: TabName) => void }) {
             accessibilityLabel={tab.label}
             accessibilityState={{ selected: active }}
           >
-            <Icon role={tab.role} size={typeScale.title.fontSize} color={active ? colors.accent : colors.inkFaint} />
+            <TabScaleIcon active={active}>
+              <Icon role={tab.role} size={typeScale.title.fontSize} color={active ? colors.accent : colors.inkFaint} />
+            </TabScaleIcon>
             <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>{tab.label}</Text>
           </Pressable>
         );

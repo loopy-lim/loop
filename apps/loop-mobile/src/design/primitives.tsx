@@ -8,8 +8,6 @@
 
 import type { ReactNode } from "react";
 import {
-  Modal,
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -22,7 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { statusLabel } from "../copy";
 import { Icon } from "../ui/Icon";
-import { PulseDot } from "../ui/motion";
+import { AnimatedSheet, PressableScale, PulseDot } from "../ui/motion";
 import { colors, press, radius, space, type as typeScale } from "../ui/tokens";
 import type { HerdrAgentStatus } from "../herdr/wire";
 
@@ -143,15 +141,14 @@ export function PressableRow(props: {
   accessibilityLabel?: string;
 }) {
   return (
-    <Pressable
+    <PressableScale
       onPress={props.onPress}
-      android_ripple={{ color: colors.surfaceAlt }}
-      style={({ pressed }) => [pressStyle.base, props.style, pressed && pressStyle.pressed]}
-      accessibilityRole="button"
+      targetScale={0.985}
+      style={[pressStyle.base, props.style]}
       accessibilityLabel={props.accessibilityLabel}
     >
       {props.children}
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -208,12 +205,17 @@ export function Sheet(props: {
 }) {
   const insets = useSafeAreaInsets();
   return (
-    <Modal visible={props.visible} transparent animationType="slide" onRequestClose={props.onClose}>
-      <View style={sheetStyles.backdrop}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={props.onClose} accessibilityLabel="닫기" />
-        <View style={[sheetStyles.panel, { paddingBottom: insets.bottom + space.l }]}>
-          <View style={sheetStyles.grabber} />
-          <Text style={sheetStyles.title}>{props.title}</Text>
+    <AnimatedSheet
+      visible={props.visible}
+      onClose={props.onClose}
+      panelStyle={[sheetStyles.panel, { paddingBottom: insets.bottom + space.l }]}
+    >
+      {(panHandlers) => (
+        <>
+          <View {...panHandlers} style={sheetStyles.headerDragZone}>
+            <View style={sheetStyles.grabber} />
+            <Text style={sheetStyles.title}>{props.title}</Text>
+          </View>
           {props.scrollable === true ? (
             <ScrollView style={sheetStyles.body} keyboardShouldPersistTaps="handled">
               {props.children}
@@ -221,18 +223,13 @@ export function Sheet(props: {
           ) : (
             <View style={sheetStyles.body}>{props.children}</View>
           )}
-        </View>
-      </View>
-    </Modal>
+        </>
+      )}
+    </AnimatedSheet>
   );
 }
 
 const sheetStyles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: "rgba(4, 6, 10, 0.6)",
-    justifyContent: "flex-end",
-  },
   panel: {
     backgroundColor: colors.surface,
     borderTopLeftRadius: radius.l,
@@ -240,6 +237,10 @@ const sheetStyles = StyleSheet.create({
     paddingHorizontal: space.l,
     paddingTop: space.s,
     maxHeight: "82%",
+  },
+  headerDragZone: {
+    paddingTop: space.xs,
+    paddingBottom: space.xs,
   },
   grabber: {
     alignSelf: "center",

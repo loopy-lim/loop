@@ -5,7 +5,7 @@
  */
 
 import { useMemo } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { copy } from "../copy";
@@ -15,6 +15,7 @@ import { panesOfTab, type HerdrAppState } from "../herdr/store";
 import type { HerdrPane } from "../herdr/wire";
 import { useStore } from "../app/storeContext";
 import { Icon } from "../ui/Icon";
+import { PressableScale } from "../ui/motion";
 import { colors, radius, space, type as typeScale, COLUMN_GUTTER } from "../ui/tokens";
 import { paneDisplayName } from "../herdr/store";
 
@@ -46,14 +47,14 @@ export function PanesScreen(props: {
     >
       <View style={styles.titleRow}>
         <Text style={styles.title}>{copy.panesTitle}</Text>
-        <Pressable
+        <PressableScale
           onPress={() => void createWorkspace()}
           style={styles.createButton}
           accessibilityLabel={copy.newAgentWorkspaceNew}
         >
           <Icon role="spawn" size={typeScale.caption.fontSize} color={colors.ink} />
           <Text style={styles.createButtonText}>워크스페이스</Text>
-        </Pressable>
+        </PressableScale>
       </View>
 
       {workspaces.length === 0 ? (

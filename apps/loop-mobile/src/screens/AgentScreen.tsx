@@ -37,7 +37,7 @@ import { paneDisplayName } from "../herdr/store";
 import type { HerdrAppState, HerdrStore } from "../herdr/store";
 import { impactLight } from "../ui/haptics";
 import { Icon } from "../ui/Icon";
-import { animateTo, AnimatedView, useMotionValue } from "../ui/motion";
+import { AnimatedView, Entrance, PressableScale, springTo, useMotionValue } from "../ui/motion";
 import { colors, radius, space, type as typeScale, COLUMN_GUTTER } from "../ui/tokens";
 import { useFollowScroll } from "../ui/followScroll";
 import { useKeyboardVisible } from "../ui/useKeyboardVisible";
@@ -193,9 +193,9 @@ export function AgentScreen(props: {
             </Text>
           </View>
           {pane !== null ? <StatusPill status={pane.status} /> : null}
-          <Pressable onPress={() => void focusOnDesktop()} hitSlop={8} accessibilityLabel={copy.focusOnDesktop}>
+          <PressableScale onPress={() => void focusOnDesktop()} accessibilityLabel={copy.focusOnDesktop}>
             <Icon role="forward" size={typeScale.body.fontSize} color={colors.inkFaint} />
-          </Pressable>
+          </PressableScale>
         </View>
         <Segmented
           options={[copy.segmentChat, copy.segmentTerminal]}
@@ -208,13 +208,21 @@ export function AgentScreen(props: {
       </View>
 
       {blocked ? (
-        <View style={styles.blockedBanner}>
-          <Icon role="attention" size={typeScale.caption.fontSize} color={colors.warn} />
-          <Text style={styles.blockedText}>{copy.sendBlocked}</Text>
-          <Pressable onPress={() => void focusOnDesktop()} hitSlop={8}>
-            <Text style={styles.blockedAction}>{copy.focusOnDesktop}</Text>
-          </Pressable>
-        </View>
+        <Entrance>
+          <View style={styles.blockedBanner}>
+            <Icon role="attention" size={typeScale.caption.fontSize} color={colors.warn} />
+            <Text style={styles.blockedText}>{copy.sendBlocked}</Text>
+            <PressableScale onPress={() => void sendKeys(["enter"])} accessibilityLabel={copy.approveEnter}>
+              <Text style={[styles.blockedAction, styles.blockedApprove]}>{copy.approveEnter}</Text>
+            </PressableScale>
+            <PressableScale onPress={() => void sendKeys(["esc"])} accessibilityLabel={copy.rejectEsc}>
+              <Text style={styles.blockedAction}>{copy.rejectEsc}</Text>
+            </PressableScale>
+            <PressableScale onPress={() => void focusOnDesktop()}>
+              <Text style={styles.blockedAction}>{copy.focusOnDesktop}</Text>
+            </PressableScale>
+          </View>
+        </Entrance>
       ) : null}
       {notice !== null ? (
         <Text style={styles.notice}>{notice}</Text>
@@ -262,13 +270,14 @@ export function AgentScreen(props: {
             onChange={setComposerValue}
             onSubmit={() => void send()}
           />
-          <Pressable
+          <PressableScale
             onPress={() => void send()}
+            disabled={composerValue.trim().length === 0 || sending}
             style={[styles.sendButton, (composerValue.trim().length === 0 || sending) && styles.sendDisabled]}
             accessibilityLabel={copy.composerSend}
           >
             <Icon role="send" size={typeScale.body.fontSize} color={colors.ctaInk} />
-          </Pressable>
+          </PressableScale>
         </View>
       </View>
     </KeyboardAvoidingView>
@@ -282,10 +291,10 @@ function Segmented(props: {
   value: 0 | 1;
   onChange: (value: 0 | 1) => void;
 }) {
-  const pos = useMotionValue(0);
+  const pos = useMotionValue(props.value);
   const [frames, setFrames] = useState<{ x: number; w: number }[] | null>(null);
   useEffect(() => {
-    animateTo(pos, props.value, { duration: 180 });
+    void springTo(pos, props.value, { speed: 22, bounciness: 3 });
   }, [pos, props.value]);
   const track = frames !== null && frames.length === 2 ? frames : null;
   const origin = track?.[0];
@@ -338,9 +347,9 @@ function Segmented(props: {
 
 function QuickKey(props: { label: string; onPress: () => void }) {
   return (
-    <Pressable onPress={props.onPress} style={styles.quickKey}>
+    <PressableScale onPress={props.onPress} style={styles.quickKey} accessibilityLabel={props.label}>
       <Text style={styles.quickKeyText}>{props.label}</Text>
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -374,31 +383,37 @@ function TextInputStyled(props: {
 function ChatTurnRow({ turn }: { turn: HerdrConversationTurn }) {
   if (turn.kind === "user") {
     return (
-      <View style={styles.turnUser}>
-        <Text style={styles.turnUserText}>{turn.text}</Text>
-      </View>
+      <Entrance>
+        <View style={styles.turnUser}>
+          <Text style={styles.turnUserText}>{turn.text}</Text>
+        </View>
+      </Entrance>
     );
   }
   if (turn.kind === "assistant") {
     return (
-      <View style={styles.turnAssistant}>
-        <Text style={styles.turnAssistantText}>{turn.text}</Text>
-      </View>
+      <Entrance>
+        <View style={styles.turnAssistant}>
+          <Text style={styles.turnAssistantText}>{turn.text}</Text>
+        </View>
+      </Entrance>
     );
   }
   const glyph = turn.state === "error" ? "✕" : turn.state === "running" ? "…" : "✓";
   return (
-    <View style={[styles.turnTool, turn.state === "error" && styles.turnToolError]}>
-      <Text style={[styles.turnToolGlyph, turn.state === "error" && styles.turnToolGlyphError]}>
-        {glyph}
-      </Text>
-      <View style={styles.turnToolBody}>
-        <Text style={styles.turnToolTitle} numberOfLines={1}>{turn.title}</Text>
-        {turn.detail !== null ? (
-          <Text style={styles.turnToolDetail} numberOfLines={2}>{turn.detail}</Text>
-        ) : null}
+    <Entrance>
+      <View style={[styles.turnTool, turn.state === "error" && styles.turnToolError]}>
+        <Text style={[styles.turnToolGlyph, turn.state === "error" && styles.turnToolGlyphError]}>
+          {glyph}
+        </Text>
+        <View style={styles.turnToolBody}>
+          <Text style={styles.turnToolTitle} numberOfLines={1}>{turn.title}</Text>
+          {turn.detail !== null ? (
+            <Text style={styles.turnToolDetail} numberOfLines={2}>{turn.detail}</Text>
+          ) : null}
+        </View>
       </View>
-    </View>
+    </Entrance>
   );
 }
 
@@ -409,18 +424,20 @@ function AgySummaryCard(props: {
   statusLabel: (status: string) => string;
 }) {
   return (
-    <View style={styles.summaryCard}>
-      <Text style={styles.summaryTitle} numberOfLines={2}>{props.summary.title}</Text>
-      <View style={styles.summaryMeta}>
-        <StatusPill status={summaryStatus(props.summary.status)} />
-        <Text style={styles.summarySteps}>
-          {`${copy.summarySteps} ${props.summary.stepCount}`}
-        </Text>
+    <Entrance>
+      <View style={styles.summaryCard}>
+        <Text style={styles.summaryTitle} numberOfLines={2}>{props.summary.title}</Text>
+        <View style={styles.summaryMeta}>
+          <StatusPill status={summaryStatus(props.summary.status)} />
+          <Text style={styles.summarySteps}>
+            {`${copy.summarySteps} ${props.summary.stepCount}`}
+          </Text>
+        </View>
+        {props.summary.preview.length > 0 ? (
+          <Text style={styles.summaryPreview} numberOfLines={4}>{props.summary.preview}</Text>
+        ) : null}
       </View>
-      {props.summary.preview.length > 0 ? (
-        <Text style={styles.summaryPreview} numberOfLines={4}>{props.summary.preview}</Text>
-      ) : null}
-    </View>
+    </Entrance>
   );
 }
 
@@ -509,6 +526,7 @@ const styles = StyleSheet.create({
     ...typeScale.captionStrong,
     color: colors.warn,
   },
+  blockedApprove: { color: colors.ctaInk },
   notice: {
     ...typeScale.caption,
     color: colors.inkFaint,

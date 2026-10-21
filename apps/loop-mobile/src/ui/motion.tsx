@@ -13,11 +13,22 @@
  * transforms and opacity only — so JS-thread transcript updates never stutter
  * a transition.
  */
-import { useEffect, useRef, type ReactNode } from "react";
-import { Animated, Easing, Pressable, type StyleProp, type ViewStyle } from "react-native";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Animated,
+  Easing,
+  Modal,
+  PanResponder,
+  Pressable,
+  StyleSheet,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from "react-native";
 
 import { BEHIND_DIM, BEHIND_PARALLAX } from "./back-swipe";
-import { press } from "./tokens";
+import { impactLight } from "./haptics";
+import { motion as motionTokens, press } from "./tokens";
 
 /** Pre-created animated container: callers never import Animated itself. */
 export const AnimatedView = Animated.View;
@@ -82,14 +93,27 @@ export function animateTo(
   });
 }
 
-/** Spring back to rest (gesture cancellation). */
-export function springTo(value: MotionValue, to: number): Promise<void> {
+/** Spring back to rest (gesture cancellation, elastic transitions). */
+export function springTo(
+  value: MotionValue,
+  to: number,
+  opts: {
+    speed?: number;
+    bounciness?: number;
+    velocity?: number;
+    tension?: number;
+    friction?: number;
+  } = {},
+): Promise<void> {
   value.stopAnimation();
   return new Promise((resolve) => {
     Animated.spring(value, {
       toValue: to,
-      speed: 28,
-      bounciness: 5,
+      speed: opts.speed ?? 26,
+      bounciness: opts.bounciness ?? 4,
+      velocity: opts.velocity,
+      tension: opts.tension,
+      friction: opts.friction,
       useNativeDriver: true,
     }).start(() => resolve());
   });
@@ -97,25 +121,26 @@ export function springTo(value: MotionValue, to: number): Promise<void> {
 
 // ——— PressableScale ————————————————————————————————————————————————————————
 
-/** A pressable that presses DOWN: scale + dim while the touch is active,
- * springs back on release. The FAB, chips, and CTA-sized buttons use this —
- * list rows keep the flat highlight (PressableRow) per iOS list convention. */
+/** A pressable that presses DOWN: subtle scale + dim while the touch is active,
+ * springs back on release. Used for cards, rows, FAB, and interactive keys. */
 export function PressableScale(props: {
   onPress: () => void;
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
   disabled?: boolean;
   accessibilityLabel?: string;
+  targetScale?: number;
 }) {
+  const target = props.targetScale ?? 0.94;
   const scale = useMotionValue(1);
   const dim = useMotionValue(1);
   const pressIn = (): void => {
-    animateTo(scale, 0.94, { duration: 120 });
-    animateTo(dim, press.activeOpacity, { duration: 120 });
+    void animateTo(scale, target, { duration: 100 });
+    void animateTo(dim, press.activeOpacity, { duration: 100 });
   };
   const pressOut = (): void => {
-    springTo(scale, 1);
-    animateTo(dim, 1, { duration: 140 });
+    void springTo(scale, 1, { speed: 32, bounciness: 4 });
+    void animateTo(dim, 1, { duration: 140 });
   };
   return (
     <Pressable
@@ -140,23 +165,23 @@ export function PressableScale(props: {
 
 // ——— PulseDot ———————————————————————————————————————————————————————————————
 
-/** The live-status dot: a quiet two-frame-style opacity pulse on the
+/** The live-status dot: a quiet synchronized opacity + scale pulse on the
  * registered `pulse` period (tokens.motion). Working is the one status that
  * may breathe — idle/blocked/done stay static. */
 export function PulseDot(props: { color: string; size?: number }) {
   const size = props.size ?? 6;
-  const opacity = useMotionValue(1);
+  const progress = useMotionValue(0);
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(opacity, {
-          toValue: 0.45,
+        Animated.timing(progress, {
+          toValue: 1,
           duration: 450,
           easing: Easing.inOut(Easing.quad),
           useNativeDriver: true,
         }),
-        Animated.timing(opacity, {
-          toValue: 1,
+        Animated.timing(progress, {
+          toValue: 0,
           duration: 450,
           easing: Easing.inOut(Easing.quad),
           useNativeDriver: true,
@@ -165,7 +190,17 @@ export function PulseDot(props: { color: string; size?: number }) {
     );
     loop.start();
     return () => loop.stop();
-  }, [opacity]);
+  }, [progress]);
+
+  const opacity = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0.45],
+  });
+  const scale = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.2],
+  });
+
   return (
     <AnimatedView
       style={{
@@ -174,7 +209,158 @@ export function PulseDot(props: { color: string; size?: number }) {
         borderRadius: size / 2,
         backgroundColor: props.color,
         opacity,
+        transform: [{ scale }],
       }}
     />
   );
 }
+
+// ——— TabScaleIcon ——————————————————————————————————————————————————————————
+
+/** Tab icon with micro-bounce spring when activated (iOS 17/18 tab bar feel). */
+export function TabScaleIcon(props: { active: boolean; children: ReactNode }) {
+  const scale = useMotionValue(1);
+  const prevActive = useRef(props.active);
+  useEffect(() => {
+    if (!prevActive.current && props.active) {
+      scale.setValue(0.86);
+      void springTo(scale, 1, { speed: 30, bounciness: 8 });
+    }
+    prevActive.current = props.active;
+  }, [props.active, scale]);
+
+  return (
+    <AnimatedView style={{ transform: [{ scale }] }}>
+      {props.children}
+    </AnimatedView>
+  );
+}
+
+// ——— Entrance ——————————————————————————————————————————————————————————————
+
+/** One-time entrance fade + rise (tokens.motion.entrance, ≤4pt rise).
+ * Used for chat turns, stream updates, and cards arriving. */
+export function Entrance(props: {
+  children: ReactNode;
+  style?: StyleProp<ViewStyle>;
+  delay?: number;
+}) {
+  const progress = useMotionValue(0);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void animateTo(progress, 1, {
+        duration: motionTokens.entrance,
+        easing: easing.enter,
+      });
+    }, props.delay ?? 0);
+    return () => clearTimeout(timer);
+  }, [progress, props.delay]);
+
+  const opacity = progress.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
+  const translateY = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [motionTokens.entranceOffset, 0],
+  });
+
+  return (
+    <AnimatedView style={[props.style, { opacity, transform: [{ translateY }] }]}>
+      {props.children}
+    </AnimatedView>
+  );
+}
+
+// ——— AnimatedSheet —————————————————————————————————————————————————————————
+
+/** Bottom sheet modal container with animated backdrop fade, spring slide-up,
+ * and drag-down-to-dismiss gesture on the grabber / header. */
+export function AnimatedSheet(props: {
+  visible: boolean;
+  onClose: () => void;
+  children: (panHandlers: object) => ReactNode;
+  backdropStyle?: StyleProp<ViewStyle>;
+  panelStyle?: StyleProp<ViewStyle>;
+}) {
+  const [mounted, setMounted] = useState(props.visible);
+  const backdropOpacity = useMotionValue(0);
+  const translateY = useMotionValue(500);
+  const closingRef = useRef(false);
+
+  useEffect(() => {
+    if (props.visible) {
+      closingRef.current = false;
+      setMounted(true);
+      translateY.setValue(500);
+      backdropOpacity.setValue(0);
+      void animateTo(backdropOpacity, 1, { duration: 200, easing: easing.enter });
+      void springTo(translateY, 0, { speed: 24, bounciness: 2 });
+    } else if (mounted && !closingRef.current) {
+      closingRef.current = true;
+      void animateTo(backdropOpacity, 0, { duration: 180, easing: easing.exit });
+      void animateTo(translateY, 500, { duration: 200, easing: easing.exit }).then(() => {
+        setMounted(false);
+        closingRef.current = false;
+      });
+    }
+  }, [props.visible, mounted, backdropOpacity, translateY]);
+
+  const requestClose = () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    impactLight();
+    void animateTo(backdropOpacity, 0, { duration: 180, easing: easing.exit });
+    void animateTo(translateY, 500, { duration: 200, easing: easing.exit }).then(() => {
+      setMounted(false);
+      closingRef.current = false;
+      props.onClose();
+    });
+  };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gesture) => gesture.dy > 6,
+      onPanResponderMove: (_, gesture) => {
+        const offset = gesture.dy > 0 ? gesture.dy : gesture.dy * 0.2;
+        translateY.setValue(offset);
+      },
+      onPanResponderRelease: (_, gesture) => {
+        if (gesture.dy > 90 || (gesture.dy > 30 && gesture.vy > 0.5)) {
+          requestClose();
+        } else {
+          void springTo(translateY, 0, { speed: 28, bounciness: 4 });
+        }
+      },
+    }),
+  ).current;
+
+  if (!mounted) return null;
+
+  return (
+    <Modal visible={mounted} transparent animationType="none" onRequestClose={requestClose}>
+      <View style={sheetContainerStyles.root}>
+        <AnimatedView
+          style={[
+            StyleSheet.absoluteFill,
+            sheetContainerStyles.backdrop,
+            props.backdropStyle,
+            { opacity: backdropOpacity },
+          ]}
+        >
+          <Pressable style={StyleSheet.absoluteFill} onPress={requestClose} accessibilityLabel="닫기" />
+        </AnimatedView>
+        <AnimatedView style={[props.panelStyle, { transform: [{ translateY }] }]}>
+          {props.children(panResponder.panHandlers)}
+        </AnimatedView>
+      </View>
+    </Modal>
+  );
+}
+
+const sheetContainerStyles = StyleSheet.create({
+  root: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  backdrop: {
+    backgroundColor: "rgba(4, 6, 10, 0.6)",
+  },
+});

@@ -159,14 +159,19 @@ export function ScreenStack(props: {
       const bound = next.bounds[index];
       if (bound === undefined) continue;
       if (t.exiting) {
-        void animateTo(bound, 0, { duration: 220, easing: easing.exit }).then(() => {
+        const curVal =
+          typeof (bound as unknown as { _value?: number })._value === "number"
+            ? Math.max(0, Math.min(1, (bound as unknown as { _value: number })._value))
+            : 1;
+        const duration = Math.max(80, Math.round(curVal * 200));
+        void animateTo(bound, 0, { duration, easing: easing.exit }).then(() => {
           commitRemove(t.uid);
         });
         continue;
       }
       if (!added.includes(t.key) || initialMount) continue;
       enteringRef.current.add(t.uid);
-      void animateTo(bound, 1, { duration: 320, easing: easing.enter }).then(() => {
+      void animateTo(bound, 1, { duration: 280, easing: easing.enter }).then(() => {
         enteringRef.current.delete(t.uid);
       });
     }
@@ -214,14 +219,14 @@ export function ScreenStack(props: {
           impactLight();
           live.onBack(); // the sync animates the SAME boundary on out
         } else {
-          void springTo(bound, 1); // back to covering
+          void springTo(bound, 1, { speed: 30, bounciness: 4 }); // back to covering
         }
       },
       onPanResponderTerminate: (_event, _gesture) => {
         const { frame: f } = liveRef.current;
         const topIndex = topAliveIndex(f);
         const bound = f.bounds[topIndex];
-        if (bound !== undefined) void springTo(bound, 1);
+        if (bound !== undefined) void springTo(bound, 1, { speed: 30, bounciness: 4 });
       },
     }),
   ).current;
