@@ -26,8 +26,6 @@ export type RouterAction =
   | { type: "pop" }
   | { type: "popToRoot" };
 
-const TABS: readonly TabName[] = ["herd", "panes", "settings"];
-
 function emptyStacks(): Record<TabName, Route[]> {
   return { herd: [], panes: [], settings: [] };
 }

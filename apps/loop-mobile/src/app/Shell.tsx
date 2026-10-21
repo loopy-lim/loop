@@ -31,7 +31,7 @@ import { useHerdrState, useStore } from "./storeContext";
 import { impactLight } from "../ui/haptics";
 import { Icon } from "../ui/Icon";
 import type { IconRole } from "../ui/glyphs";
-import { ScreenStack, type StackEntry } from "../ui/ScreenStack";
+import { ScreenStack } from "../ui/ScreenStack";
 import { colors, space, type as typeScale } from "../ui/tokens";
 
 const TABS: { name: TabName; role: IconRole; label: string }[] = [

@@ -13,7 +13,6 @@
     "pod": "cd ios && pod install"
   },
   "dependencies": {
-    "@loop/protocol": "file:../../packages/protocol",
     "react": "19.1.0",
     "react-native": "0.81.4",
     "react-native-keychain": "^10.0.0",
@@ -30,7 +29,6 @@
     "@react-native/babel-preset": "0.81.4",
     "@react-native/metro-config": "0.81.4",
     "@types/react": "19.1.16",
-    "@types/react-test-renderer": "19.1.0",
     "react-test-renderer": "19.1.0"
   },
   "engines": {

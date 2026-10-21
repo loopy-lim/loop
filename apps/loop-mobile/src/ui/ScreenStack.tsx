@@ -21,12 +21,7 @@ import { useEffect, useRef, useState } from "react";
 import { PanResponder, StyleSheet, View, useWindowDimensions } from "react-native";
 import type { ReactNode } from "react";
 
-import {
-  BACK_EDGE_WIDTH,
-  gestureProgress,
-  isBackGestureStart,
-  resolveBackSwipe,
-} from "./back-swipe";
+import { gestureProgress, isBackGestureStart, resolveBackSwipe } from "./back-swipe";
 import { impactLight } from "./haptics";
 import {
   animateTo,
@@ -123,7 +118,7 @@ export function ScreenStack(props: {
     // A push landing mid-enter snaps the in-flight slide to rest first, so
     // rapid taps never see the under-screen jump. A key that is itself being
     // removed keeps its mid-flight value — its exit reverses from there.
-    for (const uid of [...enteringRef.current]) {
+    for (const uid of enteringRef.current) {
       const index = cur.tracked.findIndex((t) => t.uid === uid);
       const tracked = index === -1 ? undefined : cur.tracked[index];
       if (tracked !== undefined && !removed.includes(tracked)) {

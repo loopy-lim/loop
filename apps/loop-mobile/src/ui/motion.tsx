@@ -14,10 +14,10 @@
  * a transition.
  */
 import { useEffect, useRef, type ReactNode } from "react";
-import { Animated, Easing, Pressable, View, type StyleProp, type ViewStyle } from "react-native";
+import { Animated, Easing, Pressable, type StyleProp, type ViewStyle } from "react-native";
 
 import { BEHIND_DIM, BEHIND_PARALLAX } from "./back-swipe";
-import { colors, press } from "./tokens";
+import { press } from "./tokens";
 
 /** Pre-created animated container: callers never import Animated itself. */
 export const AnimatedView = Animated.View;
