@@ -97,14 +97,14 @@ describe("iOS SF Symbol render path — the native LoopIcon view stays wired", (
   });
 
   test("chrome icons render through Icon — no raw DynText glyph marks remain", () => {
+    // Herd rebuild IA (rebuild brief §3): the tab shell and every screen.
     const chromeFiles = [
-      "src/ui/TabBar.tsx",
-      "src/ui/DrawerMenu.tsx",
-      "src/App.tsx",
+      "src/app/Shell.tsx",
+      "src/screens/HerdScreen.tsx",
+      "src/screens/AgentScreen.tsx",
+      "src/screens/TerminalScreen.tsx",
+      "src/screens/PanesScreen.tsx",
       "src/screens/SettingsScreen.tsx",
-      "src/screens/RunScreen.tsx",
-      "src/features/run-list.tsx",
-      "src/features/spawn-fab.tsx",
     ];
     for (const file of chromeFiles) {
       const source = read(file);
@@ -114,14 +114,7 @@ describe("iOS SF Symbol render path — the native LoopIcon view stays wired", (
         "back",
         "logout",
         "attention",
-        "attach",
         "send",
-        "remove",
-        "copy",
-        "statusRunning",
-        "statusDone",
-        "statusError",
-        "statusDot",
         "spawn",
         "tabChats",
         "tabFiles",
@@ -130,31 +123,5 @@ describe("iOS SF Symbol render path — the native LoopIcon view stays wired", (
         expect(source, `${file} renders {glyph.${role}} directly`).not.toContain(`glyph.${role}`);
       }
     }
-  });
-});
-
-describe("spawn FAB — the card is gone, the floating action stays honest", () => {
-  test("the spawn card was replaced by the FAB (no dual surface)", () => {
-    expect(existsSync(join(mobileRoot, "src/features/spawn-card.tsx"))).toBe(false);
-    const screen = read("src/screens/SubmitScreen.tsx");
-    expect(screen).toContain("<SpawnFab");
-    expect(screen).not.toContain("SpawnSessionCard");
-  });
-
-  test("the FAB keeps the flow's states above the button", () => {
-    const fab = read("src/features/spawn-fab.tsx");
-    expect(fab).toContain('status.kind === "busy" ? "busy" : "spawn"');
-    expect(fab).toContain("accessibilityLabel={SPAWN_TUI_LABEL}");
-    expect(fab).toContain("width: 56");
-    expect(fab).toContain("height: 56");
-    expect(fab).toContain("SPAWN_TUI_SPAWNING");
-    expect(fab).toContain("SPAWN_TUI_WAITING");
-    expect(fab).toContain("SPAWN_TUI_TIMEOUT_PREFIX");
-    expect(fab).toContain("SPAWN_TUI_BLOCKED");
-    // secondary tier: surface fill + hairline + float elevation — never a
-    // second strong emphasis on the composer's viewport (canon §4)
-    expect(fab).toContain("colors.surface");
-    expect(fab).toContain("colors.hairline");
-    expect(fab).toContain("elevation.float");
   });
 });

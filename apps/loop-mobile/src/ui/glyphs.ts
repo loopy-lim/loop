@@ -41,6 +41,9 @@ const ICON_ROLES = {
   tabChats: { sf: "house", text: "⌂" },
   tabFiles: { sf: "folder", text: "▭" },
   tabSettings: { sf: "gearshape", text: "⚙" },
+  /** Herd rebuild (rebuild brief §3): the Panes tab and agent marks. */
+  tabPanes: { sf: "rectangle.split.2x2", text: "▤" },
+  agent: { sf: "sparkles", text: "✦" },
   /** Header/settings logout (destructive, behind the confirmation). */
   logout: { sf: "power", text: "⏻" },
   /** Attention status signal. */

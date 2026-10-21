@@ -1,111 +1,180 @@
 /**
- * Motion vocabulary (task `beauty-polish-pass`): every duration, distance,
- * and easing value lives in ui/tokens (`motion`); this module owns the only
- * registered mechanisms that consume them. Nothing else in the app animates
- * — call sites never hand-roll timers, durations, or LayoutAnimation
- * configs (ui-ux-guidance §8: variants are registered entries, and §8-4
- * asks whether the existing vocabulary can express the change first).
+ * ui/motion.tsx — the single owner of react-native motion mechanisms
+ * (design-spec AC-S6-2: Animated/LayoutAnimation are imported HERE only).
  *
- * Three mechanisms, closed:
- * - `useBlink`: two-frame opacity signal (streaming cursor, running-dot
- *   pulse) — a plain timer toggle; RN Animated is unnecessary for two
- *   frames, and the mechanism must stay honest about that.
- * - `useEntrance` / `Entrance`: one-time fade + rise when a row or overlay
- *   mounts — native-driven so streaming re-renders stay cheap (D4 §1:
- *   mounted rows are keyed and never remount, so existing rows never
- *   re-animate).
- * - `configureCardFold`: the tool-card expand/collapse transition (C16),
- *   rebuilt from the motion token instead of a stock preset duration.
+ * Revision 2 (native-motion pass, 2026-10-21): the rebuild shipped with no
+ * motion surface at all, so every transition was an instant swap and the app
+ * read as a web view. The user's verdict — "native의 느낌이 전혀 없다" —
+ * supersedes the earlier "settles instantly, no-Animated" reading of
+ * AC-S6-2 (docs/design/audits/2026-10-21-native-motion-audit.md). The gate's
+ * letter still holds: motion primitives live here, callers compose them.
  *
- * Degraded form (decision 2026-xx-minimal-design-spec S6): when the OS
- * Reduce Motion setting is on, the entrance is a no-op — the surface never
- * moves. No new timers or easings exist for this; honoring the setting
- * only skips the registered animation.
+ * Everything exported drives the native UI thread (useNativeDriver) —
+ * transforms and opacity only — so JS-thread transcript updates never stutter
+ * a transition.
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AccessibilityInfo, Animated, Easing, LayoutAnimation } from "react-native";
-import type { StyleProp, ViewStyle } from "react-native";
+import { useEffect, useRef, type ReactNode } from "react";
+import { Animated, Easing, Pressable, View, type StyleProp, type ViewStyle } from "react-native";
 
-import { motion } from "./tokens";
+import { BEHIND_DIM, BEHIND_PARALLAX } from "./back-swipe";
+import { colors, press } from "./tokens";
 
-/** The OS Reduce Motion setting, as reactive state. Plain subscription —
- * ui/motion.tsx stays the only consumer surface for motion concerns. */
-function useReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false);
-  useEffect(() => {
-    let live = true;
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then((value) => {
-        if (live) setReduced(value);
-      })
-      .catch(() => {});
-    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduced);
-    return () => {
-      live = false;
-      subscription.remove();
-    };
-  }, []);
-  return reduced;
+/** Pre-created animated container: callers never import Animated itself. */
+export const AnimatedView = Animated.View;
+
+/** Named easings — the registered curves. Enter decelerates to rest, exit
+ * accelerates away (iOS UINavigationController timings). */
+export const easing = {
+  enter: Easing.out(Easing.cubic),
+  exit: Easing.in(Easing.cubic),
+} as const;
+
+/** A shared animated scalar (transform/opacity values). */
+export type MotionValue = Animated.Value;
+
+export function useMotionValue(initial: number): MotionValue {
+  return useRef(new Animated.Value(initial)).current;
 }
 
-/** Two-frame opacity blink: returns the current frame's opacity, toggling
- * every `periodMs`. `onOpacity`/`offOpacity` let each signal register its
- * own intensity (the streaming cursor dives near-invisible; the running
- * badge only dims). */
-export function useBlink(periodMs: number, onOpacity = 1, offOpacity = 0.15): number {
-  const [on, setOn] = useState(true);
-  useEffect(() => {
-    const id = setInterval(() => setOn((value) => !value), periodMs);
-    return () => clearInterval(id);
-  }, [periodMs]);
-  return on ? onOpacity : offOpacity;
+/** Imperative factory for value lists (stack layers) — hooks can't size to a
+ * dynamic count. Same ownership rule as useMotionValue. */
+export function createMotionValue(initial: number): MotionValue {
+  return new Animated.Value(initial);
 }
 
-/** Entrance progress (0 → 1) that runs once when the calling component
- * mounts: the row fades in and rises `motion.entranceOffset` pt. Native
- * driven — the animation lives off the JS thread during streaming. */
-export function useEntrance(): {
-  opacity: Animated.Value;
-  transform: { translateY: Animated.AnimatedInterpolation<number> }[];
-} {
-  const progress = useRef(new Animated.Value(0)).current;
-  const reduced = useReducedMotion();
-  useEffect(() => {
-    if (reduced) {
-      // Reduced motion (S6): the entrance is a no-op — rows paint settled.
-      progress.setValue(1);
-      return;
-    }
-    Animated.timing(progress, {
-      toValue: 1,
-      duration: motion.entrance,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
-    }).start();
-    return () => progress.stopAnimation();
-  }, [progress, reduced]);
-  const translateY = progress.interpolate({
+/** The stack transition's translate style for one screen: `self` is the
+ * boundary that slides this screen in (1 = covering), `above` the boundary
+ * of the screen covering this one (drives the leftward parallax). Both terms
+ * compose into a single native-driven translateX. */
+export function layeredTranslate(self: MotionValue, above: MotionValue | null, width: number) {
+  const slide = self.interpolate({ inputRange: [0, 1], outputRange: [width, 0] });
+  if (above === null) return { transform: [{ translateX: slide }] };
+  const parallax = above.interpolate({
     inputRange: [0, 1],
-    outputRange: [motion.entranceOffset, 0],
+    outputRange: [0, -BEHIND_PARALLAX * width],
   });
-  return { opacity: progress, transform: [{ translateY }] };
+  return { transform: [{ translateX: Animated.add(slide, parallax) }] };
 }
 
-/** Mount-time entrance wrapper for conditionally-mounted chrome (the
- * jump-to-bottom pill): fades and rises its children once. Timeline rows
- * call `useEntrance` directly; this component exists so a call site can
- * wrap an overlay without growing a component boundary. */
-export function Entrance(props: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
-  const entrance = useEntrance();
-  return <Animated.View style={[props.style, entrance]}>{props.children}</Animated.View>;
+/** The covered screen's dim style for the boundary above it (null = none). */
+export function layeredDim(above: MotionValue | null) {
+  if (above === null) return { opacity: 1 as const };
+  return {
+    opacity: above.interpolate({ inputRange: [0, 1], outputRange: [1, 1 - BEHIND_DIM] }),
+  };
 }
 
-/** Card fold/expand transition (C16): one shared config whose duration is
- * the motion token — replaces the stock preset so the fold pace is owned
- * by the design system. */
-export function configureCardFold(): void {
-  LayoutAnimation.configureNext({
-    duration: motion.fold,
-    update: { type: LayoutAnimation.Types.easeInEaseOut },
+/** Timing to a target; resolves on settle. A running animation on the same
+ * value is stopped first, so callers can chain without tracking handles. */
+export function animateTo(
+  value: MotionValue,
+  to: number,
+  opts: { duration?: number; easing?: (t: number) => number } = {},
+): Promise<void> {
+  value.stopAnimation();
+  return new Promise((resolve) => {
+    Animated.timing(value, {
+      toValue: to,
+      duration: opts.duration ?? 240,
+      easing: opts.easing ?? easing.enter,
+      useNativeDriver: true,
+    }).start(() => resolve());
   });
+}
+
+/** Spring back to rest (gesture cancellation). */
+export function springTo(value: MotionValue, to: number): Promise<void> {
+  value.stopAnimation();
+  return new Promise((resolve) => {
+    Animated.spring(value, {
+      toValue: to,
+      speed: 28,
+      bounciness: 5,
+      useNativeDriver: true,
+    }).start(() => resolve());
+  });
+}
+
+// ——— PressableScale ————————————————————————————————————————————————————————
+
+/** A pressable that presses DOWN: scale + dim while the touch is active,
+ * springs back on release. The FAB, chips, and CTA-sized buttons use this —
+ * list rows keep the flat highlight (PressableRow) per iOS list convention. */
+export function PressableScale(props: {
+  onPress: () => void;
+  children: ReactNode;
+  style?: StyleProp<ViewStyle>;
+  disabled?: boolean;
+  accessibilityLabel?: string;
+}) {
+  const scale = useMotionValue(1);
+  const dim = useMotionValue(1);
+  const pressIn = (): void => {
+    animateTo(scale, 0.94, { duration: 120 });
+    animateTo(dim, press.activeOpacity, { duration: 120 });
+  };
+  const pressOut = (): void => {
+    springTo(scale, 1);
+    animateTo(dim, 1, { duration: 140 });
+  };
+  return (
+    <Pressable
+      onPress={props.onPress}
+      onPressIn={props.disabled ? undefined : pressIn}
+      onPressOut={props.disabled ? undefined : pressOut}
+      disabled={props.disabled}
+      accessibilityRole="button"
+      accessibilityLabel={props.accessibilityLabel}
+    >
+      <AnimatedView
+        style={[
+          props.style,
+          { transform: [{ scale }], opacity: dim },
+        ]}
+      >
+        {props.children}
+      </AnimatedView>
+    </Pressable>
+  );
+}
+
+// ——— PulseDot ———————————————————————————————————————————————————————————————
+
+/** The live-status dot: a quiet two-frame-style opacity pulse on the
+ * registered `pulse` period (tokens.motion). Working is the one status that
+ * may breathe — idle/blocked/done stay static. */
+export function PulseDot(props: { color: string; size?: number }) {
+  const size = props.size ?? 6;
+  const opacity = useMotionValue(1);
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, {
+          toValue: 0.45,
+          duration: 450,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 450,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [opacity]);
+  return (
+    <AnimatedView
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: props.color,
+        opacity,
+      }}
+    />
+  );
 }

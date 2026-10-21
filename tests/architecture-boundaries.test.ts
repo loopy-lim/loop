@@ -124,17 +124,31 @@ test("the interactive Loop Lead never owns Herdr workspace or attachment lifecyc
   expect(cli).not.toMatch(/workspace["']\s*,\s*["']create/);
 });
 
-// ——— App layered layout (decision 2026-xx-tokenless-auth-and-app-layout D-B) ———
+// ——— App layered layout (decision 2026-xx-tokenless-auth-and-app-layout D-B,
+// amended by the herdr-first rebuild: docs/design/rebuild-brief-herdr-first.md
+// §5 — state/ collapses into herdr/store, app/ owns composition+navigation,
+// design/ owns tokens-based primitives and ANSI) ———
 
-/** The six decided layers; arrows point at layers a layer may import. */
-const LAYERS = ["screens", "features", "gateway-client", "state", "ui", "auth"] as const;
+/** The rebuild's layers; arrows point at layers a layer may import. */
+const LAYERS = [
+  "app",
+  "auth",
+  "design",
+  "features",
+  "gateway-client",
+  "herdr",
+  "screens",
+  "ui",
+] as const;
 type Layer = (typeof LAYERS)[number];
 
 const LAYER_IMPORTS: Record<Layer, readonly Layer[]> = {
-  screens: ["features", "gateway-client", "state", "ui", "auth"],
-  features: ["gateway-client", "state", "ui", "auth"],
+  app: ["auth", "design", "features", "gateway-client", "herdr", "screens", "ui"],
+  screens: ["app", "auth", "design", "features", "gateway-client", "herdr", "ui"],
+  features: ["auth", "design", "gateway-client", "herdr", "ui"],
+  design: ["herdr", "ui"],
+  herdr: ["auth", "gateway-client"],
   "gateway-client": [],
-  state: ["gateway-client"],
   ui: [],
   auth: ["gateway-client"],
 };

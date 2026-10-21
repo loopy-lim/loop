@@ -1,8 +1,8 @@
 /**
  * Edge-back gesture policy (task `mobile-ux-patterns`, iOS HIG
- * interactive pop) — the pure decision math behind detail screens' left
- * edge swipe. No react-native import: ui/BackSwipeZone.tsx feeds raw
- * gesture values in; tests pin the decisions without a device.
+ * interactive pop) — the pure decision and interpolation math behind the
+ * stack's left-edge swipe. No react-native import: ui/ScreenStack.tsx feeds
+ * raw gesture values in; tests pin the decisions without a device.
  *
  * The app's navigation is JS-owned (no UINavigationController), so the
  * system pop gesture does not exist here — this module IS the pop
@@ -29,6 +29,13 @@ export const BACK_FLING_VELOCITY = 900;
 /** Minimum travel for a fling to count (pt): a fast twitch is a scroll
  * accident, not an intent. */
 export const BACK_FLING_MIN_DISTANCE = 56;
+
+/** How far the covered screen trails leftward at full cover, as a fraction
+ * of the screen width — UINavigationController's under-travel parallax. */
+export const BEHIND_PARALLAX = 0.3;
+
+/** Opacity the covered screen loses at full cover (the quiet push dim). */
+export const BEHIND_DIM = 0.2;
 
 export type BackSwipeDecision = "commit" | "cancel";
 
@@ -62,8 +69,20 @@ export function resolveBackSwipe(args: {
   return "cancel";
 }
 
-/** The screen's translation during an active drag: rides the finger 1:1
- * rightward, never left of rest, never past the screen width. */
-export function backDragTranslate(dx: number, width: number): number {
-  return Math.min(Math.max(0, dx), width);
+/** Drag delta → transition progress: 1:1 with the finger across the screen
+ * width, clamped to [0, 1] (0 = at rest, 1 = fully covering). */
+export function gestureProgress(dx: number, width: number): number {
+  if (width <= 0) return 0;
+  return Math.min(Math.max(dx / width, 0), 1);
+}
+
+/** The covering screen's offset at a progress: rides the finger rightward,
+ * fully off-screen at progress 1. */
+export function topOffset(progress: number, width: number): number {
+  return (1 - progress) * width;
+}
+
+/** The covered screen's trailing offset at a progress (leftward parallax). */
+export function behindOffset(progress: number, width: number): number {
+  return -BEHIND_PARALLAX * progress * width;
 }

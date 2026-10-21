@@ -11,7 +11,7 @@ import { describe, expect, test } from "bun:test";
 import { createConnectionConfig, ConnectionConfigError } from "../src/auth/connection";
 import { decodeStoredCredentials } from "../src/auth/credentialStore";
 import { probeGateway } from "../src/gateway-client/probe";
-import type { FetchLike } from "../src/gateway-client/client";
+import type { FetchLike } from "../src/herdr/client";
 
 /** A bearer-only listener that rejects the tokenless probe with 401. */
 const unauthorizedFetchImpl: FetchLike = async () =>
@@ -46,10 +46,10 @@ describe("tokenless probe (no Authorization header)", () => {
     const seen: { url: string; auth: string | null }[] = [];
     const fetchImpl: FetchLike = async (input, init) => {
       seen.push({ url: String(input), auth: new Headers(init?.headers).get("Authorization") });
-      return new Response(JSON.stringify({ runs: [], cursor: null }), { status: 200 });
+      return new Response(JSON.stringify({ available: true, version: 1, panes: [] }), { status: 200 });
     };
     await probeGateway(config, fetchImpl);
-    expect(seen).toEqual([{ url: "http://gw.tailnet.ts.net:18477/v1/runs?limit=1", auth: null }]);
+    expect(seen).toEqual([{ url: "http://gw.tailnet.ts.net:18477/v1/herdr/state", auth: null }]);
   });
 
   test("a 401 from a bearer-only listener still fails the tokenless probe", async () => {

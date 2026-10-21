@@ -5,7 +5,17 @@
  * (ADR §4.6).
  */
 
-import type { GatewayProblem } from "./wire";
+/** RFC 9457 problem body (gateway problem.ts is the contract origin). */
+export type GatewayProblem = {
+  type: string;
+  title: string;
+  status: number;
+  code: string;
+  detail: string;
+  requestId: string;
+  retryable: boolean;
+  fields: Record<string, string> | null;
+};
 
 export class GatewayError extends Error {
   override readonly name = "GatewayError";

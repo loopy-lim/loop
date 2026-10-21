@@ -60,6 +60,7 @@ describe("mobile regression greps — the vocabulary stays closed", () => {
   test("M1/M2: single palette source; no raw font sizes outside the scale definition", () => {
     for (const [file, source] of mobileSources) {
       if (file.endsWith("ui/tokens.ts")) continue; // the scale definition itself
+      if (file.endsWith("design/ansi.ts")) continue; // xterm-256 palette is protocol data, not theme vocabulary
       expect(source, file).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
       expect(source, file).not.toMatch(/fontSize:\s*\d/);
     }
