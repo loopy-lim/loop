@@ -492,6 +492,11 @@ export type HerdrPaneView = {
   /** Detected/managed agent kind occupying the pane (e.g. "claude", "agy"). */
   agent: string | null;
   cwd: string | null;
+  /** The agent's own reported cwd — claude/codex sessions that `cd` after
+   * start write their on-disk session storage under THIS directory, not the
+   * shell pane's cwd (live-verified 2026-10-22: the conversation resolver
+   * needs it as a fallback key). */
+  foregroundCwd: string | null;
   /** Decimal string (u64 rule). */
   revision: string;
   focused: boolean;
@@ -589,10 +594,22 @@ function herdrError(error: unknown): HerdrCallError {
   if (detail.includes("agent_not_found")) return { code: "agent_not_found", message: detail };
   if (detail.includes("pane_not_found")) return { code: "pane_not_found", message: detail };
   if (detail.includes("agent_not_ready")) return { code: "agent_not_ready", message: detail };
+  if (detail.includes("agent_pane_busy")) return { code: "agent_pane_busy", message: detail };
   if (detail.includes("workspace_not_found"))
     return { code: "workspace_not_found", message: detail };
   if (detail.includes("tab_not_found")) return { code: "tab_not_found", message: detail };
   return { code: null, message: detail };
+}
+
+/** Stable agent-name slug for an unnamed start: pane "wF:p1" → "wf-p1", so
+ * `codex-wf-p1` repeats deterministically for the same pane. */
+function agentPaneSlug(paneId: string): string {
+  return (
+    paneId
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "pane"
+  );
 }
 
 /** herdr serves ONE request per connection (verified live) — open, write,
@@ -687,8 +704,17 @@ export class HerdrControlClient {
     this.#reconnectMaxMs = options.reconnectMaxMs ?? 10_000;
   }
 
-  async #request(method: string, params: Record<string, unknown>): Promise<unknown> {
-    return await herdrSingleRequest(this.#socketPath, this.#requestTimeoutMs, method, params);
+  async #request(
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs?: number,
+  ): Promise<unknown> {
+    return await herdrSingleRequest(
+      this.#socketPath,
+      timeoutMs ?? this.#requestTimeoutMs,
+      method,
+      params,
+    );
   }
 
   async #try<T>(run: () => Promise<T>): Promise<T | null> {
@@ -825,26 +851,44 @@ export class HerdrControlClient {
 
   /** Start a supported agent in an existing available pane. herdr validates
    * agent identity and readiness; `agent_not_ready` still returns the pane
-   * (the agent is starting — callers keep observing). */
+   * (the agent is starting — callers keep observing).
+   *
+   * `name` is REQUIRED by herdr 0.9.5 (AgentStartParams.required = name,
+   * kind, pane_id — live-verified 2026-10-22: omitting it answers
+   * `invalid_request: missing field name`). An unnamed start derives a
+   * stable slug from kind + pane so herdr's agent-session identity stays
+   * deterministic per pane.
+   *
+   * The socket budget must cover herdr's OWN readiness wait (`timeout_ms`,
+   * 30s from the route layer): a cold agent spawn — codex's node CLI under a
+   * busy machine — legitimately exceeds the default 3s request cap, and
+   * cutting the socket early read as a bogus `agent_start_rejected` 409
+   * (live-verified 2026-10-22). */
   async startAgent(spec: HerdrAgentStartSpec): Promise<HerdrAgentStartOutcome> {
+    const resolvedName =
+      spec.name === null || spec.name === undefined
+        ? `${spec.kind}-${agentPaneSlug(spec.paneId)}`
+        : spec.name;
     try {
-      const result = await this.#request("agent.start", {
-        // `name` is a REQUIRED string in the herdr schema — omit it when the
-        // caller gave none (a null would fail validation as invalid_request).
-        ...(spec.name === null || spec.name === undefined ? {} : { name: spec.name }),
-        kind: spec.kind,
-        pane_id: spec.paneId,
-        ...(spec.args === null || spec.args === undefined ? {} : { args: spec.args }),
-        ...(spec.timeoutMs === null || spec.timeoutMs === undefined
-          ? {}
-          : { timeout_ms: spec.timeoutMs }),
-      });
+      const result = await this.#request(
+        "agent.start",
+        {
+          name: resolvedName,
+          kind: spec.kind,
+          pane_id: spec.paneId,
+          ...(spec.args === null || spec.args === undefined ? {} : { args: spec.args }),
+          ...(spec.timeoutMs === null || spec.timeoutMs === undefined
+            ? {}
+            : { timeout_ms: spec.timeoutMs }),
+        },
+        (spec.timeoutMs ?? 30_000) + 5_000,
+      );
       const mapped = mapAgentStart(result, spec.paneId);
-      return mapped ?? { ok: true, paneId: spec.paneId, name: spec.name ?? null, ready: true };
+      return mapped ?? { ok: true, paneId: spec.paneId, name: resolvedName, ready: true };
     } catch (error) {
       const classified = herdrError(error);
       if (classified.code === "agent_not_ready") {
-        return { ok: true, paneId: spec.paneId, name: spec.name ?? null, ready: false };
+        return { ok: true, paneId: spec.paneId, name: resolvedName, ready: false };
       }
       return {
         ok: false,
@@ -1126,6 +1170,7 @@ function mapPane(entry: Record<string, unknown>): HerdrPaneView | null {
     status: agentStateOrUnknown(entry.agent_status),
     agent: stringOrNull(entry.agent),
     cwd: stringOrNull(entry.cwd),
+    foregroundCwd: stringOrNull(entry.foreground_cwd),
     revision:
       typeof revision === "number" && Number.isSafeInteger(revision) && revision >= 0
         ? revision.toString(10)

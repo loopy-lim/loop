@@ -755,7 +755,15 @@ async function handleHerdrRoute(
     if (pane === undefined || pane.agent === null || pane.cwd === null) {
       return problemResponse(404, "conversation_unavailable", requestId);
     }
-    const conversation = resolveAgentConversation(pane.agent, pane.cwd, undefined, pane.agentSession);
+    // An agent that `cd`-ed after start stores its session under its own
+    // foreground cwd, not the shell pane's cwd — try that key as a fallback
+    // (live-verified 2026-10-22: w4 claude session lived only under
+    // foreground_cwd's project dir).
+    const conversation =
+      resolveAgentConversation(pane.agent, pane.cwd, undefined, pane.agentSession) ??
+      (pane.foregroundCwd !== null && pane.foregroundCwd !== pane.cwd
+        ? resolveAgentConversation(pane.agent, pane.foregroundCwd, undefined, pane.agentSession)
+        : null);
     if (conversation === null) return problemResponse(404, "conversation_unavailable", requestId);
     return jsonResponse({ paneId, ...conversation }, 200, requestId);
   }
@@ -844,9 +852,12 @@ async function handleHerdrRoute(
     });
     if (started === null) return problemResponse(503, "herdr_unavailable", requestId);
     if (started.kind === "rejected") {
-      return problemResponse(409, "agent_start_rejected", requestId, {
-        code: started.code ?? "unknown",
-      });
+      // herdr's own rejection text rides along: it is the honest diagnostic
+      // surface (agent_pane_busy vs invalid_request vs …) without leaking
+      // credentials or prompt content.
+      const fields: Record<string, string> = { code: started.code ?? "unknown" };
+      if (started.message !== null) fields.herdrMessage = started.message;
+      return problemResponse(409, "agent_start_rejected", requestId, fields);
     }
     return jsonResponse(started.value, 201, requestId);
   }
@@ -1014,22 +1025,33 @@ async function startInPane(
     name: spec.name,
     timeoutMs: 30_000,
   };
-  const outcome = await control.startAgent(startSpec);
-  if (!outcome.ok) {
-    return { kind: "rejected", code: outcome.code, message: outcome.message };
+  // A freshly spawned pane registers as an "available shell" a beat after
+  // workspace.create/pane.split answers (live-verified 2026-10-22: an
+  // immediate agent.start answers `agent_pane_busy` — the create→start race).
+  // Retry the busy window briefly before surfacing the rejection; herdr
+  // arbitrates every attempt, so an occupied pane still ends in a rejection.
+  const attempts = 10;
+  for (let attempt = 1; ; attempt += 1) {
+    const outcome = await control.startAgent(startSpec);
+    if (outcome.ok) {
+      return {
+        kind: "started",
+        value: {
+          paneId: outcome.paneId,
+          name: outcome.name,
+          kind: spec.kind,
+          ready: outcome.ready,
+          createdPane,
+          workspaceId,
+          tabId,
+        },
+      };
+    }
+    if (outcome.code !== "agent_pane_busy" || attempt >= attempts) {
+      return { kind: "rejected", code: outcome.code, message: outcome.message };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
   }
-  return {
-    kind: "started",
-    value: {
-      paneId: outcome.paneId,
-      name: outcome.name,
-      kind: spec.kind,
-      ready: outcome.ready,
-      createdPane,
-      workspaceId,
-      tabId,
-    },
-  };
 }
 
 async function readJsonBody(request: Request): Promise<Record<string, unknown>> {

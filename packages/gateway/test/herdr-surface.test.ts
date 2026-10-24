@@ -174,6 +174,7 @@ function fixtureSnapshot(
           agent_status: overrides.paneStatus ?? "working",
           agent: overrides.paneAgent === undefined ? "claude" : overrides.paneAgent,
           cwd: "/Users/loopy/dev/ll3/loop",
+          foreground_cwd: "/Users/loopy/dev/ll3/loop/frontend",
           revision: 12,
           focused: true,
         },
@@ -284,6 +285,9 @@ describe("herdr surface (M1)", () => {
     expect(panes[0]?.title).toBe("hardening");
     expect(panes[0]?.status).toBe("working");
     expect(panes[0]?.agent).toBe("claude");
+    // The agent's own cwd rides along for the conversation resolver's
+    // fallback key (agents that `cd` after start store sessions there).
+    expect(panes[0]?.foregroundCwd).toBe("/Users/loopy/dev/ll3/loop/frontend");
     // u64 decimal-string rule; the agent pane's revision is the gateway's
     // synthesized content revision (herdr's own counter is not a change hook)
     expect(panes[0]?.revision).toBe("1");
@@ -453,6 +457,9 @@ describe("herdr surface (M1)", () => {
     must(startCall);
     expect(startCall?.params.pane_id).toBe("w1:p2");
     expect(startCall?.params.kind).toBe("agy");
+    // herdr 0.9.5 requires `name` on agent.start — an unnamed start derives
+    // a stable kind+pane slug (the missing-field 409 fix, live-verified).
+    expect(startCall?.params.name).toBe("agy-w1-p2");
   });
 
   test("POST agents/start splits when the tab has no shell pane", async () => {
@@ -489,6 +496,35 @@ describe("herdr surface (M1)", () => {
     expect(splitCall?.params.direction).toBe("right");
     // state back to the shared fixture for later tests
     fake.setSnapshot(fixtureSnapshot());
+  });
+
+  test("POST agents/start retries the fresh-pane agent_pane_busy window", async () => {
+    // Live finding (2026-10-22): herdr answers `agent_pane_busy` when
+    // agent.start lands between workspace.create and the pane registering as
+    // an available shell. One busy answer, then success — the route must ride
+    // out the window instead of surfacing a 409.
+    let startAttempts = 0;
+    fake.respond("agent.start", (params) => {
+      startAttempts += 1;
+      if (startAttempts === 1) {
+        return {
+          failure: {
+            code: "agent_pane_busy",
+            message: "agent target pane w9:p1 is not an available shell",
+          },
+        };
+      }
+      return { pane: { pane_id: params.pane_id }, agent: { name: params.name }, ready: true };
+    });
+    const response = await fetch(`${gateway.baseUrl}/v1/herdr/agents/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeader(gateway.token()) },
+      body: JSON.stringify({ kind: "codex", createWorkspace: true }),
+    });
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.paneId).toBe("w9:p1");
+    expect(startAttempts).toBe(2);
   });
 
   test("POST agents/start maps herdr rejection to agent_start_rejected", async () => {
@@ -795,3 +831,64 @@ function fixtureSnapshotWithPanes(panes: JsonRecord[]): JsonRecord {
     },
   };
 }
+
+// ——— cold-spawn start window (2026-10-22 live finding) ——————————————————————
+// herdr's agent.start carries its own readiness wait (timeout_ms; the route
+// passes 30s). The control client's socket budget must cover that window:
+// cutting the socket at the default 3s request cap read a slow-but-healthy
+// cold spawn (codex's node CLI on a busy machine) as a bogus
+// `agent_start_rejected` 409. This fake answers agent.start after 300ms —
+// past a shrunken default budget (100ms), inside the start-specific window.
+describe("HerdrControlClient.startAgent socket budget", () => {
+  test("a start reply slower than the default budget still succeeds", async () => {
+    const dir = join(
+      tmpdir(),
+      `loop-gateway-start-budget-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    );
+    mkdirSync(dir, { recursive: true });
+    const socketPath = join(dir, "herdr.sock");
+    const server = Bun.listen({
+      unix: socketPath,
+      socket: {
+        open() {},
+        data(socket, bytes) {
+          for (const line of String(bytes).split("\n")) {
+            if (line.trim().length === 0) continue;
+            let message: { id?: unknown; method?: unknown };
+            try {
+              message = JSON.parse(line);
+            } catch {
+              continue;
+            }
+            if (message.method !== "agent.start" || typeof message.id !== "string") continue;
+            const id = message.id;
+            setTimeout(() => {
+              socket.write(
+                `${JSON.stringify({
+                  id,
+                  result: { pane: { pane_id: "w9:p1" }, agent: { name: "cold-codex" }, ready: true },
+                })}\n`,
+              );
+            }, 300);
+          }
+        },
+        close() {},
+        error() {},
+      },
+    });
+    try {
+      const control = new HerdrControlClient({ socketPath, requestTimeoutMs: 100 });
+      const outcome = await control.startAgent({
+        kind: "codex",
+        paneId: "w9:p1",
+        name: "cold-codex",
+        timeoutMs: 1_000,
+      });
+      expect(outcome.ok).toBe(true);
+      if (outcome.ok) expect(outcome.paneId).toBe("w9:p1");
+    } finally {
+      server.stop(true);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
