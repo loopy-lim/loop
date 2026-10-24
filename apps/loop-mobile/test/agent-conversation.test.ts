@@ -6,7 +6,16 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { chatBody, mergePendingTurns, nextConversation, planRefresh, summaryStatus, turnsEqual } from "../src/herdr/conversation";
+import {
+  chatBody,
+  mergePendingTurns,
+  nextConversation,
+  pendingSame,
+  planRefresh,
+  summaryStatus,
+  turnsEqual,
+} from "../src/herdr/conversation";
+import type { PendingPrompt } from "../src/herdr/conversation";
 import type { HerdrConversation, HerdrConversationTurn } from "../src/herdr/wire";
 
 const PANE = "w1:p1";
@@ -121,14 +130,20 @@ describe("turnsEqual", () => {
 
 describe("mergePendingTurns", () => {
   const fetchedUser: HerdrConversationTurn = { kind: "user", id: "u1", text: "첫 질문", at: null };
+  const attached = Date.parse("2026-10-24T00:00:00Z");
+  // attachedAt: 0 → the floor is far in the past; the at:null-turn cases
+  // below never touch it.
+  const base = { attachedAt: 0 };
 
   test("no pending → the fetched list passes through untouched", () => {
     expect(mergePendingTurns([fetchedUser], [])).toEqual({ turns: [fetchedUser], remaining: [] });
   });
 
   test("unmatched pending renders as a trailing user bubble", () => {
-    const merged = mergePendingTurns([fetchedUser], [{ id: "pending-0", text: "또 해줘", seen: [] }]);
-    expect(merged.remaining).toEqual(["pending-0"]);
+    const merged = mergePendingTurns([fetchedUser], [
+      { id: "pending-0", text: "또 해줘", seen: [], ...base },
+    ]);
+    expect(merged.remaining.map((item) => item.id)).toEqual(["pending-0"]);
     expect(merged.turns[1]).toEqual({ kind: "user", id: "pending-0", text: "또 해줘", at: null });
   });
 
@@ -136,7 +151,7 @@ describe("mergePendingTurns", () => {
     const sent: HerdrConversationTurn = { kind: "user", id: "u2", text: "  실행해줘  ", at: null };
     const merged = mergePendingTurns(
       [fetchedUser, sent],
-      [{ id: "pending-0", text: "실행해줘", seen: ["u1"] }],
+      [{ id: "pending-0", text: "실행해줘", seen: ["u1"], ...base }],
     );
     expect(merged.remaining).toEqual([]);
     expect(merged.turns.length).toBe(2); // no duplicate bubble
@@ -146,9 +161,9 @@ describe("mergePendingTurns", () => {
     // "하나" was already on record (id u1, in seen) when the prompt attached.
     const resent = mergePendingTurns(
       [fetchedUser],
-      [{ id: "pending-0", text: "첫 질문", seen: ["u1"] }],
+      [{ id: "pending-0", text: "첫 질문", seen: ["u1"], ...base }],
     );
-    expect(resent.remaining).toEqual(["pending-0"]);
+    expect(resent.remaining.map((item) => item.id)).toEqual(["pending-0"]);
     expect(resent.turns.map((turn) => turn.id)).toEqual(["u1", "pending-0"]);
   });
 
@@ -158,19 +173,110 @@ describe("mergePendingTurns", () => {
     const both = mergePendingTurns(
       [fetchedUser, first, second],
       [
-        { id: "pending-0", text: "계속", seen: ["u1"] },
-        { id: "pending-1", text: "계속", seen: ["u1"] },
+        { id: "pending-0", text: "계속", seen: ["u1"], ...base },
+        { id: "pending-1", text: "계속", seen: ["u1"], ...base },
       ],
     );
     expect(both.remaining).toEqual([]);
     const one = mergePendingTurns(
       [fetchedUser, first],
       [
-        { id: "pending-0", text: "계속", seen: ["u1"] },
-        { id: "pending-1", text: "계속", seen: ["u1"] },
+        { id: "pending-0", text: "계속", seen: ["u1"], ...base },
+        { id: "pending-1", text: "계속", seen: ["u1"], ...base },
       ],
     );
-    expect(one.remaining).toEqual(["pending-1"]);
+    expect(one.remaining.map((item) => item.id)).toEqual(["pending-1"]);
+  });
+
+  test("consumed turn ids absorb into remaining pendings' seen (no cascade, R-1)", () => {
+    const first: HerdrConversationTurn = {
+      kind: "user",
+      id: "u2",
+      text: "계속",
+      at: "2026-10-24T00:00:10Z",
+    };
+    const pendings = [
+      { id: "pending-0", text: "계속", seen: ["u1"], attachedAt: attached },
+      { id: "pending-1", text: "계속", seen: ["u1"], attachedAt: attached },
+    ];
+    const one = mergePendingTurns([fetchedUser, first], pendings);
+    expect(one.remaining.map((item) => item.id)).toEqual(["pending-1"]);
+    // Durability: refetching the SAME history must not let pending-1
+    // re-consume u2 — the cascade that retired both bubbles on one record.
+    const again = mergePendingTurns([fetchedUser, first], one.remaining);
+    expect(again.remaining.map((item) => item.id)).toEqual(["pending-1"]);
+    expect(again.remaining[0]?.seen).toContain("u2");
+    expect(again.turns.filter((turn) => turn.id === "pending-1")).toHaveLength(1);
+  });
+
+  test("a turn stamped before attach cannot retire a seen=[] pending (R-2)", () => {
+    const old: HerdrConversationTurn = {
+      kind: "user",
+      id: "u9",
+      text: "계속",
+      at: "2026-10-23T23:00:00Z",
+    };
+    const merged = mergePendingTurns([old], [
+      { id: "pending-0", text: "계속", seen: [], attachedAt: attached },
+    ]);
+    expect(merged.remaining.map((item) => item.id)).toEqual(["pending-0"]);
+    expect(merged.turns.map((turn) => turn.id)).toEqual(["u9", "pending-0"]);
+  });
+
+  test("attach-time floor allows skew but blocks older stamps", () => {
+    // 60s before attach: inside the 90s skew allowance → may retire.
+    const skew: HerdrConversationTurn = {
+      kind: "user",
+      id: "u8",
+      text: "계속",
+      at: "2026-10-23T23:59:00Z",
+    };
+    expect(
+      mergePendingTurns([skew], [{ id: "pending-0", text: "계속", seen: [], attachedAt: attached }])
+        .remaining,
+    ).toEqual([]);
+    // 120s before attach: beyond the skew floor → cannot stand in.
+    const older: HerdrConversationTurn = {
+      kind: "user",
+      id: "u7",
+      text: "계속",
+      at: "2026-10-23T23:58:00Z",
+    };
+    expect(
+      mergePendingTurns([older], [{ id: "pending-0", text: "계속", seen: [], attachedAt: attached }])
+        .remaining.map((item) => item.id),
+    ).toEqual(["pending-0"]);
+  });
+
+  test("a turn without a timestamp falls back to the seen guard (A5)", () => {
+    const noStamp: HerdrConversationTurn = { kind: "user", id: "u9", text: "계속", at: null };
+    const merged = mergePendingTurns([noStamp], [
+      { id: "pending-0", text: "계속", seen: [], attachedAt: attached },
+    ]);
+    expect(merged.remaining).toEqual([]); // the seen guard is the only gate
+  });
+});
+
+describe("pendingSame", () => {
+  const item = (seen: string[]): PendingPrompt => ({
+    id: "pending-0",
+    text: "계속",
+    seen,
+    attachedAt: 5,
+  });
+
+  test("content-equal lists compare equal regardless of array identity", () => {
+    expect(pendingSame([item(["u1"])], [{ ...item(["u1"]) }])).toBe(true);
+  });
+
+  test("seen drift is unequal (the absorbed-consumption guard)", () => {
+    expect(pendingSame([item(["u1"])], [item(["u1", "u2"])])).toBe(false);
+  });
+
+  test("id, stamp, or length drift is unequal", () => {
+    expect(pendingSame([item(["u1"])], [])).toBe(false);
+    expect(pendingSame([item(["u1"])], [{ ...item(["u1"]), id: "pending-1" }])).toBe(false);
+    expect(pendingSame([item(["u1"])], [{ ...item(["u1"]), attachedAt: 6 }])).toBe(false);
   });
 });
 

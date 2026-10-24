@@ -1190,6 +1190,36 @@ function mapAgentSession(value: unknown): { kind: string; value: string } | null
   return { kind, value: v };
 }
 
+// ——— pane birth ledger ———
+
+/** The conversation resolver's cwd-latest fallback must not hand a freshly
+ * started pane a session file the pane never wrote (live-observed 2026-10-22:
+ * a new claude pane borrowed the operator's active session until its own
+ * first record). herdr exposes no pane birth timestamp, so the gateway notes
+ * the moment IT started the agent. In-memory on purpose: the defect window is
+ * always within the spawning process's lifetime, and persisting would drag
+ * the store bridge into a display policy (plan 2026-10-24 A1). */
+const PANE_BIRTH_CAP = 1024;
+const paneBirths = new Map<string, number>();
+
+/** Records when the gateway started an agent in `paneId` (epoch ms). */
+export function notePaneBirth(paneId: string, atMs: number): void {
+  if (paneId.length === 0) return;
+  while (paneBirths.size >= PANE_BIRTH_CAP) {
+    const oldest = paneBirths.keys().next();
+    if (oldest.done === true) break;
+    paneBirths.delete(oldest.value);
+  }
+  paneBirths.set(paneId, atMs);
+}
+
+/** When the gateway started this pane's agent, else null — pre-existing and
+ * post-restart panes keep the legacy fallback behavior. */
+export function paneBirthMs(paneId: string): number | null {
+  const at = paneBirths.get(paneId);
+  return at === undefined ? null : at;
+}
+
 function mapAgentStart(result: unknown, fallbackPaneId: string): HerdrAgentStartOutcome | null {
   if (result === null || typeof result !== "object") return null;
   const raw = result as {

@@ -31,6 +31,7 @@ import {
   chatBody,
   mergePendingTurns,
   nextConversation,
+  pendingSame,
   planRefresh,
   seenUserIds,
   summaryStatus,
@@ -178,7 +179,7 @@ export function AgentScreen(props: { paneId: string; state: HerdrAppState; onBac
     pendingSeq.current += 1;
     setPending((current) => [
       ...current,
-      { id, text, seen: seenUserIds(conversationRef.current) },
+      { id, text, seen: seenUserIds(conversationRef.current), attachedAt: Date.now() },
     ]);
     const timer = setTimeout(() => {
       pendingTimers.current.delete(timer);
@@ -197,11 +198,13 @@ export function AgentScreen(props: { paneId: string; state: HerdrAppState; onBac
   }, [conversation, pending, props.paneId, segment]);
 
   // A fetched history that now carries a pending prompt retires it — the
-  // optimistic bubble is replaced by the agent's own record.
+  // optimistic bubble is replaced by the agent's own record. The remaining
+  // prompts carry absorbed `seen` (durable 1:1 consumption); an equal result
+  // leaves state untouched so the memo is not recomputed on every fetch.
   useEffect(() => {
-    if (chat === null || chat.remaining.length === pending.length) return;
-    setPending((current) => current.filter((item) => chat.remaining.includes(item.id)));
-  }, [chat, pending]);
+    if (chat === null) return;
+    setPending((current) => (pendingSame(current, chat.remaining) ? current : chat.remaining));
+  }, [chat]);
 
   // Follow the tail when new content lands while the user is at the bottom
   // (follow-scroll machine owns the verdict); detached users stay anchored

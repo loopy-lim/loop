@@ -304,6 +304,7 @@ function claudeConversation(
   cwd: string,
   home: string,
   session: AgentSessionRef | null,
+  floorMs: number | null,
 ): AgentConversation | null {
   const dir = join(home, ".claude", "projects", claudeProjectDirName(cwd));
   let source: string | null = null;
@@ -313,7 +314,14 @@ function claudeConversation(
   if (source === null) {
     const newest = newestEntries(dir, ".jsonl", 1)[0];
     if (newest === undefined) return null;
-    source = join(dir, newest);
+    const file = join(dir, newest);
+    // The cwd-latest fallback must not hand this pane a session it never
+    // wrote (live-observed: a fresh claude pane borrowed the operator's
+    // active session until its own first record). A file last written before
+    // the pane's agent started predates the pane — refuse it. The pinned
+    // path above is the pane's own session and needs no floor.
+    if (floorMs !== null && !fileTouchedSince(file, floorMs)) return null;
+    source = file;
   }
   const turns = claudeTurns(source);
   if (turns === null || turns.length === 0) return null;
@@ -329,7 +337,7 @@ function claudeConversation(
 
 // ——— codex (~/.codex/sessions/Y/M/D/rollout-*.jsonl, cwd in session_meta) ———
 
-function newestCodexRollouts(home: string): string[] {
+function newestCodexRollouts(home: string): Array<{ path: string; at: number }> {
   const root = join(home, ".codex", "sessions");
   const out: Array<{ path: string; at: number }> = [];
   let years: string[];
@@ -365,10 +373,7 @@ function newestCodexRollouts(home: string): string[] {
       }
     }
   }
-  return out
-    .sort((a, b) => b.at - a.at)
-    .slice(0, CODEX_SCAN_BUDGET)
-    .map((entry) => entry.path);
+  return out.sort((a, b) => b.at - a.at).slice(0, CODEX_SCAN_BUDGET);
 }
 
 function codexSessionCwd(file: string): string | null {
@@ -504,15 +509,21 @@ function codexConversation(
   cwd: string,
   home: string,
   session: AgentSessionRef | null,
+  floorMs: number | null,
 ): AgentConversation | null {
   const rollouts = newestCodexRollouts(home);
   // herdr's codex integration reports the session id; rollout filenames end
   // with it, so the pane's own file matches deterministically.
   const named =
     session !== null && session.kind === "id"
-      ? rollouts.find((file) => file.includes(session.value))
+      ? rollouts.find((entry) => entry.path.includes(session.value))
       : undefined;
-  for (const file of named !== undefined ? [named] : rollouts) {
+  for (const entry of named !== undefined ? [named] : rollouts) {
+    const file = entry.path;
+    // Same no-borrow rule as claude: a fallback candidate last written before
+    // the pane's agent started predates the pane. Candidates are newest-first,
+    // so everything after this entry is older too — continue keeps it simple.
+    if (named === undefined && floorMs !== null && entry.at < floorMs) continue;
     if (named === undefined && codexSessionCwd(file) !== cwd) continue;
     const turns = codexTurns(file);
     if (turns === null || turns.length === 0) continue;
@@ -745,19 +756,35 @@ export type AgentSessionRef = { kind: string; value: string };
 
 /** Resolve the newest structured conversation for a herdr pane. Returns null
  * when the kind has no adapter or no usable source — the caller answers 404
- * and the app keeps its ANSI transcript. */
+ * and the app keeps its ANSI transcript. `fallbackFloorMs` (the pane's agent
+ * start time, when the gateway itself started it) bounds the cwd-based
+ * fallback: sources last written before the floor predate the pane and are
+ * refused, so a fresh pane never borrows another conversation's session file.
+ * Pinned session sources ignore the floor; agy keeps its documented cwd
+ * fallback (no reliable write-time semantics — plan 2026-10-24 A2). */
 export function resolveAgentConversation(
   kind: string,
   cwd: string,
   deps?: AgentConversationDeps,
   session?: AgentSessionRef | null,
+  fallbackFloorMs?: number | null,
 ): AgentConversation | null {
   const home = homeDir(deps);
   if (home === null || cwd.length === 0) return null;
-  if (kind === "claude") return claudeConversation(kind, cwd, home, session ?? null);
-  if (kind === "codex") return codexConversation(kind, cwd, home, session ?? null);
+  const floor = fallbackFloorMs ?? null;
+  if (kind === "claude") return claudeConversation(kind, cwd, home, session ?? null, floor);
+  if (kind === "codex") return codexConversation(kind, cwd, home, session ?? null, floor);
   if (kind === "agy") return agyConversation("agy", cwd, home, session ?? null);
   return null;
+}
+
+/** Whether `file`'s last write is at/after `floorMs` (missing file → false). */
+function fileTouchedSince(file: string, floorMs: number): boolean {
+  try {
+    return statSync(file).mtimeMs >= floorMs;
+  } catch {
+    return false;
+  }
 }
 
 /** A readable claude session file for an explicit session id, else null. */

@@ -11,13 +11,19 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+import { claudeProjectDirName } from "../src/agent-sessions";
 import { authHeader, bootTestGateway, type TestGateway } from "./helpers";
-import { HerdrControlClient, HerdrPaneSource } from "../src/herdr-pane-source";
+import {
+  HerdrControlClient,
+  HerdrPaneSource,
+  notePaneBirth,
+  paneBirthMs,
+} from "../src/herdr-pane-source";
 
 function must<T>(value: T | undefined | null): T {
   if (value === undefined || value === null) throw new Error("expected value to be defined");
@@ -298,6 +304,59 @@ describe("herdr surface (M1)", () => {
     expect((state.focused as Record<string, unknown>).paneId).toBe("w1:p1");
   });
 
+  test("GET conversation borrows nothing written before the pane's birth", async () => {
+    await waitUntilHerdr(gateway, () => gateway.herdr?.monitor.current().available === true);
+    const home = join(
+      tmpdir(),
+      `loop-gw-conv-home-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    );
+    const project = join(
+      home,
+      ".claude",
+      "projects",
+      claudeProjectDirName("/Users/loopy/dev/ll3/loop"),
+    );
+    mkdirSync(project, { recursive: true });
+    const file = join(project, "old.jsonl");
+    writeFileSync(
+      file,
+      `${JSON.stringify({ type: "user", uuid: "u1", timestamp: "2026-10-01T00:00:00Z", message: { role: "user", content: "이전 세션" } })}\n`,
+    );
+    utimesSync(file, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+    const previousHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      // Pane w1:p1 is pre-existing (no birth recorded) — the legacy fallback
+      // still serves the newest cwd session.
+      const legacy = await fetch(`${gateway.baseUrl}/v1/herdr/panes/w1:p1/conversation`, {
+        headers: authHeader(gateway.token()),
+      });
+      expect(legacy.status).toBe(200);
+
+      // A gateway-started pane must not borrow the pre-birth session file.
+      notePaneBirth("w1:p1", Date.now());
+      const fresh = await fetch(`${gateway.baseUrl}/v1/herdr/panes/w1:p1/conversation`, {
+        headers: authHeader(gateway.token()),
+      });
+      expect(fresh.status).toBe(404);
+
+      // Once the pane's own record lands (mtime after birth), it is served.
+      await Bun.sleep(5);
+      appendFileSync(
+        file,
+        `${JSON.stringify({ type: "assistant", uuid: "a1", timestamp: "2026-10-24T00:00:00Z", message: { role: "assistant", content: [{ type: "text", text: "새 답변" }] } })}\n`,
+      );
+      const own = await fetch(`${gateway.baseUrl}/v1/herdr/panes/w1:p1/conversation`, {
+        headers: authHeader(gateway.token()),
+      });
+      expect(own.status).toBe(200);
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   test("GET /v1/herdr/events sends a fresh intro and converges on feed events", async () => {
     await waitUntilHerdr(gateway, () => gateway.herdr?.monitor.current().available === true);
     await waitUntilHerdr(gateway, () => fake.subscriberCount() > 0);
@@ -525,6 +584,22 @@ describe("herdr surface (M1)", () => {
     const body = (await response.json()) as Record<string, unknown>;
     expect(body.paneId).toBe("w9:p1");
     expect(startAttempts).toBe(2);
+  });
+
+  test("POST agents/start records the pane birth for the fallback floor", async () => {
+    fake.respond("agent.start", (params) => ({
+      pane: { pane_id: params.pane_id },
+      agent: { name: params.name },
+      ready: true,
+    }));
+    const response = await fetch(`${gateway.baseUrl}/v1/herdr/agents/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeader(gateway.token()) },
+      body: JSON.stringify({ kind: "codex", createWorkspace: true }),
+    });
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(paneBirthMs(String(body.paneId))).not.toBeNull();
   });
 
   test("POST agents/start maps herdr rejection to agent_start_rejected", async () => {

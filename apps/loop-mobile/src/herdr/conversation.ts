@@ -88,10 +88,17 @@ export function planRefresh(
 
 /** A prompt delivered to the agent whose on-disk record has not been fetched
  * yet — renders as an optimistic trailing user bubble. `seen` holds the
- * user-turn ids already on record when the prompt was attached, so a resent
- * prompt can only retire against NEW history: an old turn with the same
- * text never stands in for this delivery. */
-export type PendingPrompt = { id: string; text: string; seen: readonly string[] };
+ * user-turn ids already on record when the prompt was attached (plus any
+ * turns consumed on a later prompt's behalf), so a resent prompt can only
+ * retire against NEW history: an old turn with the same text never stands in
+ * for this delivery. `attachedAt` (phone wall clock) bounds that history by
+ * time as well — see PENDING_ATTACH_SKEW_MS. */
+export type PendingPrompt = {
+  id: string;
+  text: string;
+  seen: readonly string[];
+  attachedAt: number;
+};
 
 /** User-turn ids of the current conversation — the `seen` snapshot for a
  * pending prompt attached right now. */
@@ -104,39 +111,90 @@ export function seenUserIds(conversation: HerdrConversation | null): string[] {
   return ids;
 }
 
+/** Wall-clock slack between the phone's attach stamp and the gateway host's
+ * turn timestamps: 90s absorbs ordinary clock skew, and the 15s pending
+ * timeout bounds any residual mismatch (plan 2026-10-24 A3). */
+export const PENDING_ATTACH_SKEW_MS = 90_000;
+
 /** Fold optimistic pending prompts into fetched turns. A prompt leaves the
- * queue when the fetched history carries a user turn with the same trimmed
- * text that was NOT already on record at attach time (one new turn retires
- * one prompt, so identical resends retire one-for-one); the rest render as
- * trailing user turns. Returns the display list and the ids still pending —
- * the screen drops the matched ids from its pending state. */
+ * queue when the fetched history carries a user turn that was NOT already on
+ * record at attach time and is not stamped (reliably) before the prompt
+ * attached — one new turn retires one prompt, so identical resends retire
+ * one-for-one. Consumed turn ids are absorbed into the remaining prompts'
+ * `seen`, so a later fetch cannot re-consume the same turn for the next
+ * identical pending (the retire-cascade fix). Returns the display list and
+ * the still-pending prompts — the screen replaces its pending state with
+ * them. */
 export function mergePendingTurns(
   fetched: HerdrConversationTurn[],
   pending: readonly PendingPrompt[],
-): { turns: HerdrConversationTurn[]; remaining: string[] } {
+): { turns: HerdrConversationTurn[]; remaining: PendingPrompt[] } {
   if (pending.length === 0) return { turns: fetched, remaining: [] };
   const seenIds = new Set<string>();
   for (const item of pending) {
     for (const id of item.seen) seenIds.add(id);
   }
-  const newText = new Map<string, string[]>();
+  // Fresh-turn candidates by trimmed text. An absent or unparseable stamp
+  // admits the seen guard only (plan 2026-10-24 A5).
+  const stampOf = (turn: HerdrConversationTurn): number | null => {
+    if (turn.at === null) return null;
+    const parsed = Date.parse(turn.at);
+    return Number.isNaN(parsed) ? null : parsed;
+  };
+  const fresh = new Map<string, Array<{ id: string; at: number | null }>>();
   for (const turn of fetched) {
     if (turn.kind !== "user" || seenIds.has(turn.id)) continue;
     const key = turn.text.trim();
-    const ids = newText.get(key);
-    if (ids === undefined) newText.set(key, [turn.id]);
-    else ids.push(turn.id);
+    const candidate = { id: turn.id, at: stampOf(turn) };
+    const list = fresh.get(key);
+    if (list === undefined) fresh.set(key, [candidate]);
+    else list.push(candidate);
   }
   const turns = [...fetched];
-  const remaining: string[] = [];
+  const stillPending: PendingPrompt[] = [];
+  const consumed: string[] = [];
   for (const item of pending) {
-    const ids = newText.get(item.text.trim());
-    if (ids !== undefined && ids.length > 0) {
-      ids.shift(); // one fresh turn retires one pending prompt
-      continue;
+    const floor = item.attachedAt - PENDING_ATTACH_SKEW_MS;
+    const list = fresh.get(item.text.trim());
+    if (list !== undefined) {
+      const index = list.findIndex((candidate) => candidate.at === null || candidate.at >= floor);
+      if (index !== -1) {
+        const match = list[index]!;
+        list.splice(index, 1); // one fresh turn retires one pending prompt
+        consumed.push(match.id);
+        continue;
+      }
     }
-    remaining.push(item.id);
+    stillPending.push(item);
+  }
+  // Durable 1:1: a turn consumed here is accounted for — remaining prompts
+  // must not stand in for it on a later fetch.
+  const remaining =
+    consumed.length === 0
+      ? stillPending
+      : stillPending.map((item) => ({
+          ...item,
+          seen: [...new Set([...item.seen, ...consumed])],
+        }));
+  for (const item of remaining) {
     turns.push({ kind: "user", id: item.id, text: item.text, at: null });
   }
   return { turns, remaining };
+}
+
+/** Content equality for pending lists — same ids in order, same text and
+ * attach stamp, same seen contents. The screen's retire effect leaves state
+ * untouched when a merge produced nothing new: replacing with a
+ * fresh-but-equal array would retrigger the memo and re-merge every fetch. */
+export function pendingSame(a: readonly PendingPrompt[], b: readonly PendingPrompt[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((item, index) => {
+    const other = b[index];
+    if (other === undefined) return false;
+    if (other.id !== item.id || other.text !== item.text) return false;
+    if (other.attachedAt !== item.attachedAt) return false;
+    if (other.seen.length !== item.seen.length) return false;
+    const ids = new Set(item.seen);
+    return other.seen.every((id) => ids.has(id));
+  });
 }

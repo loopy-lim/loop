@@ -9,7 +9,12 @@
 import type { RunGraphOutput } from "@loop/protocol";
 import type { GatewayAuthEnvNames, GatewayAuthMode, GatewayConfig } from "./config";
 import type { HerdrAgentStartSpec, HerdrControlClient, HerdrReadSource } from "./herdr-pane-source";
-import { HERDR_DEFAULT_READ_SOURCE, HERDR_READ_SOURCES } from "./herdr-pane-source";
+import {
+  HERDR_DEFAULT_READ_SOURCE,
+  HERDR_READ_SOURCES,
+  notePaneBirth,
+  paneBirthMs,
+} from "./herdr-pane-source";
 import type { HerdrStateMonitor } from "./herdr-state";
 import { DEFAULT_AUTH_ENV_NAMES } from "./config";
 import type { OutboundFrame } from "./events";
@@ -759,10 +764,14 @@ async function handleHerdrRoute(
     // foreground cwd, not the shell pane's cwd — try that key as a fallback
     // (live-verified 2026-10-22: w4 claude session lived only under
     // foreground_cwd's project dir).
+    // The fallback floor (when the gateway itself started this pane's agent)
+    // keeps the cwd-based fallbacks from borrowing a session file the pane
+    // predates — a fresh pane answers 404 until its own record exists.
+    const floor = paneBirthMs(paneId);
     const conversation =
-      resolveAgentConversation(pane.agent, pane.cwd, undefined, pane.agentSession) ??
+      resolveAgentConversation(pane.agent, pane.cwd, undefined, pane.agentSession, floor) ??
       (pane.foregroundCwd !== null && pane.foregroundCwd !== pane.cwd
-        ? resolveAgentConversation(pane.agent, pane.foregroundCwd, undefined, pane.agentSession)
+        ? resolveAgentConversation(pane.agent, pane.foregroundCwd, undefined, pane.agentSession, floor)
         : null);
     if (conversation === null) return problemResponse(404, "conversation_unavailable", requestId);
     return jsonResponse({ paneId, ...conversation }, 200, requestId);
@@ -1034,6 +1043,9 @@ async function startInPane(
   for (let attempt = 1; ; attempt += 1) {
     const outcome = await control.startAgent(startSpec);
     if (outcome.ok) {
+      // Birth ledger: bounds this pane's conversation fallback — the pane
+      // must not borrow a session file it predates (plan 2026-10-24).
+      notePaneBirth(outcome.paneId, Date.now());
       return {
         kind: "started",
         value: {
