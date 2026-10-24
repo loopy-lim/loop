@@ -1,0 +1,43 @@
+# macOS VM (dockur/macos) — loop-mobile iOS device build without a Mac.
+# See README.md for the operator flow and docs/research/2026-10-22-docker-xcode-iphone.md
+# for the research behind this setup.
+services:
+  macos:
+    image: dockurr/macos
+    container_name: loop-ios-builder
+    environment:
+      VERSION: "15" # macOS Sequoia — current stable the image recommends
+      CPU_CORES: "16"
+      RAM_SIZE: "32G"
+      DISK_SIZE: "256G" # macOS + Xcode (~40G installed) + DerivedData headroom
+      # Extra QEMU args, e.g. iPhone USB passthrough (see README "USB 페어링"):
+      # QEMU_EXTRA_ARGS='-device usb-host,hostbus=2,hostport=3'
+      ARGUMENTS: "${QEMU_EXTRA_ARGS:-}"
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+      # iPhone USB pairing also needs the phone's bus device here, e.g.
+      # - /dev/bus/usb/002/003
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "8006:8006" # web viewer — browser shows the macOS screen
+      - "5900:5900" # raw VNC
+      - "2222:22" # SSH into the guest (Remote Login must be on)
+    volumes:
+      - loop-ios-vm:/storage
+    stop_grace_period: 2m
+
+  # dockur's DHCP-bridge mode doesn't forward arbitrary published ports to
+  # the guest, so relay host:2222 -> guest sshd. The guest IP comes from
+  # dnsmasq (single guest = 172.30.0.2, see the leases file if it changes).
+  ssh-relay:
+    image: alpine/socat
+    network_mode: "service:macos"
+    command: TCP-LISTEN:22,fork,reuseaddr TCP:172.30.0.2:22
+    restart: unless-stopped
+    depends_on:
+      - macos
+
+volumes:
+  loop-ios-vm:
