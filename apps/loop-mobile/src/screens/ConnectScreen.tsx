@@ -9,6 +9,7 @@ import { useState } from "react";
 import { KeyboardAvoidingView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
 import {
+  connectionConfigFromUrl,
   createConnectionConfig,
   ConnectionConfigError,
   type ConnectionConfig,
@@ -40,7 +41,12 @@ export function ConnectScreen(props: {
     if (connecting) return;
     let config: ConnectionConfig;
     try {
-      config = createConnectionConfig(host, port, token);
+      // A full URL in the host field (serve-TLS amendment) wins over the
+      // host+port pair: `https://gw.tailnet.ts.net` or `http://h:p`.
+      const trimmed = host.trim();
+      config = /^https?:\/\//i.test(trimmed)
+        ? connectionConfigFromUrl(trimmed, token)
+        : createConnectionConfig(trimmed, port, token);
     } catch (e) {
       setError(e instanceof ConnectionConfigError ? e.message : copy.connectFailed);
       return;
@@ -61,7 +67,7 @@ export function ConnectScreen(props: {
           style={[styles.input, focusedField === "host" && styles.inputFocused]}
           value={host}
           onChangeText={setHost}
-          placeholder="100.x.y.z 또는 host.ts.net"
+          placeholder="100.x.y.z, host.ts.net 또는 https://gw.ts.net"
           placeholderTextColor={colors.inkFaint}
           autoCapitalize="none"
           autoCorrect={false}

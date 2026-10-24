@@ -9,7 +9,7 @@
  * exists, so a caller never fakes a "Copied" state. Swapping in the
  * community package later is a one-file change.
  */
-import type { TurboModule } from "react-native/Libraries/TurboModule/RCTExport";
+import type { TurboModule } from "react-native";
 import { TurboModuleRegistry } from "react-native";
 
 type ClipboardModule = TurboModule & { setString(content: string): void };

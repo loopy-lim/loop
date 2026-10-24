@@ -4,7 +4,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View, type ScrollViewInstance } from "react-native";
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type ScrollViewInstance,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { copy } from "../copy";
@@ -33,7 +40,10 @@ export function TerminalScreen(props: {
     [props.state.herdr, props.paneId],
   );
   const label = kindLabel(pane?.agent ?? null);
-  const [transcript, setTranscript] = useState<Transcript>({ ...EMPTY_TRANSCRIPT, paneId: props.paneId });
+  const [transcript, setTranscript] = useState<Transcript>({
+    ...EMPTY_TRANSCRIPT,
+    paneId: props.paneId,
+  });
   const lastRevision = useRef("");
 
   const refresh = useCallback(async () => {
@@ -60,13 +70,16 @@ export function TerminalScreen(props: {
   }, [pane, refresh]);
 
   const scrollRef = useRef<ScrollViewInstance | null>(null);
+  // Tail-follow pins instantly (no animation): a live mirror re-renders every
+  // few hundred ms and an animated scrollToEnd that keeps restarting reads as
+  // bouncing — plus its own onScroll events could detach the follow mid-glide
+  // (live device finding, 2026-10-22). Touch scrolling stays the only detach.
   useEffect(() => {
-    if (follow.following) scrollRef.current?.scrollToEnd({ animated: true });
+    if (follow.following) scrollRef.current?.scrollToEnd({ animated: false });
   }, [transcript.text, follow.following]);
 
   const title = pane === null ? props.paneId : paneDisplayName(pane, label);
-  const paneGone =
-    pane === null && props.state.herdr !== null && props.state.herdr.available;
+  const paneGone = pane === null && props.state.herdr !== null && props.state.herdr.available;
 
   if (paneGone) {
     return (
@@ -93,7 +106,9 @@ export function TerminalScreen(props: {
           <Icon role="back" size={typeScale.title.fontSize} color={colors.ink} />
         </Pressable>
         <View style={styles.headerTitle}>
-          <Text style={styles.headerTitleText} numberOfLines={1}>{title}</Text>
+          <Text style={styles.headerTitleText} numberOfLines={1}>
+            {title}
+          </Text>
           <Text style={styles.headerSubtitle} numberOfLines={1}>
             {pane?.cwd ?? copy.settingsNotConnected}
           </Text>

@@ -55,7 +55,30 @@ bun install && bun test test
 # 시뮬레이터 빌드 + 실행 (booted 기기, self-contained JS bundle)
 bun run pod   # 최초 1회
 bun run ios:release
+
+# 안드로이드 에뮬레이터 빌드 + 실행 (JDK 17·ANDROID_HOME 필요, KVM 권장)
+bun run android:release
 ```
+
+### Android 온보딩 (데스크탑 → 기기)
+
+1. **데스크탑(herdr 호스트)**: `loop gateway install-service` — systemd 사용자
+   유닛으로 게이트웨이 부팅 자동 기동을 등록한다(tailscale 바인딩 IP와 포트를
+   고정, linger까지 시도). 이미 게이트웨이가 살아 있으면 enable-only로
+   멱등하다. 이후 `loop pair` — `loop://connect` QR을 터미널에 출력한다.
+   운영은 `loop gateway status|stop`.
+2. **기기(폰·태블릿)**: 릴리스 APK(`bun run android:release` 산출,
+   `android/app/build/outputs/apk/release/`, 기기 ABI에 맞는
+   `-PreactNativeArchitectures=arm64-v8a`)를 설치하고, 데스크탑과 같은
+   tailnet에 둔다.
+3. **페어링**: 시스템 카메라로 `loop pair`의 QR을 스캔하면 `loop://` 딥링크로
+   앱이 열려 자동 페어링된다(cold start 기준, 라이브 검증 2026-10-22). 앱이
+   이미 포그라운드인 상태의 재스캔은 미동작(기록된 제한) — 그때는 주소를
+   직접 입력한다(수동 입력도 전체 URL https 허용).
+4. **재시작**: 데스크탑 재부팅 후에는 유닛이 게이트웨이를 자동 기동하고, 앱은
+   재연결 백오프로 자동 복구된다(무조작 라이브 검증 2026-10-22). herdr의
+   상시 기동은 `~/.config/systemd/user/herdr.service`(같은 방식)로 둘 수
+   있다.
 
 게이트웨이: `LOOP_GATEWAY_HOST=<tailscale-ip> LOOP_GATEWAY_PORT=18477
 LOOP_GATEWAY_DATABASE_PATH=… bun packages/gateway/src/main.ts` — herdr

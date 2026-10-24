@@ -10,6 +10,7 @@
     "start": "react-native start",
     "ios": "react-native run-ios",
     "ios:release": "bash scripts/build-ios-simulator.sh",
+    "android:release": "bash scripts/build-android.sh",
     "pod": "cd ios && pod install"
   },
   "dependencies": {

@@ -8,7 +8,12 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { createConnectionConfig, ConnectionConfigError } from "../src/auth/connection";
+import {
+  connectionConfigFromUrl,
+  createConnectionConfig,
+  ConnectionConfigError,
+  parseBaseUrl,
+} from "../src/auth/connection";
 import { decodeStoredCredentials } from "../src/auth/credentialStore";
 import { probeGateway } from "../src/gateway-client/probe";
 import type { FetchLike } from "../src/herdr/client";
@@ -37,6 +42,49 @@ describe("tokenless connection config", () => {
   test("a non-empty bearer still selects the fallback", () => {
     const config = createConnectionConfig("gw.tailnet.ts.net", "18477", " tok_fallback ");
     expect(config.bearer).toBe("tok_fallback");
+  });
+});
+
+describe("serve-TLS URL connection config (2026-10-22 amendment)", () => {
+  test("an https URL builds the https base URL, port optional (443 implied)", () => {
+    expect(connectionConfigFromUrl("https://gw.tail42f248.ts.net")).toEqual({
+      baseUrl: "https://gw.tail42f248.ts.net",
+      bearer: "",
+    });
+    expect(connectionConfigFromUrl("https://gw.tail42f248.ts.net:8443", " tok ")).toEqual({
+      baseUrl: "https://gw.tail42f248.ts.net:8443",
+      bearer: "tok",
+    });
+  });
+
+  test("a plain http URL is accepted with its explicit port", () => {
+    expect(connectionConfigFromUrl("http://100.80.133.120:18477")).toEqual({
+      baseUrl: "http://100.80.133.120:18477",
+      bearer: "",
+    });
+  });
+
+  test("paths, bare hosts, junk ports, and empty hosts fail closed", () => {
+    expect(() => connectionConfigFromUrl("https://gw.ts.net/v1")).toThrow(ConnectionConfigError);
+    expect(() => connectionConfigFromUrl("gw.ts.net")).toThrow(ConnectionConfigError);
+    expect(() => connectionConfigFromUrl("https://gw.ts.net:")).toThrow(ConnectionConfigError);
+    expect(() => connectionConfigFromUrl("https://gw.ts.net:zero")).toThrow(ConnectionConfigError);
+    expect(() => connectionConfigFromUrl("https://:443")).toThrow(ConnectionConfigError);
+    expect(() => connectionConfigFromUrl("ftp://gw.ts.net")).toThrow(ConnectionConfigError);
+  });
+
+  test("parseBaseUrl recovers host, port, and scheme from both shapes", () => {
+    expect(parseBaseUrl("http://gw.tailnet.ts.net:18477")).toEqual({
+      host: "gw.tailnet.ts.net",
+      port: 18477,
+      tls: false,
+    });
+    expect(parseBaseUrl("https://gw.tailnet.ts.net")).toEqual({
+      host: "gw.tailnet.ts.net",
+      port: 443,
+      tls: true,
+    });
+    expect(() => parseBaseUrl("ftp://gw.tailnet.ts.net")).toThrow(ConnectionConfigError);
   });
 });
 
@@ -69,7 +117,29 @@ describe("keychain stays bearer-fallback only", () => {
     expect(decodeStoredCredentials("gw.tailnet.ts.net:18477", "tok_fallback")).toEqual({
       host: "gw.tailnet.ts.net",
       port: 18477,
+      tls: false,
       bearer: "tok_fallback",
+    });
+  });
+
+  test("a serve-TLS item decodes with its scheme; legacy entries read as http", () => {
+    expect(decodeStoredCredentials("https://gw.tailnet.ts.net:8443", "tok_tls")).toEqual({
+      host: "gw.tailnet.ts.net",
+      port: 8443,
+      tls: true,
+      bearer: "tok_tls",
+    });
+    expect(decodeStoredCredentials("https://gw.tailnet.ts.net:8443", "tokenless")).toEqual({
+      host: "gw.tailnet.ts.net",
+      port: 8443,
+      tls: true,
+      bearer: "",
+    });
+    expect(decodeStoredCredentials("gw.tailnet.ts.net:18477", "tokenless")).toEqual({
+      host: "gw.tailnet.ts.net",
+      port: 18477,
+      tls: false,
+      bearer: "",
     });
   });
 });

@@ -44,8 +44,12 @@ const ICON_ROLES = {
   /** Herd rebuild (rebuild brief §3): the Panes tab and agent marks. */
   tabPanes: { sf: "rectangle.split.2x2", text: "▤" },
   agent: { sf: "sparkles", text: "✦" },
-  /** Header/settings logout (destructive, behind the confirmation). */
-  logout: { sf: "power", text: "⏻" },
+  /** Header/settings logout (destructive, behind the confirmation). U+23FB
+   * ⏻ was the first pick but Android's core fonts lack it — it rendered as
+   * tofu on the live device (2026-10-22, Settings screen). ⊙ (U+2299,
+   * Mathematical Operators — covered everywhere) carries the same
+   * power-ring reading; the word carries the meaning anyway. */
+  logout: { sf: "power", text: "⊙" },
   /** Attention status signal. */
   attention: { sf: "exclamationmark.triangle", text: "⚠" },
   /** File entry (viewer leaf rows). */
@@ -91,7 +95,10 @@ export interface IconGlyph {
 
 /** The registry. View-level icons read `icon[role].sf` via ui/Icon.tsx. */
 export const icon: Readonly<Record<IconRole, IconGlyph>> = Object.fromEntries(
-  Object.entries(ICON_ROLES).map(([role, entry]) => [role, { sf: entry.sf, text: pin(entry.text) }]),
+  Object.entries(ICON_ROLES).map(([role, entry]) => [
+    role,
+    { sf: entry.sf, text: pin(entry.text) },
+  ]),
 ) as Readonly<Record<IconRole, IconGlyph>>;
 
 /** The text-only view of the registry — the inline-flow rendering path.

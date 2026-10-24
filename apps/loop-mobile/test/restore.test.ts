@@ -143,6 +143,7 @@ describe("storedToConnectionConfig", () => {
     const config = storedToConnectionConfig({
       host: "gw.tailnet.ts.net",
       port: 18477,
+      tls: false,
       bearer: "tok",
     });
     expect(config).toEqual({ baseUrl: "http://gw.tailnet.ts.net:18477", bearer: "tok" });

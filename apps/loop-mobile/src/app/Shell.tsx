@@ -7,8 +7,8 @@
  * back gesture live in ScreenStack; the tab bar owns haptics.
  */
 
-import { useCallback, useReducer, useState, type ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useReducer, useState, type ReactNode } from "react";
+import { BackHandler, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { copy } from "../copy";
@@ -70,6 +70,20 @@ export function Shell(props: { onLogout: () => void }) {
     impactLight();
     dispatch({ type: "switchTab", tab });
   }, []);
+
+  // Android hardware/system back pops the push stack (ScreenStack's pop is
+  // the same animated boundary the edge gesture uses); at a tab root it
+  // falls through to the system. iOS never fires hardwareBackPress, so the
+  // subscription stays platform-neutral.
+  const canPop = top !== null;
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (!canPop) return false;
+      pop();
+      return true;
+    });
+    return () => sub.remove();
+  }, [canPop, pop]);
 
   const renderTabRoot = (name: TabName): ReactNode => {
     if (name === "herd") {

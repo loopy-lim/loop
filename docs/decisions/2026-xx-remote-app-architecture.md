@@ -427,3 +427,25 @@ bearer는 앱 재시작 후 다시 입력/주입하며 어떠한 앱 persistence
 ## 8. Dependents용 contract 요약
 
 React Native 모바일 앱과 Tauri 데스크톱 앱은 Rust `loop-bridge`에서 먼저 정의하고 Rustra로 생성한 공통 protocol을 통해, `host:port`로 구성되어 활성 Tailscale interface에만 fail-closed bind된 gateway의 `/v1` HTTP/SSE를 사용한다. `POST /v1/runs`는 raw prompt를 받아 `202`와 accepted run을 반환하고, `GET /v1/runs`/`GET /v1/runs/{runId}`는 목록과 authoritative run projection을 제공하며, `GET /v1/runs/{runId}/events`는 opaque SSE cursor로 `status`, bounded `output`, `reset`, `terminal` event를 전달한다. status와 event payload는 generated bridge types이고 HTTP/SSE framing, problem response, 인증, cursor 및 Tailscale 검사는 adapter-local이며, HTTP/Pi/Herdr/Tailscale 개념은 `loop-core`에 들어가지 않고 bearer/signing credential은 gateway나 앱의 config·로그·DB·파일에 저장하지 않는다.
+
+## 9. 개정 (2026-10-22): serve-TLS front 경로
+
+tailscale serve(또는 동등한 tailnet-internal TLS 프록시)를 gateway 앞에 두면
+앱이 `https://<magicdns-name>[:port]` base URL로 접속할 수 있다. 이 개정은
+D2의 기본 계약(`http://<host>:<port>`, tailnet 멤버십이 신뢰 경계)을 바꾸지
+않는다 — plain http host:port가 기본이고, https는 같은 tailnet 안의 TLS
+front를 통한 표현일 뿐이다.
+
+- 허용하는 것: 앱 연결 설정이 `https://host[:port]` 전체 URL을 받는다
+  (`connectionConfigFromUrl`), 키체인 영속 항목이 스킴을 보존한다
+  (`https://host:port` username), 수동 연결 화면이 전체 URL을 받는다.
+  QR 페어링 payload(`loop://connect?host=&port=`)는 http host:port로
+  유지된다 — serve front는 수동 입력으로 연결한다.
+- 여전히 금지: public Internet 노출(funnel 포함)은 v1 범위 밖. bearer 없는
+  https는 tailnet 멤버십 + TLS 전송 보호를 전제로 하며, credential 정책은
+  무변경(키체인만, 로그·파일 금지).
+- Android 릴리스 빌드는 network security config로 클리어텍스트를 명시 허용해
+  iOS(raw IP ATS 우회 + 스코프드 예외)와 같은 목적을 달성한다. 단 Android의
+  base-config 허용은 iOS의 도메인 스코프 예외보다 넓다 — 앱은 게이트웨이 외
+  통신이 없어 허용 범위 차이의 실효 위험은 낮고, 도메인 스코핑이 필요해지는
+  시점(서드파티 통신 추가)에 후속으로 좁힌다.

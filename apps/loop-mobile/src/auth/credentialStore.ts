@@ -15,7 +15,12 @@
  * (no native module, no network). The real binding lives in `keychain.ts`.
  */
 
-import { createConnectionConfig, parseBaseUrl, type ConnectionConfig } from "../auth/connection";
+import {
+  connectionConfigFromUrl,
+  createConnectionConfig,
+  parseBaseUrl,
+  type ConnectionConfig,
+} from "../auth/connection";
 
 /** Minimal keychain surface this app needs (subset of react-native-keychain). */
 export type GatewayKeychainPort = {
@@ -30,13 +35,18 @@ export type GatewayKeychainPort = {
 export type StoredGatewayCredentials = {
   readonly host: string;
   readonly port: number;
+  /** Serve-TLS amendment: the stored location's scheme (see connection.ts). */
+  readonly tls: boolean;
   readonly bearer: string;
 };
 
-/** Keychain username encoding: `host:port`. `createConnectionConfig` forbids
- * ":" and "/" inside the host, so splitting on the LAST colon is lossless. */
-export function encodeCredentialUsername(host: string, port: number): string {
-  return `${host}:${port}`;
+/** Keychain username encoding. Plain-http entries stay the legacy
+ * `host:port` (createConnectionConfig forbids ":" and "/" inside the host,
+ * so splitting on the LAST colon is lossless). TLS-fronted entries carry
+ * their scheme explicitly: `https://host:port` — self-describing, and the
+ * legacy shape still decodes as http. */
+export function encodeCredentialUsername(host: string, port: number, tls: boolean): string {
+  return tls ? `https://${host}:${port}` : `${host}:${port}`;
 }
 
 /** The password field of a tokenless connection entry. A tokenless connect
@@ -57,9 +67,12 @@ export function decodeStoredCredentials(
   username: string,
   password: string,
 ): StoredGatewayCredentials | null {
+  const tlsForm = username.toLowerCase().startsWith("https://");
   const separator = username.lastIndexOf(":");
   if (separator <= 0 || separator === username.length - 1) return null;
-  const host = username.slice(0, separator);
+  const host = tlsForm
+    ? username.slice("https://".length, separator)
+    : username.slice(0, separator);
   const rawPort = username.slice(separator + 1);
   const port = Number.parseInt(rawPort, 10);
   if (password === TOKENLESS_PASSWORD_MARKER) {
@@ -67,7 +80,7 @@ export function decodeStoredCredentials(
     // there is no bearer material in the item.
     try {
       const parsed = parseBaseUrl(createConnectionConfig(host, port).baseUrl);
-      return { host: parsed.host, port: parsed.port, bearer: "" };
+      return { host: parsed.host, port: parsed.port, tls: tlsForm, bearer: "" };
     } catch {
       return null;
     }
@@ -77,7 +90,7 @@ export function decodeStoredCredentials(
     // Full validation path (host shape, port range, bearer fallback token).
     const config = createConnectionConfig(host, port, password);
     const parsed = parseBaseUrl(config.baseUrl);
-    return { host: parsed.host, port: parsed.port, bearer: config.bearer };
+    return { host: parsed.host, port: parsed.port, tls: tlsForm, bearer: config.bearer };
   } catch {
     return null;
   }
@@ -106,10 +119,10 @@ export function createGatewayCredentialStore(
       return decodeStoredCredentials(item.username, item.password);
     },
     async save(config: ConnectionConfig): Promise<void> {
-      const { host, port } = parseBaseUrl(config.baseUrl);
+      const { host, port, tls } = parseBaseUrl(config.baseUrl);
       const bearer = config.bearer.trim();
       await keychain.save(
-        encodeCredentialUsername(host, port),
+        encodeCredentialUsername(host, port, tls),
         bearer.length === 0 ? TOKENLESS_PASSWORD_MARKER : bearer,
       );
     },
@@ -121,5 +134,7 @@ export function createGatewayCredentialStore(
 
 /** Validated stored credentials → in-memory connection config. */
 export function storedToConnectionConfig(stored: StoredGatewayCredentials): ConnectionConfig {
-  return createConnectionConfig(stored.host, stored.port, stored.bearer);
+  return stored.tls
+    ? connectionConfigFromUrl(`https://${stored.host}:${stored.port}`, stored.bearer)
+    : createConnectionConfig(stored.host, stored.port, stored.bearer);
 }

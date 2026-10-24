@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP is the app's connection contract to the Loop gateway
+  (decision 2026-xx-remote-app-architecture §D2: base URL is exactly
+  http://<host>:<port>, tailnet membership is the trust boundary). iOS
+  reaches the same behavior through ATS's raw-IP bypass plus scoped
+  hostname exceptions (Info.plist NSAppTransportSecurity); Android has no
+  IP-literal bypass, so the release build must opt in explicitly here.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

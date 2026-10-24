@@ -66,7 +66,9 @@ describe("icon registry — the closed role set (canon §3, v3)", () => {
     expect(icon.attention.text).toBe(`⚠${TEXT_PRESENTATION}`);
     expect(icon.menu.text).toBe(`☰${TEXT_PRESENTATION}`);
     expect(icon.tabSettings.text).toBe(`⚙${TEXT_PRESENTATION}`);
-    expect(icon.logout.text).toBe(`⏻${TEXT_PRESENTATION}`);
+    // U+23FB ⏻ tofu'd on Android's core fonts (live device, 2026-10-22) —
+    // the registry now pins the core-covered power-ring ⊙.
+    expect(icon.logout.text).toBe(`⊙${TEXT_PRESENTATION}`);
   });
 });
 

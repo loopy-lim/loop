@@ -10,7 +10,8 @@ export const copy = {
 
   // Connection
   connectTitle: "게이트웨이 연결",
-  connectHint: "Mac에서 `loop pair`가 만든 QR을 스캔하거나 주소를 직접 입력하세요.",
+  connectHint:
+    "Mac에서 `loop pair`가 만든 QR을 스캔하거나 주소를 직접 입력하세요. (`https://` 전체 URL도 됩니다)",
   connectScan: "QR 스캔",
   connectManual: "주소로 연결",
   connectHostLabel: "호스트 (Tailscale 주소)",
@@ -33,7 +34,8 @@ export const copy = {
   herdEmptyTitle: "실행 중인 에이전트가 없어요",
   herdEmptyBody: "우측 아래 + 버튼으로 워크스페이스에 에이전트를 시작하세요.",
   herdOfflineTitle: "herdr에 연결할 수 없어요",
-  herdOfflineBody: "Mac에서 herdr가 실행 중인지 확인하세요. 연결이 복구되면 자동으로 다시 나타나요.",
+  herdOfflineBody:
+    "Mac에서 herdr가 실행 중인지 확인하세요. 연결이 복구되면 자동으로 다시 나타나요.",
   herdFailedBody: "게이트웨이에 연결할 수 없어요. 설정에서 연결을 확인하세요.",
   newAgent: "새 에이전트",
 
@@ -46,8 +48,9 @@ export const copy = {
   composerPlaceholder: "에이전트에게 메시지 보내기",
   composerSend: "보내기",
   sendQueued: "전송됨 — 응답을 기다리는 중",
+  workingIndicator: "에이전트 작업 중",
   sendBlocked: "에이전트가 승인 대기 중이에요",
-  approveEnter: "승인 ⏎",
+  approveEnter: "승인 ↵",
   rejectEsc: "취소 esc",
   sendNotFound: "에이전트를 찾을 수 없어요",
   sendFailed: "전송에 실패했어요",
@@ -63,7 +66,8 @@ export const copy = {
   newAgentWorkspaceLabel: "워크스페이스",
   newAgentNameLabel: "이름 (선택)",
   newAgentStart: "시작",
-  newAgentNoIntegrations: "설치된 에이전트가 없어요 — Mac에서 herdr integration install로 추가하세요.",
+  newAgentNoIntegrations:
+    "설치된 에이전트가 없어요 — Mac에서 herdr integration install로 추가하세요.",
   newAgentWorkspaceNew: "새 워크스페이스",
 
   // Panes browser

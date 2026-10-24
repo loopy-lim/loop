@@ -8,6 +8,7 @@
 import { useMemo } from "react";
 import {
   FlatList,
+  Platform,
   StyleSheet,
   Text,
   View,
@@ -42,6 +43,7 @@ export function HerdScreen(props: {
   return (
     <View style={styles.root}>
       <FlatList
+        style={styles.list}
         data={groups}
         keyExtractor={(group) => group.workspace.id}
         contentContainerStyle={[styles.content, { paddingTop: insets.top + space.m }]}
@@ -58,11 +60,17 @@ export function HerdScreen(props: {
         ListEmptyComponent={
           loading ? undefined : <HerdEmpty state={state} />
         }
+        // Android/Fabric (RN 0.88, live-verified 2026-10-22): mounting a
+        // RefreshControl here blanks the ENTIRE Herd subtree — the JS renders
+        // (rows, FAB in the tree) but no native view ever attaches. iOS keeps
+        // the native pull-to-refresh; Android rides the live SSE stream.
         refreshControl={
-          <NativeRefresh
-            refreshing={state.connection.status === "connecting"}
-            onRefresh={() => void store.refresh()}
-          />
+          Platform.OS === "ios" ? (
+            <NativeRefresh
+              refreshing={state.connection.status === "connecting"}
+              onRefresh={() => void store.refresh()}
+            />
+          ) : undefined
         }
       />
       <NewAgentFab onPress={props.onNewAgent} />
@@ -117,6 +125,7 @@ function NewAgentFab(props: { onPress: () => void }) {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  list: { flex: 1 },
   content: {
     paddingHorizontal: COLUMN_GUTTER,
     paddingBottom: 96,

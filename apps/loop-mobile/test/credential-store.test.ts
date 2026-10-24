@@ -11,10 +11,11 @@ import {
   createGatewayCredentialStore,
   decodeStoredCredentials,
   encodeCredentialUsername,
+  storedToConnectionConfig,
   TOKENLESS_PASSWORD_MARKER,
   type GatewayKeychainPort,
 } from "../src/auth/credentialStore";
-import { createConnectionConfig } from "../src/auth/connection";
+import { connectionConfigFromUrl, createConnectionConfig } from "../src/auth/connection";
 
 /** In-memory single-slot keychain standing in for the OS secure store. */
 function mockKeychain() {
@@ -43,10 +44,25 @@ const CONFIG = createConnectionConfig("gw.tailnet.ts.net", "18477", "tok_test_be
 
 describe("credential username encoding", () => {
   test("encodes host:port; decodes losslessly", () => {
-    expect(encodeCredentialUsername("gw.tailnet.ts.net", 18477)).toBe("gw.tailnet.ts.net:18477");
+    expect(encodeCredentialUsername("gw.tailnet.ts.net", 18477, false)).toBe(
+      "gw.tailnet.ts.net:18477",
+    );
     expect(decodeStoredCredentials("gw.tailnet.ts.net:18477", "tok")).toEqual({
       host: "gw.tailnet.ts.net",
       port: 18477,
+      tls: false,
+      bearer: "tok",
+    });
+  });
+
+  test("serve-TLS entries encode the scheme and round-trip as https", () => {
+    expect(encodeCredentialUsername("gw.tail42f248.ts.net", 8443, true)).toBe(
+      "https://gw.tail42f248.ts.net:8443",
+    );
+    expect(decodeStoredCredentials("https://gw.tail42f248.ts.net:8443", "tok")).toEqual({
+      host: "gw.tail42f248.ts.net",
+      port: 8443,
+      tls: true,
       bearer: "tok",
     });
   });
@@ -80,6 +96,7 @@ describe("gateway credential store", () => {
     expect(await store.load()).toEqual({
       host: "gw.tailnet.ts.net",
       port: 18477,
+      tls: false,
       bearer: "tok_test_bearer",
     });
   });
@@ -107,6 +124,7 @@ describe("gateway credential store", () => {
     expect(await store.load()).toEqual({
       host: "other.tailnet.ts.net",
       port: 18477,
+      tls: false,
       bearer: "tok_new",
     });
     expect(mock.calls.save).toBe(2);
@@ -123,13 +141,41 @@ describe("gateway credential store", () => {
       username: "gw.tailnet.ts.net:18477",
       password: TOKENLESS_PASSWORD_MARKER,
     });
-    expect(await store.load()).toEqual({ host: "gw.tailnet.ts.net", port: 18477, bearer: "" });
+    expect(await store.load()).toEqual({
+      host: "gw.tailnet.ts.net",
+      port: 18477,
+      tls: false,
+      bearer: "",
+    });
     // A later fallback login overwrites the tokenless entry with real material.
     await store.save(CONFIG);
     expect(await store.load()).toEqual({
       host: "gw.tailnet.ts.net",
       port: 18477,
+      tls: false,
       bearer: "tok_test_bearer",
+    });
+  });
+
+  test("a serve-TLS config saves its scheme and restores an https connection", async () => {
+    const mock = mockKeychain();
+    const store = createGatewayCredentialStore(mock.port);
+    const config = connectionConfigFromUrl("https://gw.tail42f248.ts.net:8443");
+    await store.save(config);
+    expect(mock.item()).toEqual({
+      username: "https://gw.tail42f248.ts.net:8443",
+      password: TOKENLESS_PASSWORD_MARKER,
+    });
+    const loaded = await store.load();
+    expect(loaded).toEqual({
+      host: "gw.tail42f248.ts.net",
+      port: 8443,
+      tls: true,
+      bearer: "",
+    });
+    expect(storedToConnectionConfig(loaded!)).toEqual({
+      baseUrl: "https://gw.tail42f248.ts.net:8443",
+      bearer: "",
     });
   });
 

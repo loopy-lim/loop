@@ -1,0 +1,8 @@
+# Android build outputs (template .gitignore's android section, scoped here).
+.gradle/
+build/
+app/build/
+.cxx/
+local.properties
+*.keystore
+!debug.keystore
