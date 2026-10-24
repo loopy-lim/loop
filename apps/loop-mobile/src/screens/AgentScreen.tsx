@@ -6,13 +6,7 @@
  * desktop — the app never answers approval dialogs (rebuild brief §7).
  */
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { memo } from "react";
 import {
   FlatList,
@@ -33,14 +27,31 @@ import { EmptyState, Hairline, PressableRow, StatusPill } from "../design/primit
 import { TerminalText } from "../design/TerminalText";
 import { kindLabel } from "../herdr/kinds";
 import { nextTranscript, EMPTY_TRANSCRIPT, type Transcript } from "../herdr/transcript";
-import { chatBody, nextConversation, summaryStatus, type ChatBody } from "../herdr/conversation";
+import {
+  chatBody,
+  mergePendingTurns,
+  nextConversation,
+  planRefresh,
+  seenUserIds,
+  summaryStatus,
+  turnsEqual,
+  type ChatBody,
+  type PendingPrompt,
+} from "../herdr/conversation";
 import type { HerdrConversation, HerdrConversationTurn } from "../herdr/wire";
 import { paneDisplayName } from "../herdr/store";
 import type { HerdrAppState, HerdrStore } from "../herdr/store";
 import { impactLight } from "../ui/haptics";
 import { Icon } from "../ui/Icon";
 import type { IconRole } from "../ui/glyphs";
-import { AnimatedView, Entrance, PressableScale, springTo, useMotionValue } from "../ui/motion";
+import {
+  AnimatedView,
+  Entrance,
+  PressableScale,
+  springTo,
+  TypingDots,
+  useMotionValue,
+} from "../ui/motion";
 import { colors, radius, space, type as typeScale, COLUMN_GUTTER } from "../ui/tokens";
 import { useFollowScroll } from "../ui/followScroll";
 import { useKeyboardVisible } from "../ui/useKeyboardVisible";
@@ -48,12 +59,18 @@ import { useStore } from "../app/storeContext";
 import { MarkdownView } from "../features/markdown-view";
 
 const READ_LINES = 400;
+/** ANSI read options for the transcript/terminal mirror (route defaults). */
+const READ_OPTIONS = {
+  lines: READ_LINES,
+  source: "recent_unwrapped" as const,
+  format: "ansi" as const,
+};
+/** An optimistic bubble retires on its match in the fetched history, or here
+ * when the record never lands (agent restart, lost prompt) — the queue
+ * self-heals either way. */
+const PENDING_PROMPT_TIMEOUT_MS = 15_000;
 
-export function AgentScreen(props: {
-  paneId: string;
-  state: HerdrAppState;
-  onBack: () => void;
-}) {
+export function AgentScreen(props: { paneId: string; state: HerdrAppState; onBack: () => void }) {
   const store = useStore();
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
@@ -65,44 +82,70 @@ export function AgentScreen(props: {
   const title = pane === null ? props.paneId : paneDisplayName(pane, label);
   // A converged, available state view without this pane means the pane was
   // closed elsewhere: render the honest closed state, never a stale screen.
-  const paneGone =
-    pane === null && props.state.herdr !== null && props.state.herdr.available;
+  const paneGone = pane === null && props.state.herdr !== null && props.state.herdr.available;
 
   const [segment, setSegment] = useState<"chat" | "terminal">("chat");
-  const [transcript, setTranscript] = useState<Transcript>({ ...EMPTY_TRANSCRIPT, paneId: props.paneId });
+  const [transcript, setTranscript] = useState<Transcript>({
+    ...EMPTY_TRANSCRIPT,
+    paneId: props.paneId,
+  });
   const [conversation, setConversation] = useState<HerdrConversation | null>(null);
-  const body: ChatBody = segment === "chat" ? chatBody(props.paneId, conversation) : { view: "transcript" };
+  const body: ChatBody =
+    segment === "chat" ? chatBody(props.paneId, conversation) : { view: "transcript" };
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [composerValue, setComposerValue] = useState("");
+  const [pending, setPending] = useState<PendingPrompt[]>([]);
   const follow = useFollowScroll();
   const lastRevision = useRef<string>("");
+  // Refresh reads the CURRENT segment without joining it into callback deps
+  // (a dep would re-run the initial read on every switch); the segment
+  // control below is the one writer that keeps it in sync.
+  const segmentRef = useRef(segment);
+  // What the last conversation fetch decided the chat surface is: while the
+  // structured turns view holds, a tick's ANSI read renders nothing, so it
+  // is skipped until a fallback flips this back to "other".
+  const surfaceRef = useRef<"turns" | "other" | "unknown">("unknown");
 
-  const applyReading = useCallback((reading: Awaited<ReturnType<HerdrStore["client"]["readPane"]>>) => {
-    setTranscript((current) => nextTranscript(current, reading) ?? current);
-  }, []);
+  const applyReading = useCallback(
+    (reading: Awaited<ReturnType<HerdrStore["client"]["readPane"]>>) => {
+      setTranscript((current) => nextTranscript(current, reading) ?? current);
+    },
+    [],
+  );
 
-  const refresh = useCallback(async () => {
-    try {
-      const reading = await store.client.readPane(props.paneId, {
-        lines: READ_LINES,
-        source: "recent_unwrapped",
-        format: "ansi",
-      });
-      applyReading(reading);
-    } catch {
-      // Offline or pane gone: keep the last transcript on screen; the state
-      // feed re-renders the header honestly (pane disappears → 404 title).
-    }
-    try {
-      const fetched = await store.client.conversation(props.paneId);
-      setConversation((current) => nextConversation(props.paneId, current, fetched));
-    } catch {
-      // 404 (no structured source for this kind) or offline: the ANSI
-      // transcript stays the chat body — the structured layer is additive.
-      setConversation((current) => (current?.paneId === props.paneId ? current : null));
-    }
-  }, [applyReading, props.paneId, store]);
+  const refresh = useCallback(
+    async (forceTranscript = false) => {
+      // Both reads run concurrently — a streamed tick used to pay them in
+      // series, doubling the wait for new content. Which reads a tick needs
+      // is the pure planRefresh contract (unit-pinned).
+      const plan = planRefresh(segmentRef.current, surfaceRef.current, forceTranscript);
+      const [reading, fetched] = await Promise.all([
+        plan.transcript
+          ? store.client.readPane(props.paneId, READ_OPTIONS).catch(() => null)
+          : Promise.resolve(null),
+        plan.conversation
+          ? store.client
+              .conversation(props.paneId)
+              .then(
+                (conversation) => conversation,
+                () => "failed" as const,
+              )
+          : Promise.resolve(null),
+      ]);
+      if (reading !== null) applyReading(reading);
+      if (fetched === "failed") {
+        // 404 (no structured source for this kind) or offline: the ANSI
+        // transcript stays the chat body — the structured layer is additive.
+        setConversation((current) => (current?.paneId === props.paneId ? current : null));
+        surfaceRef.current = "other";
+      } else if (fetched !== null) {
+        setConversation((current) => nextConversation(props.paneId, current, fetched));
+        surfaceRef.current = chatBody(props.paneId, fetched).view === "turns" ? "turns" : "other";
+      }
+    },
+    [applyReading, props.paneId, store],
+  );
 
   // Initial read, then read whenever the pane's revision advances.
   useEffect(() => {
@@ -116,16 +159,66 @@ export function AgentScreen(props: {
     void refresh();
   }, [pane, refresh]);
 
+  // Optimistic send: an accepted prompt joins the tail as a pending bubble
+  // and hands off to the agent's own record when a fetched turn carries it.
+  const pendingSeq = useRef(0);
+  const pendingTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const conversationRef = useRef<HerdrConversation | null>(null);
+  useEffect(() => {
+    conversationRef.current = conversation;
+  }, [conversation]);
+  useEffect(
+    () => () => {
+      for (const timer of pendingTimers.current) clearTimeout(timer);
+    },
+    [],
+  );
+  const attachPending = useCallback((text: string) => {
+    const id = `pending-${pendingSeq.current}`;
+    pendingSeq.current += 1;
+    setPending((current) => [
+      ...current,
+      { id, text, seen: seenUserIds(conversationRef.current) },
+    ]);
+    const timer = setTimeout(() => {
+      pendingTimers.current.delete(timer);
+      setPending((current) => current.filter((item) => item.id !== id));
+    }, PENDING_PROMPT_TIMEOUT_MS);
+    pendingTimers.current.add(timer);
+  }, []);
+
+  // The turns list the FlatList renders: fetched turns with still-pending
+  // prompts folded in as trailing user bubbles (null off the turns view).
+  const chat = useMemo(() => {
+    if (segment !== "chat") return null;
+    const decided = chatBody(props.paneId, conversation);
+    if (decided.view !== "turns") return null;
+    return mergePendingTurns(decided.turns.turns, pending);
+  }, [conversation, pending, props.paneId, segment]);
+
+  // A fetched history that now carries a pending prompt retires it — the
+  // optimistic bubble is replaced by the agent's own record.
+  useEffect(() => {
+    if (chat === null || chat.remaining.length === pending.length) return;
+    setPending((current) => current.filter((item) => chat.remaining.includes(item.id)));
+  }, [chat, pending]);
+
   // Follow the tail when new content lands while the user is at the bottom
   // (follow-scroll machine owns the verdict); detached users stay anchored
   // where they are — appended content grows below without moving the view.
+  // Programmatic follows pin INSTANTLY (animated: false): a live session
+  // lands new content every few hundred ms, and an animated scroll that
+  // keeps restarting mid-flight read as up-down bouncing — its own onScroll
+  // events could also momentarily read off-bottom and detach the follow
+  // (live device finding, 2026-10-22). Touch scrolling stays the only
+  // detach path.
   const scrollRef = useRef<ScrollViewInstance | null>(null);
   const listRef = useRef<FlatList<HerdrConversationTurn> | null>(null);
   useEffect(() => {
     if (!follow.following) return;
-    if (body.view === "turns") listRef.current?.scrollToEnd({ animated: true });
-    else scrollRef.current?.scrollToEnd({ animated: true });
-  }, [transcript.text, conversation, body.view, follow.following]);
+    if (body.view === "turns") listRef.current?.scrollToEnd({ animated: false });
+    else scrollRef.current?.scrollToEnd({ animated: false });
+  }, [transcript.text, chat, body.view, follow.following]);
 
   // Entering the screen lands on the newest content: the first non-empty
   // layout snaps to the bottom, no animation (re-render budget: once).
@@ -149,6 +242,7 @@ export function AgentScreen(props: {
     if (outcome.accepted) {
       impactLight();
       setNotice(copy.sendQueued);
+      attachPending(text);
       void refresh();
       return;
     }
@@ -156,17 +250,20 @@ export function AgentScreen(props: {
     if (outcome.reason === "blocked") setNotice(copy.sendBlocked);
     else if (outcome.reason === "not_found") setNotice(copy.sendNotFound);
     else setNotice(copy.sendFailed);
-  }, [composerValue, props.paneId, refresh, sending, store]);
+  }, [attachPending, composerValue, props.paneId, refresh, sending, store]);
 
-  const sendKeys = useCallback(async (keys: string[]) => {
-    try {
-      await store.client.sendKeys(props.paneId, keys);
-      setNotice(null);
-      void refresh();
-    } catch {
-      setNotice(copy.sendFailed);
-    }
-  }, [props.paneId, refresh, store]);
+  const sendKeys = useCallback(
+    async (keys: string[]) => {
+      try {
+        await store.client.sendKeys(props.paneId, keys);
+        setNotice(null);
+        void refresh();
+      } catch {
+        setNotice(copy.sendFailed);
+      }
+    },
+    [props.paneId, refresh, store],
+  );
 
   const focusOnDesktop = useCallback(async () => {
     try {
@@ -207,13 +304,18 @@ export function AgentScreen(props: {
             <Icon role="back" size={typeScale.title.fontSize} color={colors.ink} />
           </Pressable>
           <View style={styles.headerTitle}>
-            <Text style={styles.headerTitleText} numberOfLines={1}>{title}</Text>
+            <Text style={styles.headerTitleText} numberOfLines={1}>
+              {title}
+            </Text>
             <Text style={styles.headerSubtitle} numberOfLines={1}>
               {[label, pane?.cwd].filter((part) => part != null && part.length > 0).join(" · ")}
             </Text>
           </View>
           {pane !== null ? <StatusPill status={pane.status} /> : null}
-          <PressableScale onPress={() => void focusOnDesktop()} accessibilityLabel={copy.focusOnDesktop}>
+          <PressableScale
+            onPress={() => void focusOnDesktop()}
+            accessibilityLabel={copy.focusOnDesktop}
+          >
             <Icon role="forward" size={typeScale.body.fontSize} color={colors.inkFaint} />
           </PressableScale>
         </View>
@@ -222,7 +324,10 @@ export function AgentScreen(props: {
           value={segment === "chat" ? 0 : 1}
           onChange={(value) => {
             impactLight();
-            setSegment(value === 0 ? "chat" : "terminal");
+            const next = value === 0 ? "chat" : "terminal";
+            segmentRef.current = next; // the forced refresh below reads it synchronously
+            setSegment(next);
+            void refresh(true); // the newly shown body fetches now, not on the next tick
           }}
         />
       </View>
@@ -232,10 +337,16 @@ export function AgentScreen(props: {
           <View style={styles.blockedBanner}>
             <Icon role="attention" size={typeScale.caption.fontSize} color={colors.warn} />
             <Text style={styles.blockedText}>{copy.sendBlocked}</Text>
-            <PressableScale onPress={() => void sendKeys(["enter"])} accessibilityLabel={copy.approveEnter}>
+            <PressableScale
+              onPress={() => void sendKeys(["enter"])}
+              accessibilityLabel={copy.approveEnter}
+            >
               <Text style={[styles.blockedAction, styles.blockedApprove]}>{copy.approveEnter}</Text>
             </PressableScale>
-            <PressableScale onPress={() => void sendKeys(["esc"])} accessibilityLabel={copy.rejectEsc}>
+            <PressableScale
+              onPress={() => void sendKeys(["esc"])}
+              accessibilityLabel={copy.rejectEsc}
+            >
               <Text style={styles.blockedAction}>{copy.rejectEsc}</Text>
             </PressableScale>
             <PressableScale onPress={() => void focusOnDesktop()}>
@@ -244,17 +355,17 @@ export function AgentScreen(props: {
           </View>
         </Entrance>
       ) : null}
-      {notice !== null ? (
-        <Text style={styles.notice}>{notice}</Text>
-      ) : null}
+      {notice !== null ? <Text style={styles.notice}>{notice}</Text> : null}
 
       {body.view === "turns" ? (
         <FlatList
           style={styles.body}
           contentContainerStyle={styles.bodyContent}
-          data={body.turns.turns}
+          data={chat !== null ? chat.turns : []}
           keyExtractor={(turn) => turn.id}
-          renderItem={({ item }) => <ChatTurnRow turn={item} />}
+          renderItem={({ item }) => (
+            <ChatTurnRow turn={item} pending={item.id.startsWith("pending-")} />
+          )}
           onScroll={follow.onScroll}
           scrollEventThrottle={64}
           keyboardDismissMode="interactive"
@@ -262,7 +373,14 @@ export function AgentScreen(props: {
           onContentSizeChange={snapToNewest}
           maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
           ListFooterComponent={
-            <View style={{ height: keyboardVisible ? space.m : space.xxl }} />
+            <>
+              {pane?.status === "working" ? (
+                <View style={styles.footerDots}>
+                  <TypingDots accessibilityLabel={copy.workingIndicator} />
+                </View>
+              ) : null}
+              <View style={{ height: keyboardVisible ? space.m : space.xxl }} />
+            </>
           }
         />
       ) : (
@@ -286,6 +404,11 @@ export function AgentScreen(props: {
           {transcript.truncated ? (
             <Text style={styles.truncateNotice}>{copy.truncateNotice}</Text>
           ) : null}
+          {pane?.status === "working" ? (
+            <View style={styles.footerDots}>
+              <TypingDots accessibilityLabel={copy.workingIndicator} />
+            </View>
+          ) : null}
           <View style={{ height: keyboardVisible ? space.m : space.xxl }} />
         </ScrollView>
       )}
@@ -305,7 +428,10 @@ export function AgentScreen(props: {
           <PressableScale
             onPress={() => void send()}
             disabled={composerValue.trim().length === 0 || sending}
-            style={[styles.sendButton, (composerValue.trim().length === 0 || sending) && styles.sendDisabled]}
+            style={[
+              styles.sendButton,
+              (composerValue.trim().length === 0 || sending) && styles.sendDisabled,
+            ]}
             accessibilityLabel={copy.composerSend}
           >
             <Icon role="send" size={typeScale.body.fontSize} color={colors.ctaInk} />
@@ -379,7 +505,11 @@ function Segmented(props: {
 
 function QuickKey(props: { label: string; onPress: () => void }) {
   return (
-    <PressableScale onPress={props.onPress} style={styles.quickKey} accessibilityLabel={props.label}>
+    <PressableScale
+      onPress={props.onPress}
+      style={styles.quickKey}
+      accessibilityLabel={props.label}
+    >
       <Text style={styles.quickKeyText}>{props.label}</Text>
     </PressableScale>
   );
@@ -412,16 +542,19 @@ function TextInputStyled(props: {
 
 /** One structured conversation turn: user bubble right, assistant text left,
  * tool calls as collapsed state rows — tokens only, no inline colors. */
-const ChatTurnRow = memo(function ChatTurnRow({ turn }: { turn: HerdrConversationTurn }) {
-  if (turn.kind === "user") {
-    return (
-      <Entrance>
-        <View style={styles.turnUser}>
+const ChatTurnRow = memo(
+  function ChatTurnRow(props: { turn: HerdrConversationTurn; pending?: boolean }) {
+    const { turn } = props;
+    if (turn.kind === "user") {
+      const bubble = (
+        <View style={[styles.turnUser, props.pending === true && styles.turnUserPending]}>
           <Text style={styles.turnUserText}>{turn.text}</Text>
         </View>
-      </Entrance>
-    );
-  }
+      );
+      // An optimistic bubble skips the entrance — it must not replay the
+      // fade when the agent's own record replaces it a beat later.
+      return props.pending === true ? bubble : <Entrance>{bubble}</Entrance>;
+    }
   if (turn.kind === "assistant") {
     return (
       <Entrance>
@@ -432,7 +565,11 @@ const ChatTurnRow = memo(function ChatTurnRow({ turn }: { turn: HerdrConversatio
     );
   }
   const iconRole: IconRole =
-    turn.state === "error" ? "statusError" : turn.state === "running" ? "statusRunning" : "statusDone";
+    turn.state === "error"
+      ? "statusError"
+      : turn.state === "running"
+        ? "statusRunning"
+        : "statusDone";
   const iconColor =
     turn.state === "error" ? colors.danger : turn.state === "running" ? colors.accent : colors.ok;
   return (
@@ -442,15 +579,24 @@ const ChatTurnRow = memo(function ChatTurnRow({ turn }: { turn: HerdrConversatio
           <Icon role={iconRole} size={14} color={iconColor} />
         </View>
         <View style={styles.turnToolBody}>
-          <Text style={styles.turnToolTitle} numberOfLines={1}>{turn.title}</Text>
+          <Text style={styles.turnToolTitle} numberOfLines={1}>
+            {turn.title}
+          </Text>
           {turn.detail !== null ? (
-            <Text style={styles.turnToolDetail} numberOfLines={2}>{turn.detail}</Text>
+            <Text style={styles.turnToolDetail} numberOfLines={2}>
+              {turn.detail}
+            </Text>
           ) : null}
         </View>
       </View>
     </Entrance>
   );
-});
+  },
+  // Content compare, not reference: every fetch rebuilds the turn objects,
+  // so only rows whose rendered content changed (the streaming tail)
+  // re-render, and a long conversation no longer re-parses wholesale.
+  (a, b) => turnsEqual(a.turn, b.turn) && a.pending === b.pending,
+);
 
 /** agy summary card (documented SQL summary only — the bodies are
  * undocumented blobs, so the ANSI transcript stays underneath). */
@@ -461,7 +607,9 @@ function AgySummaryCard(props: {
   return (
     <Entrance>
       <View style={styles.summaryCard}>
-        <Text style={styles.summaryTitle} numberOfLines={2}>{props.summary.title}</Text>
+        <Text style={styles.summaryTitle} numberOfLines={2}>
+          {props.summary.title}
+        </Text>
         <View style={styles.summaryMeta}>
           <StatusPill status={summaryStatus(props.summary.status)} />
           <Text style={styles.summarySteps}>
@@ -469,7 +617,9 @@ function AgySummaryCard(props: {
           </Text>
         </View>
         {props.summary.preview.length > 0 ? (
-          <Text style={styles.summaryPreview} numberOfLines={4}>{props.summary.preview}</Text>
+          <Text style={styles.summaryPreview} numberOfLines={4}>
+            {props.summary.preview}
+          </Text>
         ) : null}
       </View>
     </Entrance>
@@ -636,6 +786,8 @@ const styles = StyleSheet.create({
     paddingVertical: space.s,
     marginBottom: space.s,
   },
+  turnUserPending: { opacity: 0.7 },
+  footerDots: { paddingHorizontal: COLUMN_GUTTER },
   turnUserText: {
     ...typeScale.body,
     color: colors.ink,

@@ -39,6 +39,88 @@ const TURN_BUDGET = 200;
 /** codex resolver scan budget: newest-first, stop at the first cwd match. */
 const CODEX_SCAN_BUDGET = 400;
 
+/** Session parse-cache bound: entries (active sessions are few) and a rough
+ * source-text byte budget across the cache, so pathological histories stay
+ * bounded (FIFO eviction satisfies whichever bound trips first). */
+const SESSION_CACHE_CAP = 64;
+const SESSION_CACHE_BYTE_BUDGET = 64 * 1024 * 1024;
+
+/**
+ * Stat-validated parse cache for session files. The conversation route is
+ * re-fetched on every streamed tick (the app's revision hook fires several
+ * times a second while an agent works), so a steady session must not pay a
+ * full re-read + re-parse per tick: a path is re-read and re-PARSED only
+ * when its stat fingerprint (mtime ns + size) moved. Writes append → the
+ * fingerprint moves → the next read reparses, so a tick never sees stale
+ * turns. Cached payloads are shared read-only (the route only serializes
+ * them), and parse failures (null) are cached too — a torn file is not
+ * re-scanned per tick either. FIFO eviction over the entry cap and byte
+ * budget; oversized parse results bypass the cache.
+ */
+export class SessionParseCache<T> {
+  readonly #parse: (text: string) => T;
+  readonly #entries = new Map<string, { mtimeNs: bigint; size: number; bytes: number; payload: T }>();
+  #bytes = 0;
+
+  constructor(parse: (text: string) => T) {
+    this.#parse = parse;
+  }
+
+  /** Parsed payload for the file's current content, or null when unreadable
+   * (the caller's null contract is unchanged). */
+  read(file: string): { ok: true; payload: T } | { ok: false } {
+    let stat: { mtimeNs: bigint; size: number };
+    try {
+      const raw = statSync(file, { bigint: true });
+      stat = { mtimeNs: raw.mtimeNs, size: Number(raw.size) };
+    } catch {
+      this.#drop(file);
+      return { ok: false };
+    }
+    const hit = this.#entries.get(file);
+    if (hit !== undefined && hit.mtimeNs === stat.mtimeNs && hit.size === stat.size) {
+      return { ok: true, payload: hit.payload };
+    }
+    let text: string;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch {
+      this.#drop(file);
+      return { ok: false };
+    }
+    const payload = this.#parse(text);
+    this.#drop(file);
+    const bytes = text.length;
+    if (bytes <= SESSION_CACHE_BYTE_BUDGET) {
+      while (this.#entries.size > 0 &&
+        (this.#entries.size >= SESSION_CACHE_CAP || this.#bytes + bytes > SESSION_CACHE_BYTE_BUDGET)
+      ) {
+        const oldest = this.#entries.keys().next();
+        if (oldest.done === true) break;
+        this.#drop(oldest.value);
+      }
+      this.#entries.set(file, { ...stat, bytes, payload });
+      this.#bytes += bytes;
+    }
+    return { ok: true, payload };
+  }
+
+  #drop(file: string): void {
+    const gone = this.#entries.get(file);
+    if (gone !== undefined) {
+      this.#bytes -= gone.bytes;
+      this.#entries.delete(file);
+    }
+  }
+}
+
+/** Per-parse caches — the four session-file readers below each own one, so a
+ * hit skips that reader's whole scan/JSON.parse, not just the file read. */
+const claudeTurnsCache = new SessionParseCache(parseClaudeTurns);
+const codexTurnsCache = new SessionParseCache(parseCodexTurns);
+const codexCwdCache = new SessionParseCache(parseCodexSessionCwd);
+const agyTurnsCache = new SessionParseCache(parseAgyTurns);
+
 export type AgentConversationToolState = "running" | "done" | "error";
 
 export type AgentConversationTurn =
@@ -131,15 +213,17 @@ export function claudeProjectDirName(cwd: string): string {
 }
 
 function claudeTurns(file: string): AgentConversationTurn[] | null {
+  const read = claudeTurnsCache.read(file);
+  return read.ok ? read.payload : null;
+}
+
+/** Line-parser for the claude session JSONL — cached; runs only when the
+ * file's stat fingerprint moved. */
+function parseClaudeTurns(text: string): AgentConversationTurn[] {
   type ToolTurn = Extract<AgentConversationTurn, { kind: "tool" }>;
   const tools = new Map<string, ToolTurn>();
   const turns: AgentConversationTurn[] = [];
-  let lines: string[];
-  try {
-    lines = readFileSync(file, "utf8").split("\n");
-  } catch {
-    return null;
-  }
+  const lines = text.split("\n");
   for (const [index, line] of lines.entries()) {
     if (line.length === 0) continue;
     let entry: Record<string, unknown>;
@@ -288,37 +372,40 @@ function newestCodexRollouts(home: string): string[] {
 }
 
 function codexSessionCwd(file: string): string | null {
-  try {
-    const fd = readFileSync(file, "utf8");
-    for (const line of fd.split("\n")) {
-      if (line.length === 0) continue;
-      let entry: Record<string, unknown>;
-      try {
-        entry = JSON.parse(line) as Record<string, unknown>;
-      } catch {
-        continue;
-      }
-      if (entry.type !== "session_meta") continue;
-      const payload = entry.payload as Record<string, unknown> | undefined;
-      const cwd = payload?.cwd;
-      return typeof cwd === "string" ? cwd : null;
+  const read = codexCwdCache.read(file);
+  return read.ok ? read.payload : null;
+}
+
+/** Line-parser for codex's session_meta cwd — cached with the same stat
+ * guard, so the up-to-400-candidate scan pays one cheap cached lookup per
+ * steady file. */
+function parseCodexSessionCwd(text: string): string | null {
+  for (const line of text.split("\n")) {
+    if (line.length === 0) continue;
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
     }
-  } catch {
-    // unreadable: not a match
+    if (entry.type !== "session_meta") continue;
+    const payload = entry.payload as Record<string, unknown> | undefined;
+    const cwd = payload?.cwd;
+    return typeof cwd === "string" ? cwd : null;
   }
   return null;
 }
 
 function codexTurns(file: string): AgentConversationTurn[] | null {
+  const read = codexTurnsCache.read(file);
+  return read.ok ? read.payload : null;
+}
+
+/** Line-parser for codex rollout JSONL — cached like claude's. */
+function parseCodexTurns(text: string): AgentConversationTurn[] {
   type ToolTurn = Extract<AgentConversationTurn, { kind: "tool" }>;
   const tools = new Map<string, ToolTurn>();
   const turns: AgentConversationTurn[] = [];
-  let text: string;
-  try {
-    text = readFileSync(file, "utf8");
-  } catch {
-    return null;
-  }
   for (const line of text.split("\n")) {
     if (line.length === 0) continue;
     let entry: Record<string, unknown>;
@@ -455,14 +542,15 @@ export function cleanUserText(text: string): string {
 /** Parses Antigravity (~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl)
  * into structured turns (user prompt, assistant response, and tool calls/results). */
 export function agyTurns(file: string): AgentConversationTurn[] | null {
+  const read = agyTurnsCache.read(file);
+  return read.ok ? read.payload : null;
+}
+
+/** Line-parser for the agy transcript JSONL — cached like claude's. */
+function parseAgyTurns(text: string): AgentConversationTurn[] {
   type ToolTurn = Extract<AgentConversationTurn, { kind: "tool" }>;
   const turns: AgentConversationTurn[] = [];
-  let lines: string[];
-  try {
-    lines = readFileSync(file, "utf8").split("\n");
-  } catch {
-    return null;
-  }
+  const lines = text.split("\n");
   for (const line of lines) {
     if (line.length === 0) continue;
     let entry: Record<string, unknown>;

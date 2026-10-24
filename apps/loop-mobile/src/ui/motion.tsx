@@ -28,7 +28,7 @@ import {
 
 import { BEHIND_DIM, BEHIND_PARALLAX } from "./back-swipe";
 import { impactLight } from "./haptics";
-import { motion as motionTokens, press } from "./tokens";
+import { colors, motion as motionTokens, press, space } from "./tokens";
 
 /** Pre-created animated container: callers never import Animated itself. */
 export const AnimatedView = Animated.View;
@@ -214,6 +214,30 @@ export function PulseDot(props: { color: string; size?: number }) {
     />
   );
 }
+
+// ——— TypingDots ————————————————————————————————————————————————————————————
+
+/** The working-agent tail indicator: three quiet dots pulsing in sync on the
+ * registered period (PulseDot's loop) — presence feedback at the newest
+ * content, not decoration. Only mount it while the agent is working. */
+export function TypingDots(props: { accessibilityLabel?: string }) {
+  return (
+    <View style={motionStyles.typingRow} accessibilityLabel={props.accessibilityLabel}>
+      <PulseDot color={colors.inkFaint} size={5} />
+      <PulseDot color={colors.inkFaint} size={5} />
+      <PulseDot color={colors.inkFaint} size={5} />
+    </View>
+  );
+}
+
+const motionStyles = StyleSheet.create({
+  typingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.xs,
+    paddingTop: space.s,
+  },
+});
 
 // ——— TabScaleIcon ——————————————————————————————————————————————————————————
 
