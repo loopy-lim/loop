@@ -1,4 +1,4 @@
-import { ensureGatewayRunning, formatGatewayStatusJson, formatGatewayStatusText, gatewayStop, readGatewayStatus } from "./gateway";
+import { ensureGatewayRunning, formatGatewayInstallServiceText, formatGatewayStatusJson, formatGatewayStatusText, gatewayInstallService, gatewayStop, readGatewayStatus } from "./gateway";
 import { runPairCommand } from "./pair";
 import {
   handleCliError,
@@ -167,8 +167,8 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
 
 async function gatewayCommand(parsed: ParsedArguments, options: RunCliOptions, io: CliIo): Promise<number> {
   const subcommand = parsed.operands[0] ?? "status";
-  if (subcommand !== "status" && subcommand !== "stop") {
-    throw new UsageError("gateway requires 'status' or 'stop'");
+  if (subcommand !== "status" && subcommand !== "stop" && subcommand !== "install-service") {
+    throw new UsageError("gateway requires 'status', 'stop', or 'install-service'");
   }
   const gatewayDeps = {
     env: process.env,
@@ -179,6 +179,11 @@ async function gatewayCommand(parsed: ParsedArguments, options: RunCliOptions, i
   if (subcommand === "status") {
     const status = await readGatewayStatus(gatewayDeps);
     io.stdout(parsed.json ? formatGatewayStatusJson(status) : formatGatewayStatusText(status));
+    return 0;
+  }
+  if (subcommand === "install-service") {
+    const result = await gatewayInstallService(gatewayDeps);
+    io.stdout(formatGatewayInstallServiceText(result));
     return 0;
   }
   const stop = await gatewayStop(gatewayDeps);

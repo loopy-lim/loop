@@ -20,6 +20,7 @@ import {
   formatGatewayStatusJson,
   formatGatewayStatusText,
   gatewayEntryCandidates,
+  gatewayInstallService,
   gatewayPidFilePath,
   gatewayStop,
   GATEWAY_PID_SUFFIX,
@@ -27,6 +28,7 @@ import {
   isPortAccepting,
   parsePidFile,
   pickFreePort,
+  renderGatewayUnitFile,
   planGatewaySpawn,
   readGatewayStatus,
   resolveBunCommand,
@@ -580,4 +582,128 @@ test("runPairCommand propagates a fail-closed auto-start refusal", async () => {
       {},
     ),
   ).rejects.toMatchObject({ code: "tailscale-unavailable" });
+});
+
+// ---------------------------------------------------------------------------
+// `loop gateway install-service` — boot persistence (systemd user unit)
+// ---------------------------------------------------------------------------
+
+function fakeTailscaleProbe(): (command: string, args: string[]) => Promise<{ exitCode: number; output: string }> {
+  return async () => ({
+    exitCode: 0,
+    output: JSON.stringify({ Self: { TailscaleIPs: ["100.80.133.120"] } }),
+  });
+}
+
+test("renderGatewayUnitFile pins host, port, database, entry, and restart policy", () => {
+  const unit = renderGatewayUnitFile({
+    host: "100.80.133.120",
+    port: 18477,
+    databasePath: "/home/u/.loop/loop.sqlite",
+    entryPath: "/repo/packages/gateway/src/main.ts",
+    command: "/usr/bin/bun",
+    cwd: "/repo",
+    env: {},
+  });
+  expect(unit).toContain("Environment=LOOP_GATEWAY_HOST=100.80.133.120");
+  expect(unit).toContain("Environment=LOOP_GATEWAY_PORT=18477");
+  expect(unit).toContain("Environment=LOOP_GATEWAY_DATABASE_PATH=/home/u/.loop/loop.sqlite");
+  expect(unit).toContain("ExecStart=/usr/bin/bun /repo/packages/gateway/src/main.ts");
+  expect(unit).toContain("Restart=on-failure");
+  expect(unit).toContain("WantedBy=default.target");
+});
+
+test("install-service on a cold machine writes the unit and starts it", async () => {
+  const { root, env } = tempGatewayRoot();
+  const unitPath = join(root, "unit", "loop-gateway.service");
+  const writes: { path: string; content: string }[] = [];
+  const calls: string[][] = [];
+  const result = await gatewayInstallService({
+    env,
+    executablePath: "/repo/dist/loop",
+    probe: fakeTailscaleProbe(),
+    pickFreePort: async () => 19077,
+    databasePath: join(root, "loop.sqlite"),
+    runner: async (command, args) => {
+      calls.push([command, ...args]);
+      return { exitCode: 0, output: "" };
+    },
+    unitPath,
+    writeUnitFile: (path, content) => writes.push({ path, content }),
+  });
+  expect(result.started).toBe(true);
+  expect(result.enabled).toBe(true);
+  expect(writes).toHaveLength(1);
+  expect(writes[0]?.path).toBe(unitPath);
+  expect(writes[0]?.content).toContain("Environment=LOOP_GATEWAY_PORT=19077");
+  expect(calls[0]).toEqual(["systemctl", "--user", "daemon-reload"]);
+  expect(calls[1]).toEqual(["systemctl", "--user", "enable", "--now", "loop-gateway.service"]);
+  expect(calls.some((call) => call[0] === "loginctl" && call[1] === "enable-linger")).toBe(true);
+});
+
+test("install-service with a live gateway pins its address and only enables", async () => {
+  const { root, env, recordPath } = tempGatewayRoot();
+  writeFileSync(recordPath, JSON.stringify({ host: "100.80.133.120", port: 19099 }));
+  const unitPath = join(root, "unit", "loop-gateway.service");
+  const writes: { path: string; content: string }[] = [];
+  const calls: string[][] = [];
+  const result = await gatewayInstallService({
+    env,
+    executablePath: "/repo/dist/loop",
+    probe: fakeTailscaleProbe(),
+    probePort: async () => true,
+    databasePath: join(root, "loop.sqlite"),
+    runner: async (command, args) => {
+      calls.push([command, ...args]);
+      return { exitCode: 0, output: "" };
+    },
+    unitPath,
+    writeUnitFile: (path, content) => writes.push({ path, content }),
+  });
+  expect(result.started).toBe(false);
+  expect(calls.some((call) => call.join(" ") === "systemctl --user enable loop-gateway.service")).toBe(
+    true,
+  );
+  expect(calls.some((call) => call.includes("--now"))).toBe(false);
+  expect(writes[0]?.content).toContain("Environment=LOOP_GATEWAY_PORT=19099");
+});
+
+test("install-service fails closed without a Tailscale CGNAT address", async () => {
+  const { env } = tempGatewayRoot();
+  await expect(
+    gatewayInstallService({
+      env,
+      executablePath: "/repo/dist/loop",
+      probe: async () => ({
+        exitCode: 0,
+        output: JSON.stringify({ Self: { TailscaleIPs: ["fd7a:115c:a1e0::1"] } }),
+      }),
+      databasePath: "/tmp/loop.sqlite",
+      runner: async () => ({ exitCode: 0, output: "" }),
+      unitPath: join(tmpdir(), `loop-unit-${Date.now()}.service`),
+    }),
+  ).rejects.toMatchObject({ code: "tailscale-unavailable" });
+});
+
+test("install-service pins the probed bind IP, never the MagicDNS record label", async () => {
+  // The runtime record's host is the MagicDNS pairing label; the gateway's
+  // bind validation requires an IP literal — a unit carrying the label would
+  // crash-loop at the next boot (live finding, 2026-10-22).
+  const { root, env, recordPath } = tempGatewayRoot();
+  writeFileSync(recordPath, JSON.stringify({ host: "desktop-linux.tail42f248.ts.net", port: 19099 }));
+  const writes: { path: string; content: string }[] = [];
+  await gatewayInstallService({
+    env,
+    executablePath: "/repo/dist/loop",
+    probe: fakeTailscaleProbe(),
+    probePort: async () => true,
+    databasePath: join(root, "loop.sqlite"),
+    runner: async () => ({ exitCode: 0, output: "" }),
+    unitPath: join(root, "unit", "loop-gateway.service"),
+    writeUnitFile: (path, content) => writes.push({ path, content }),
+  });
+  const unit = writes[0]?.content ?? "";
+  expect(unit).toContain("Environment=LOOP_GATEWAY_HOST=100.80.133.120");
+  expect(unit).not.toContain("desktop-linux.tail42f248.ts.net");
+  expect(unit).toContain("Environment=LOOP_GATEWAY_PORT=19099");
 });

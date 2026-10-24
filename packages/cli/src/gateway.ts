@@ -496,6 +496,181 @@ export async function ensureGatewayRunning(
 }
 
 // ---------------------------------------------------------------------------
+// `loop gateway install-service` — boot persistence (systemd user unit)
+// ---------------------------------------------------------------------------
+
+/** Where the user unit lands: XDG_CONFIG_HOME (or ~/.config) +
+ * systemd/user/loop-gateway.service. Override via the unitPath option in
+ * tests. */
+export function systemdUserUnitPath(env: Record<string, string | undefined>): string {
+  const configHome = env.XDG_CONFIG_HOME?.trim() || join(env.HOME ?? "", ".config");
+  return join(configHome, "systemd", "user", "loop-gateway.service");
+}
+
+/** Render the systemd user unit for one resolved spawn plan. Paths are
+ * absolute and written unquoted — home directories with spaces are outside
+ * the supported matrix (same constraint as the Loop config directory). */
+export function renderGatewayUnitFile(plan: SpawnPlan): string {
+  return [
+    "[Unit]",
+    "Description=Loop gateway (herdr HTTP/SSE surface for LoopMobile)",
+    "After=network-online.target",
+    "",
+    "[Service]",
+    `WorkingDirectory=${plan.cwd}`,
+    `Environment=LOOP_GATEWAY_HOST=${plan.host}`,
+    `Environment=LOOP_GATEWAY_PORT=${plan.port}`,
+    `Environment=LOOP_GATEWAY_DATABASE_PATH=${plan.databasePath}`,
+    `ExecStart=${plan.command} ${plan.entryPath}`,
+    "Restart=on-failure",
+    "RestartSec=3",
+    "",
+    "[Install]",
+    "WantedBy=default.target",
+    "",
+  ].join("\n");
+}
+
+export type InstallServiceRunner = (
+  command: string,
+  args: string[],
+) => Promise<{ exitCode: number; output: string }>;
+
+export type InstallServiceOptions = GatewayDeps & {
+  /** systemctl/loginctl execution seam (tests inject a recorder). */
+  runner?: InstallServiceRunner;
+  writeUnitFile?: (path: string, content: string) => void;
+  unitPath?: string;
+};
+
+export type InstallServiceResult = {
+  unitPath: string;
+  unitWritten: boolean;
+  enabled: boolean;
+  /** true = the unit was started now; false = a gateway is already alive and
+   * the unit takes over from the next boot/stop (enable-only). */
+  started: boolean;
+  linger: "enabled" | "failed";
+  notes: string[];
+};
+
+/** The default runner: the same probe family as tailscale status — a real
+ * child process, stdout/stderr captured. */
+const defaultInstallRunner: InstallServiceRunner = async (command, args) => {
+  const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+  let output = "";
+  child.stdout?.on("data", (chunk: Buffer) => {
+    output += chunk.toString();
+  });
+  child.stderr?.on("data", (chunk: Buffer) => {
+    output += chunk.toString();
+  });
+  const exitCode = await new Promise<number>((resolveExit) => {
+    child.once("error", () => resolveExit(127));
+    child.once("exit", (code) => resolveExit(code ?? 1));
+  });
+  return { exitCode, output };
+};
+
+/** Install boot persistence for the gateway: resolve today's spawn plan
+ * (fail-closed Tailscale host; an existing runtime record pins its own port
+ * so a paired device keeps its address), write the systemd user unit,
+ * daemon-reload, and enable it. The unit's LOOP_GATEWAY_HOST is always the
+ * probed CGNAT IP — the runtime record's host is the MagicDNS pairing label,
+ * and the gateway's bind validation rejects non-IP literals (live finding,
+ * 2026-10-22). When a gateway is already alive the unit is enabled WITHOUT
+ * starting it — the running gateway keeps serving and the unit takes over
+ * from the next boot or `loop gateway stop`. Linger is attempted best-effort:
+ * without it the unit starts at the first login after a reboot instead of at
+ * boot. */
+export async function gatewayInstallService(
+  options: InstallServiceOptions,
+): Promise<InstallServiceResult> {
+  const runner = options.runner ?? defaultInstallRunner;
+  const run = async (command: string, args: string[], what: string): Promise<void> => {
+    const result = await runner(command, args);
+    if (result.exitCode !== 0) {
+      throw new ConfigError(
+        "gateway-service-install-failed",
+        `${what} failed (exit ${result.exitCode}): ${result.output.trim()}`,
+      );
+    }
+  };
+
+  const record = readRecord(options);
+  const host = await probeTailscaleBindIp(options.probe);
+  if (host === null) {
+    throw new ConfigError(
+      "tailscale-unavailable",
+      "cannot install the gateway service: no Tailscale CGNAT address was reported by `tailscale status` — start Tailscale first; the gateway binds tailnet interfaces only",
+    );
+  }
+  const port = record?.port ?? (await (options.pickFreePort ?? pickFreePort)());
+  const databasePath =
+    options.databasePath ??
+    join(resolveConfigDirectory({ environment: options.env }), DEFAULT_DATABASE_FILE_NAME);
+  const entryPath = resolveGatewayEntryPath(options.executablePath ?? process.execPath);
+  const unitPath = options.unitPath ?? systemdUserUnitPath(options.env);
+  const plan: SpawnPlan = {
+    host,
+    port,
+    databasePath,
+    entryPath,
+    command: resolveBunCommand(options.executablePath ?? process.execPath),
+    cwd: resolve(entryPath, "..", "..", ".."),
+    env: {},
+  };
+  const unit = renderGatewayUnitFile(plan);
+  const writeUnitFile =
+    options.writeUnitFile ??
+    ((path: string, content: string) => {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, content, "utf8");
+    });
+  writeUnitFile(unitPath, unit);
+  await run("systemctl", ["--user", "daemon-reload"], "systemctl --user daemon-reload");
+
+  const status = await readGatewayStatus(options);
+  const notes: string[] = [];
+  if (status.running) {
+    await run("systemctl", ["--user", "enable", "loop-gateway.service"], "systemctl --user enable");
+    notes.push(
+      `a gateway is already serving ${status.record?.host}:${status.record?.port} — the unit is enabled and takes over from the next boot or after \`loop gateway stop\``,
+    );
+  } else {
+    await run(
+      "systemctl",
+      ["--user", "enable", "--now", "loop-gateway.service"],
+      "systemctl --user enable --now",
+    );
+    notes.push("the unit is enabled and started");
+  }
+
+  let linger: InstallServiceResult["linger"] = "failed";
+  const lingerRun = await runner("loginctl", ["enable-linger"]);
+  if (lingerRun.exitCode === 0) {
+    linger = "enabled";
+  } else {
+    notes.push(
+      "loginctl enable-linger failed — without linger the unit starts at the first login after a reboot instead of at boot",
+    );
+  }
+
+  return { unitPath, unitWritten: true, enabled: true, started: !status.running, linger, notes };
+}
+
+export function formatGatewayInstallServiceText(result: InstallServiceResult): string {
+  const lines = [
+    `unit: ${result.unitPath}`,
+    `enabled: yes${result.started ? " (started now)" : " (a live gateway keeps serving; the unit takes over later)"}`,
+    `linger: ${result.linger}`,
+    ...result.notes.map((note) => `note: ${note}`),
+    "",
+  ];
+  return `${lines.join("\n")}`;
+}
+
+// ---------------------------------------------------------------------------
 // `loop gateway status` / `loop gateway stop`
 // ---------------------------------------------------------------------------
 
