@@ -5,14 +5,21 @@
  * type roles, and glyphs come from ui/ tokens, never inline hex.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { StyleSheet, TouchableOpacity, View, type StyleProp, type TextStyle } from "react-native";
+import {
+  Linking,
+  StyleSheet,
+  TouchableOpacity,
+  View,
+  type StyleProp,
+  type TextStyle,
+} from "react-native";
 
 import { copy } from "../copy";
 import { DynText } from "../ui/DynText";
 import { Icon } from "../ui/Icon";
 import { glyph } from "../ui/glyphs";
 import { colors, press, radius, space, type } from "../ui/tokens";
-import { parseInline, parseMarkdown, type MarkdownInline } from "./markdown";
+import { BULLET_INDENT, parseInline, parseMarkdown, type MarkdownInline } from "./markdown";
 import { highlightSyntax, type SyntaxSpan } from "./syntax";
 import { copyText } from "./clipboard";
 
@@ -38,9 +45,38 @@ function InlineLine(props: { text: string; style?: StyleProp<TextStyle> }) {
             </DynText>
           );
         }
+        if (span.kind === "italic") {
+          return (
+            <DynText key={index} style={styles.italic}>
+              {span.text}
+            </DynText>
+          );
+        }
         if (span.kind === "inlineCode") {
           return (
             <DynText key={index} style={styles.inlineCode}>
+              {span.text}
+            </DynText>
+          );
+        }
+        if (span.kind === "link") {
+          // The parser admits http/https urls only; the guard repeats it so
+          // the open can never be coaxed onto another scheme. A failed open
+          // (no browser handler) is dropped silently — no fake success, no
+          // floating rejection.
+          const url = span.url;
+          return (
+            <DynText
+              key={index}
+              style={styles.link}
+              onPress={
+                /^https?:\/\//.test(url)
+                  ? () => {
+                      Linking.openURL(url).catch(() => undefined);
+                    }
+                  : undefined
+              }
+            >
               {span.text}
             </DynText>
           );
@@ -132,10 +168,40 @@ export function MarkdownView(props: { text: string; style?: StyleProp<TextStyle>
           );
         }
         if (block.kind === "bullet") {
+          const indent =
+            block.level > 0
+              ? BULLET_INDENT[Math.min(block.level, BULLET_INDENT.length) - 1]
+              : undefined;
           return (
-            <View key={index} style={styles.bulletRow}>
+            <View key={index} style={[styles.bulletRow, indent !== undefined && { paddingLeft: indent }]}>
               <DynText style={styles.bulletGlyph}>{`${glyph.bullet}  `}</DynText>
               <InlineLine text={block.text} style={[styles.prose, props.style]} />
+            </View>
+          );
+        }
+        if (block.kind === "ordered") {
+          return (
+            <View key={index} style={styles.bulletRow}>
+              <DynText style={styles.bulletGlyph}>{`${block.n}.  `}</DynText>
+              <InlineLine text={block.text} style={[styles.prose, props.style]} />
+            </View>
+          );
+        }
+        if (block.kind === "table") {
+          // GFM grid (plan 2026-10-25 AC-1). BISECT-2 (2026-10-25): the
+          // flex/minWidth/borderLeft cell grid still blanked its whole
+          // FlatList batch on Android Fabric — this is the minimal markup
+          // that survives. One line per row, inline-parsed.
+          const lines = [block.head, ...block.rows];
+          return (
+            <View key={index} style={styles.tableCard}>
+              {lines.map((row, rowIndex) => (
+                <InlineLine
+                  key={rowIndex}
+                  text={row.join(" · ")}
+                  style={[styles.tableText, props.style]}
+                />
+              ))}
             </View>
           );
         }
@@ -154,6 +220,8 @@ export function MarkdownView(props: { text: string; style?: StyleProp<TextStyle>
 const styles = StyleSheet.create({
   prose: { ...type.body, color: colors.ink },
   bold: { fontWeight: "700" },
+  italic: { fontStyle: "italic" },
+  link: { color: colors.accent, textDecorationLine: "underline" },
   inlineCode: {
     ...type.mono,
     color: colors.ink,
@@ -194,4 +262,29 @@ const styles = StyleSheet.create({
   codeCopy: { minWidth: 32, flexDirection: "row", alignItems: "center", gap: space.xxs },
   codeCopyText: { ...type.caption, color: colors.inkMute },
   codeText: { ...type.mono, fontFamily: "Menlo", color: colors.ink, marginTop: space.xs },
+  tableCard: {
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    borderRadius: radius.m,
+    marginTop: space.xs,
+    marginBottom: space.xs,
+  },
+  tableRow: { flexDirection: "row" },
+  tableHeadRow: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.hairline,
+  },
+  tableCell: {
+    flex: 1,
+    minWidth: 120,
+    paddingHorizontal: space.s,
+    paddingVertical: space.xs,
+  },
+  tableCellLine: {
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: colors.hairline,
+  },
+  tableHeadText: { ...type.bodyStrong, color: colors.ink },
+  tableText: { ...type.body, color: colors.ink },
 });

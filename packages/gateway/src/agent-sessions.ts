@@ -126,6 +126,7 @@ export type AgentConversationToolState = "running" | "done" | "error";
 export type AgentConversationTurn =
   | { kind: "user"; id: string; text: string; at: string | null }
   | { kind: "assistant"; id: string; text: string; at: string | null }
+  | { kind: "thinking"; id: string; text: string; at: string | null }
   | {
       kind: "tool";
       id: string;
@@ -268,7 +269,7 @@ function parseClaudeTurns(text: string): AgentConversationTurn[] {
       continue;
     }
 
-    // assistant: text blocks and tool_use blocks
+    // assistant: text blocks, thinking blocks, and tool_use blocks
     const blocks = Array.isArray(message.content) ? message.content : null;
     if (blocks === null) continue;
     for (const block of blocks) {
@@ -278,6 +279,13 @@ function parseClaudeTurns(text: string): AgentConversationTurn[] {
           kind: "assistant",
           id: `${idBase}:t${turns.length}`,
           text: capText(b.text, TURN_TEXT_CAP),
+          at,
+        });
+      } else if (b.type === "thinking" && typeof b.thinking === "string" && b.thinking.trim().length > 0) {
+        turns.push({
+          kind: "thinking",
+          id: `${idBase}:k${turns.length}`,
+          text: capText(b.thinking, TURN_TEXT_CAP),
           at,
         });
       } else if (b.type === "tool_use" && typeof b.id === "string") {

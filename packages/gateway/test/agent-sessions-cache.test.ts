@@ -190,3 +190,47 @@ test("codex fallback floor: a rollout predating the pane birth is skipped", () =
   // Floor after the rollout's last write: refused.
   expect(resolveAgentConversation("codex", "/w/codex", { home }, null, Date.now())).toBeNull();
 });
+
+test("claude thinking blocks become thinking turns (plan 2026-10-25 AC-7)", () => {
+  const home = dir;
+  const project = join(home, ".claude", "projects", claudeProjectDirName("/w/thinking"));
+  mkdirSync(project, { recursive: true });
+  const lines = [
+    JSON.stringify({
+      type: "user",
+      uuid: "u1",
+      timestamp: "2026-10-25T09:00:00Z",
+      message: { role: "user", content: "조사해줘" },
+    }),
+    JSON.stringify({
+      type: "assistant",
+      uuid: "a1",
+      timestamp: "2026-10-25T09:00:05Z",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "먼저 저장소 구조를 파악한다" },
+          { type: "text", text: "구조를 파악했습니다." },
+        ],
+      },
+    }),
+    JSON.stringify({
+      type: "assistant",
+      uuid: "a2",
+      timestamp: "2026-10-25T09:00:06Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "thinking" }],
+      },
+    }),
+  ];
+  writeFileSync(join(project, "s.jsonl"), `${lines.join("\n")}\n`);
+  const served = resolveAgentConversation("claude", "/w/thinking", { home });
+  if (served === null || served.surface !== "turns") throw new Error("expected turns");
+  const kinds = served.turns.map((turn) => turn.kind);
+  expect(kinds).toEqual(["user", "thinking", "assistant"]);
+  const thinking = served.turns[1];
+  expect(thinking).toMatchObject({ kind: "thinking", text: "먼저 저장소 구조를 파악한다" });
+  // an empty/shapeless thinking block contributes no turn
+  expect(served.turns.filter((turn) => turn.kind === "thinking")).toHaveLength(1);
+});

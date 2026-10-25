@@ -62,6 +62,7 @@ export function turnsEqual(a: HerdrConversationTurn, b: HerdrConversationTurn): 
   if (a.id !== b.id || a.kind !== b.kind) return false;
   if (a.kind === "user" && b.kind === "user") return a.text === b.text;
   if (a.kind === "assistant" && b.kind === "assistant") return a.text === b.text;
+  if (a.kind === "thinking" && b.kind === "thinking") return a.text === b.text;
   if (a.kind === "tool" && b.kind === "tool") {
     return a.title === b.title && a.detail === b.detail && a.state === b.state;
   }

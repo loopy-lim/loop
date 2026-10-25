@@ -94,6 +94,13 @@ export const copy = {
   summarySteps: "스텝",
   copyCode: "복사",
   copiedCode: "복사됨",
+  turnCopy: "텍스트 복사",
+  copiedTurn: "복사됐어요",
+  copyFailed: "복사에 실패했어요",
+  jumpToLatest: "최신으로",
+  thinkingLabel: "생각",
+  reconnecting: "재연결 중이에요 — 연결이 복구되면 자동으로 이어져요",
+  connLost: "연결이 끊겼어요 — 복구되면 자동으로 이어져요",
 } as const;
 
 export function statusLabel(status: string): string {

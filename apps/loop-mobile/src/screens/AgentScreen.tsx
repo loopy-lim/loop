@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { memo } from "react";
 import {
+  AccessibilityInfo,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -42,10 +43,13 @@ import {
 import type { HerdrConversation, HerdrConversationTurn } from "../herdr/wire";
 import { paneDisplayName } from "../herdr/store";
 import type { HerdrAppState, HerdrStore } from "../herdr/store";
+import { copyText } from "../features/clipboard";
+import { relativeTimeKo, turnTimeMarks } from "../features/time-format";
 import { impactLight } from "../ui/haptics";
 import { Icon } from "../ui/Icon";
 import type { IconRole } from "../ui/glyphs";
 import {
+  AnimatedSheet,
   AnimatedView,
   Entrance,
   PressableScale,
@@ -53,7 +57,7 @@ import {
   TypingDots,
   useMotionValue,
 } from "../ui/motion";
-import { colors, radius, space, type as typeScale, COLUMN_GUTTER } from "../ui/tokens";
+import { colors, elevation, radius, space, type as typeScale, COLUMN_GUTTER } from "../ui/tokens";
 import { useFollowScroll } from "../ui/followScroll";
 import { useKeyboardVisible } from "../ui/useKeyboardVisible";
 import { useStore } from "../app/storeContext";
@@ -97,6 +101,12 @@ export function AgentScreen(props: { paneId: string; state: HerdrAppState; onBac
   const [notice, setNotice] = useState<string | null>(null);
   const [composerValue, setComposerValue] = useState("");
   const [pending, setPending] = useState<PendingPrompt[]>([]);
+  /** Folded state of tool/thinking cards, keyed by turn id — survives new
+   * fetched turns (ids are stable) so a streamed tick never reopens a card
+   * the user collapsed (plan 2026-10-25 AC-4). */
+  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(new Set());
+  /** Long-press copy sheet payload (plan 2026-10-25 AC-3); null = closed. */
+  const [copySheet, setCopySheet] = useState<{ text: string } | null>(null);
   const follow = useFollowScroll();
   const lastRevision = useRef<string>("");
   // Refresh reads the CURRENT segment without joining it into callback deps
@@ -206,6 +216,75 @@ export function AgentScreen(props: { paneId: string; state: HerdrAppState; onBac
     setPending((current) => (pendingSame(current, chat.remaining) ? current : chat.remaining));
   }, [chat]);
 
+  // Per-turn time captions (plan 2026-10-25 AC-1): computed once per list,
+  // index-aligned with `chat.turns` — the day header rides the first turn of
+  // each local calendar day.
+  const marks = useMemo(
+    () => (chat === null ? [] : turnTimeMarks(chat.turns)),
+    [chat],
+  );
+
+  // Stable interaction handlers for the memoized rows: functional updates
+  // and a ref mirror keep identities constant across fetch ticks, so the
+  // row comparator can safely ignore them.
+  const toggleExpanded = useCallback((id: string) => {
+    setExpandedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  const copySheetRef = useRef<{ text: string } | null>(null);
+  useEffect(() => {
+    copySheetRef.current = copySheet;
+  }, [copySheet]);
+  const openCopySheet = useCallback((turn: HerdrConversationTurn) => {
+    if (turn.kind === "tool") return;
+    if (turn.text.trim().length === 0) return;
+    setCopySheet({ text: turn.text });
+  }, []);
+  // Transient feedback (G4 F-1): a stale "복사됐어요" reads as current state,
+  // so the flash notice self-clears; an older notice is superseded first.
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (noticeTimer.current !== null) clearTimeout(noticeTimer.current);
+    },
+    [],
+  );
+  const flashNotice = useCallback((text: string) => {
+    if (noticeTimer.current !== null) clearTimeout(noticeTimer.current);
+    setNotice(text);
+    // Only clear while the flash still owns the slot — a direct setNotice
+    // (전송됨 등) that landed meanwhile must not be wiped by a stale timer.
+    noticeTimer.current = setTimeout(
+      () => setNotice((current) => (current === text ? null : current)),
+      2_500,
+    );
+  }, []);
+  const confirmCopy = useCallback(() => {
+    const sheet = copySheetRef.current;
+    if (sheet === null) return;
+    if (copyText(sheet.text)) {
+      impactLight();
+      flashNotice(copy.copiedTurn);
+    } else {
+      flashNotice(copy.copyFailed);
+    }
+    setCopySheet(null);
+  }, [flashNotice]);
+
+  // Status changes are announced to screen readers (plan 2026-10-25 AC-8);
+  // the visual pill was already there — this adds the non-visual channel.
+  const announcedStatus = useRef<string | null>(null);
+  useEffect(() => {
+    const status = pane?.status ?? null;
+    if (status === announcedStatus.current) return;
+    announcedStatus.current = status;
+    if (status !== null) AccessibilityInfo.announceForAccessibility(statusLabel(status));
+  }, [pane?.status]);
+
   // Follow the tail when new content lands while the user is at the bottom
   // (follow-scroll machine owns the verdict); detached users stay anchored
   // where they are — appended content grows below without moving the view.
@@ -232,6 +311,29 @@ export function AgentScreen(props: { paneId: string; state: HerdrAppState; onBac
     follow.followNow();
     if (body.view === "turns") listRef.current?.scrollToEnd({ animated: false });
     else scrollRef.current?.scrollToEnd({ animated: false });
+  }, [body.view, follow]);
+
+  // One-tap return to the tail (plan 2026-10-25 AC-2). Pins instantly and
+  // retries once inside the jump window: a virtualized list (or an MVC
+  // anchor) can drop the first programmatic glide — the retry is what makes
+  // the tap deterministic on Android (live emulator finding, 2026-10-25).
+  const jumpRetry = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (jumpRetry.current !== null) clearTimeout(jumpRetry.current);
+    },
+    [],
+  );
+  const jumpToTail = useCallback(() => {
+    impactLight();
+    follow.followNow();
+    const jump = () => {
+      if (body.view === "turns") listRef.current?.scrollToEnd({ animated: false });
+      else scrollRef.current?.scrollToEnd({ animated: false });
+    };
+    jump();
+    if (jumpRetry.current !== null) clearTimeout(jumpRetry.current);
+    jumpRetry.current = setTimeout(jump, 220);
   }, [body.view, follow]);
 
   const send = useCallback(async () => {
@@ -277,6 +379,7 @@ export function AgentScreen(props: { paneId: string; state: HerdrAppState; onBac
   }, [props.paneId, store]);
 
   const blocked = pane?.status === "blocked";
+  const connection = props.state.connection;
 
   if (paneGone) {
     return (
@@ -358,63 +461,128 @@ export function AgentScreen(props: { paneId: string; state: HerdrAppState; onBac
           </View>
         </Entrance>
       ) : null}
+      {connection.status === "waiting" ? (
+        <View style={styles.connectionBanner}>
+          <Icon role="busy" size={typeScale.caption.fontSize} color={colors.warn} />
+          <Text style={[styles.connectionText, styles.connectionWarnText]}>{copy.reconnecting}</Text>
+        </View>
+      ) : null}
+      {connection.status === "failed" ? (
+        <View style={[styles.connectionBanner, styles.connectionFailed]}>
+          <Icon role="attention" size={typeScale.caption.fontSize} color={colors.danger} />
+          <Text style={[styles.connectionText, styles.connectionFailedText]}>{copy.connLost}</Text>
+        </View>
+      ) : null}
       {notice !== null ? <Text style={styles.notice}>{notice}</Text> : null}
 
-      {body.view === "turns" ? (
-        <FlatList
-          style={styles.body}
-          contentContainerStyle={styles.bodyContent}
-          data={chat !== null ? chat.turns : []}
-          keyExtractor={(turn) => turn.id}
-          renderItem={({ item }) => (
-            <ChatTurnRow turn={item} pending={item.id.startsWith("pending-")} />
-          )}
-          onScroll={follow.onScroll}
-          scrollEventThrottle={64}
-          keyboardDismissMode="interactive"
-          ref={listRef}
-          onContentSizeChange={snapToNewest}
-          maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
-          ListFooterComponent={
-            <>
-              {pane?.status === "working" ? (
-                <View style={styles.footerDots}>
-                  <TypingDots accessibilityLabel={copy.workingIndicator} />
+      <View style={styles.bodyWrap}>
+        {body.view === "turns" ? (
+          <FlatList
+            style={styles.body}
+            contentContainerStyle={styles.bodyContent}
+            data={chat !== null ? chat.turns : []}
+            keyExtractor={(turn) => turn.id}
+            renderItem={({ item, index }) => {
+              const mark = marks[index] ?? { dateLabel: null, clock: null };
+              return (
+                <View>
+                  {mark.dateLabel !== null ? (
+                    <Text style={styles.dayHeader}>{mark.dateLabel}</Text>
+                  ) : null}
+                  <ChatTurnRow
+                    turn={item}
+                    pending={item.id.startsWith("pending-")}
+                    clock={mark.clock}
+                    expanded={expandedIds.has(item.id)}
+                    onToggle={toggleExpanded}
+                    onCopy={openCopySheet}
+                  />
                 </View>
-              ) : null}
-              <View style={{ height: keyboardVisible ? space.m : space.xxl }} />
-            </>
-          }
-        />
-      ) : (
-        <ScrollView
-          style={styles.body}
-          contentContainerStyle={styles.bodyContent}
-          onScroll={follow.onScroll}
-          scrollEventThrottle={64}
-          keyboardDismissMode="interactive"
-          ref={scrollRef}
-          onContentSizeChange={snapToNewest}
-        >
-          {body.view === "summary" ? (
-            <>
-              <AgySummaryCard summary={body.summary.summary} statusLabel={statusLabel} />
+              );
+            }}
+            onScroll={follow.onScroll}
+            scrollEventThrottle={64}
+            keyboardDismissMode="interactive"
+            ref={listRef}
+            onContentSizeChange={snapToNewest}
+            maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
+            ListFooterComponent={
+              <>
+                {pane?.status === "working" ? (
+                  <View style={styles.footerDots}>
+                    <TypingDots accessibilityLabel={copy.workingIndicator} />
+                  </View>
+                ) : null}
+                <View style={{ height: keyboardVisible ? space.m : space.xxl }} />
+              </>
+            }
+          />
+        ) : (
+          <ScrollView
+            style={styles.body}
+            contentContainerStyle={styles.bodyContent}
+            onScroll={follow.onScroll}
+            scrollEventThrottle={64}
+            keyboardDismissMode="interactive"
+            ref={scrollRef}
+            onContentSizeChange={snapToNewest}
+          >
+            {body.view === "summary" ? (
+              <>
+                <AgySummaryCard summary={body.summary.summary} statusLabel={statusLabel} />
+                <TerminalText text={transcript.text} />
+              </>
+            ) : (
               <TerminalText text={transcript.text} />
-            </>
-          ) : (
-            <TerminalText text={transcript.text} />
-          )}
-          {transcript.truncated ? (
-            <Text style={styles.truncateNotice}>{copy.truncateNotice}</Text>
-          ) : null}
-          {pane?.status === "working" ? (
-            <View style={styles.footerDots}>
-              <TypingDots accessibilityLabel={copy.workingIndicator} />
-            </View>
-          ) : null}
-          <View style={{ height: keyboardVisible ? space.m : space.xxl }} />
-        </ScrollView>
-      )}
+            )}
+            {transcript.truncated ? (
+              <Text style={styles.truncateNotice}>{copy.truncateNotice}</Text>
+            ) : null}
+            {pane?.status === "working" ? (
+              <View style={styles.footerDots}>
+                <TypingDots accessibilityLabel={copy.workingIndicator} />
+              </View>
+            ) : null}
+            <View style={{ height: keyboardVisible ? space.m : space.xxl }} />
+          </ScrollView>
+        )}
+        {follow.following ? null : (
+          <Pressable
+            onPress={jumpToTail}
+            style={[styles.jumpPill, elevation.float]}
+            accessibilityRole="button"
+            accessibilityLabel={copy.jumpToLatest}
+            hitSlop={8}
+          >
+            <Icon role="foldOpen" size={typeScale.body.fontSize} color={colors.ink} />
+          </Pressable>
+        )}
+      </View>
+
+      <AnimatedSheet visible={copySheet !== null} onClose={() => setCopySheet(null)}>
+        {(pan) => (
+          <View style={styles.copyPanel} {...pan}>
+            <View style={styles.copyGrabber} />
+            <PressableScale
+              onPress={confirmCopy}
+              style={styles.copyAction}
+              accessibilityLabel={copy.turnCopy}
+            >
+              <Icon role="copy" size={typeScale.body.fontSize} color={colors.ink} />
+              <Text style={styles.copyActionText}>{copy.turnCopy}</Text>
+            </PressableScale>
+            <PressableScale
+              onPress={() => setCopySheet(null)}
+              style={styles.copyAction}
+              accessibilityLabel={copy.quickKeyCancel}
+            >
+              <Text style={[styles.copyActionText, styles.copyCancelText]}>
+                {copy.quickKeyCancel}
+              </Text>
+            </PressableScale>
+          </View>
+        )}
+      </AnimatedSheet>
 
       <Hairline />
       <View style={[styles.composerRow, { paddingBottom: insets.bottom + space.s }]}>
@@ -544,67 +712,151 @@ function TextInputStyled(props: {
 }
 
 /** One structured conversation turn: user bubble right, assistant text left,
- * tool calls as collapsed state rows — tokens only, no inline colors. */
+ * thinking cards and tool calls as foldable rows — tokens only, no inline
+ * colors. Prose turns long-press into an honest copy of the raw text (plan
+ * 2026-10-25 AC-3); `clock`/`expanded` ride the memo comparator so only the
+ * changed row re-renders per streamed tick. */
 const ChatTurnRow = memo(
-  function ChatTurnRow(props: { turn: HerdrConversationTurn; pending?: boolean }) {
+  function ChatTurnRow(props: {
+    turn: HerdrConversationTurn;
+    pending?: boolean;
+    clock?: string | null;
+    expanded?: boolean;
+    onToggle: (id: string) => void;
+    onCopy: (turn: HerdrConversationTurn) => void;
+  }) {
     const { turn } = props;
     if (turn.kind === "user") {
       const bubble = (
         <View style={[styles.turnUser, props.pending === true && styles.turnUserPending]}>
           <Text style={styles.turnUserText}>{turn.text}</Text>
+          <TurnClock clock={props.clock} user />
         </View>
       );
       // An optimistic bubble skips the entrance — it must not replay the
       // fade when the agent's own record replaces it a beat later.
-      return props.pending === true ? bubble : <Entrance>{bubble}</Entrance>;
+      const row = props.pending === true ? bubble : <Entrance>{bubble}</Entrance>;
+      return <Pressable onLongPress={() => props.onCopy(turn)}>{row}</Pressable>;
     }
-  if (turn.kind === "assistant") {
+    if (turn.kind === "assistant") {
+      return (
+        <Entrance>
+          <Pressable onLongPress={() => props.onCopy(turn)}>
+            <View style={styles.turnAssistant}>
+              <MarkdownView text={turn.text} style={styles.turnAssistantText} />
+              <TurnClock clock={props.clock} />
+            </View>
+          </Pressable>
+        </Entrance>
+      );
+    }
+    if (turn.kind === "thinking") {
+      const open = props.expanded === true;
+      return (
+        <Entrance>
+          <Pressable
+            onPress={() => props.onToggle(turn.id)}
+            onLongPress={() => props.onCopy(turn)}
+            hitSlop={{ top: 6, bottom: 6, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel={copy.thinkingLabel}
+            accessibilityState={{ expanded: open }}
+          >
+            <View style={styles.thinkingCard}>
+              <View style={styles.thinkingHead}>
+                <Icon
+                  role={open ? "foldOpen" : "foldClosed"}
+                  size={typeScale.caption.fontSize}
+                  color={colors.inkFaint}
+                />
+                <Text style={styles.thinkingLabel}>{copy.thinkingLabel}</Text>
+                <TurnClock clock={props.clock} />
+              </View>
+              {open ? (
+                <View style={styles.thinkingBody}>
+                  <MarkdownView text={turn.text} />
+                </View>
+              ) : null}
+            </View>
+          </Pressable>
+        </Entrance>
+      );
+    }
+    const iconRole: IconRole =
+      turn.state === "error"
+        ? "statusError"
+        : turn.state === "running"
+          ? "statusRunning"
+          : "statusDone";
+    const iconColor =
+      turn.state === "error" ? colors.danger : turn.state === "running" ? colors.accent : colors.ok;
+    const open = props.expanded === true && turn.detail !== null;
     return (
       <Entrance>
-        <View style={styles.turnAssistant}>
-          <MarkdownView text={turn.text} style={styles.turnAssistantText} />
-        </View>
+        <Pressable
+          onPress={turn.detail !== null ? () => props.onToggle(turn.id) : undefined}
+          accessibilityRole={turn.detail !== null ? "button" : undefined}
+          accessibilityLabel={turn.title}
+          accessibilityState={turn.detail !== null ? { expanded: open } : undefined}
+        >
+          <View style={[styles.turnTool, turn.state === "error" && styles.turnToolError]}>
+            <View style={styles.turnToolGlyphWrap}>
+              <Icon role={iconRole} size={14} color={iconColor} />
+            </View>
+            <View style={styles.turnToolBody}>
+              <Text style={styles.turnToolTitle} numberOfLines={1}>
+                {turn.title}
+              </Text>
+              {turn.detail !== null ? (
+                <Text style={styles.turnToolDetail} numberOfLines={open ? undefined : 2}>
+                  {turn.detail}
+                </Text>
+              ) : null}
+              {open && turn.at !== null && relativeTimeKo(turn.at).length > 0 ? (
+                <Text style={styles.turnToolRelative}>{relativeTimeKo(turn.at)}</Text>
+              ) : null}
+            </View>
+            {turn.detail !== null ? (
+              <Icon role={open ? "foldOpen" : "foldClosed"} size={12} color={colors.inkGhost} />
+            ) : null}
+          </View>
+        </Pressable>
       </Entrance>
     );
-  }
-  const iconRole: IconRole =
-    turn.state === "error"
-      ? "statusError"
-      : turn.state === "running"
-        ? "statusRunning"
-        : "statusDone";
-  const iconColor =
-    turn.state === "error" ? colors.danger : turn.state === "running" ? colors.accent : colors.ok;
-  return (
-    <Entrance>
-      <View style={[styles.turnTool, turn.state === "error" && styles.turnToolError]}>
-        <View style={styles.turnToolGlyphWrap}>
-          <Icon role={iconRole} size={14} color={iconColor} />
-        </View>
-        <View style={styles.turnToolBody}>
-          <Text style={styles.turnToolTitle} numberOfLines={1}>
-            {turn.title}
-          </Text>
-          {turn.detail !== null ? (
-            <Text style={styles.turnToolDetail} numberOfLines={2}>
-              {turn.detail}
-            </Text>
-          ) : null}
-        </View>
-      </View>
-    </Entrance>
-  );
   },
   // Content compare, not reference: every fetch rebuilds the turn objects,
   // so only rows whose rendered content changed (the streaming tail)
   // re-render, and a long conversation no longer re-parses wholesale.
-  (a, b) => turnsEqual(a.turn, b.turn) && a.pending === b.pending,
+  // The handlers are screen-stable callbacks, safe to ignore here.
+  (a, b) =>
+    turnsEqual(a.turn, b.turn) &&
+    a.pending === b.pending &&
+    (a.clock ?? null) === (b.clock ?? null) &&
+    (a.expanded === true) === (b.expanded === true),
 );
 
+/** The HH:MM caption under a turn — quiet, decorative-tier proximity only
+ * when there is an honest stamp (plan 2026-10-25 AC-1). */
+function TurnClock(props: { clock?: string | null; user?: boolean }) {
+  if (props.clock == null || props.clock.length === 0) return null;
+  return (
+    <Text style={[styles.turnClock, props.user === true && styles.turnClockUser]}>
+      {props.clock}
+    </Text>
+  );
+}
+
 /** agy summary card (documented SQL summary only — the bodies are
- * undocumented blobs, so the ANSI transcript stays underneath). */
+ * undocumented blobs, so the ANSI transcript stays underneath). The
+ * modification time rides as a relative caption when present. */
 function AgySummaryCard(props: {
-  summary: { title: string; status: string; stepCount: number; preview: string };
+  summary: {
+    title: string;
+    status: string;
+    stepCount: number;
+    preview: string;
+    modifiedAt: string | null;
+  };
   statusLabel: (status: string) => string;
 }) {
   return (
@@ -623,6 +875,9 @@ function AgySummaryCard(props: {
           <Text style={styles.summaryPreview} numberOfLines={4}>
             {props.summary.preview}
           </Text>
+        ) : null}
+        {props.summary.modifiedAt !== null && relativeTimeKo(props.summary.modifiedAt).length > 0 ? (
+          <Text style={styles.summaryModified}>{relativeTimeKo(props.summary.modifiedAt)}</Text>
         ) : null}
       </View>
     </Entrance>
@@ -728,7 +983,7 @@ const styles = StyleSheet.create({
   },
   truncateNotice: {
     ...typeScale.caption,
-    color: colors.inkGhost,
+    color: colors.inkFaint,
     paddingTop: space.s,
   },
   composerRow: {
@@ -744,6 +999,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     paddingHorizontal: space.m,
     paddingVertical: space.xs,
+    minHeight: 44,
+    justifyContent: "center",
   },
   quickKeyText: {
     ...typeScale.caption,
@@ -769,18 +1026,45 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   sendButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: colors.cta,
     alignItems: "center",
     justifyContent: "center",
   },
   sendDisabled: { backgroundColor: colors.ctaDisabled },
+  bodyWrap: { flex: 1 },
+  jumpPill: {
+    position: "absolute",
+    right: COLUMN_GUTTER,
+    bottom: space.m,
+    width: 40,
+    height: 40,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    borderColor: colors.hairline,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dayHeader: {
+    ...typeScale.captionStrong,
+    color: colors.inkFaint,
+    textAlign: "center",
+    marginTop: space.xs,
+    marginBottom: space.s,
+  },
+  turnClock: {
+    ...typeScale.caption,
+    color: colors.inkFaint,
+    marginTop: space.xxs,
+  },
+  turnClockUser: { alignSelf: "flex-end" },
   turnUser: {
     alignSelf: "flex-end",
     maxWidth: "85%",
-    backgroundColor: colors.surface,
+    backgroundColor: colors.userBubble,
     borderColor: colors.hairline,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: radius.l,
@@ -837,6 +1121,90 @@ const styles = StyleSheet.create({
     color: colors.inkFaint,
     fontFamily: "Menlo",
   },
+  turnToolRelative: {
+    ...typeScale.caption,
+    color: colors.inkFaint,
+  },
+  thinkingCard: {
+    alignSelf: "flex-start",
+    maxWidth: "92%",
+    backgroundColor: colors.surface,
+    borderColor: colors.hairline,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.m,
+    paddingHorizontal: space.m,
+    paddingVertical: space.s,
+    marginBottom: space.s,
+  },
+  thinkingHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.xs,
+  },
+  thinkingLabel: {
+    ...typeScale.captionStrong,
+    color: colors.inkMute,
+  },
+  thinkingBody: {
+    marginTop: space.s,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.hairline,
+    paddingTop: space.s,
+  },
+  connectionBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.s,
+    marginHorizontal: COLUMN_GUTTER,
+    marginTop: space.s,
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.hairline,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.m,
+    paddingHorizontal: space.m,
+    paddingVertical: space.s,
+  },
+  connectionFailed: {
+    backgroundColor: colors.surface,
+    borderColor: colors.danger,
+  },
+  connectionText: {
+    ...typeScale.caption,
+    color: colors.inkMute,
+    flex: 1,
+  },
+  connectionWarnText: { color: colors.warn },
+  connectionFailedText: { color: colors.danger },
+  copyPanel: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.l,
+    borderTopRightRadius: radius.l,
+    paddingHorizontal: COLUMN_GUTTER,
+    paddingTop: space.s,
+    paddingBottom: space.xl,
+    gap: space.xs,
+  },
+  copyGrabber: {
+    alignSelf: "center",
+    width: 36,
+    height: 4,
+    borderRadius: radius.xxs,
+    backgroundColor: colors.inkGhost,
+    marginBottom: space.s,
+  },
+  copyAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.s,
+    minHeight: 44,
+    paddingHorizontal: space.s,
+    borderRadius: radius.m,
+  },
+  copyActionText: {
+    ...typeScale.body,
+    color: colors.ink,
+  },
+  copyCancelText: { color: colors.inkMute },
   summaryCard: {
     backgroundColor: colors.surface,
     borderColor: colors.hairline,
@@ -862,5 +1230,9 @@ const styles = StyleSheet.create({
   summaryPreview: {
     ...typeScale.caption,
     color: colors.inkMute,
+  },
+  summaryModified: {
+    ...typeScale.caption,
+    color: colors.inkFaint,
   },
 });

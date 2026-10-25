@@ -18,6 +18,13 @@ import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
  * bottom" and auto-follow re-attaches. */
 export const AUTOSCROLL_BOTTOM_EPSILON = 48;
 
+/** How long an explicit jump (the pill) owns the verdict after attaching:
+ * a programmatic glide can emit onScroll events that still read off-bottom
+ * (virtualized lists estimate, MVC anchors) — without this window the user's
+ * tap would attach and instantly detach, leaving the pill stuck (live
+ * emulator finding, 2026-10-25). */
+export const JUMP_SUPPRESS_MS = 600;
+
 /**
  * Autoscroll follow state machine: the view follows the tail while the user
  * is at (or near) the bottom; scrolling up detaches, returning to the bottom
@@ -31,6 +38,7 @@ export function useFollowScroll() {
   const [following, setFollowing] = useState(true);
   const followingRef = useRef(true);
   const frame = useRef<number | null>(null);
+  const jumpAt = useRef(0);
   // Unmount mid-scroll: never flush into a dead screen.
   useEffect(
     () => () => {
@@ -48,19 +56,24 @@ export function useFollowScroll() {
       const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
       const next = nextFollowState(followingRef.current, distanceFromBottom);
       if (next === followingRef.current) return;
+      // A detach verdict inside the jump window is the glide's own noise —
+      // the tap is the newer verdict and owns this beat (JUMP_SUPPRESS_MS).
+      if (!next && Date.now() - jumpAt.current < JUMP_SUPPRESS_MS) return;
       followingRef.current = next;
       if (frame.current !== null) return; // a flush is already scheduled
       frame.current = requestAnimationFrame(flush);
     },
     [flush],
   );
-  /** Explicit re-attach (the jump-to-bottom pill): follow NOW, and drop any
-   * scheduled flush — the user's tap is the newer verdict. */
+  /** Explicit re-attach (the jump-to-bottom pill): follow NOW, drop any
+   * scheduled flush, and start the jump window — the user's tap is the newer
+   * verdict. */
   const followNow = useCallback(() => {
     if (frame.current !== null) {
       cancelAnimationFrame(frame.current);
       frame.current = null;
     }
+    jumpAt.current = Date.now();
     followingRef.current = true;
     setFollowing(true);
   }, []);

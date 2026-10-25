@@ -115,6 +115,18 @@ export function TerminalScreen(props: {
         </View>
         {pane !== null ? <StatusPill status={pane.status} /> : null}
       </View>
+      {props.state.connection.status === "waiting" ? (
+        <View style={styles.connectionBanner}>
+          <Icon role="busy" size={typeScale.caption.fontSize} color={colors.warn} />
+          <Text style={[styles.connectionText, styles.connectionWarnText]}>{copy.reconnecting}</Text>
+        </View>
+      ) : null}
+      {props.state.connection.status === "failed" ? (
+        <View style={[styles.connectionBanner, styles.connectionFailed]}>
+          <Icon role="attention" size={typeScale.caption.fontSize} color={colors.danger} />
+          <Text style={[styles.connectionText, styles.connectionFailedText]}>{copy.connLost}</Text>
+        </View>
+      ) : null}
       <ScrollView
         style={styles.body}
         contentContainerStyle={styles.bodyContent}
@@ -171,4 +183,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: COLUMN_GUTTER,
     paddingTop: space.m,
   },
+  connectionBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.s,
+    marginHorizontal: COLUMN_GUTTER,
+    marginBottom: space.s,
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.hairline,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.m,
+    paddingHorizontal: space.m,
+    paddingVertical: space.s,
+  },
+  connectionFailed: {
+    backgroundColor: colors.surface,
+    borderColor: colors.danger,
+  },
+  connectionText: {
+    ...typeScale.caption,
+    color: colors.inkMute,
+    flex: 1,
+  },
+  connectionWarnText: { color: colors.warn },
+  connectionFailedText: { color: colors.danger },
 });

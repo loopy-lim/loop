@@ -83,3 +83,31 @@ export function dayLabel(iso: string): string {
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
+
+/** Per-turn time captions (plan 2026-10-25 AC-1): the clock label under each
+ * conversation turn, plus a calendar-day header whenever the day changes —
+ * the header rides the FIRST turn of a local day, including the first turn
+ * with a valid stamp. Unstamped turns carry null marks (no header, no clock)
+ * so a pending bubble never fabricates a time. Structural input: any turn
+ * shape with an RFC 3339 `at` (the wire turn is one such). */
+export type TurnTimeMark = { dateLabel: string | null; clock: string | null };
+
+export function turnTimeMarks(turns: readonly { at: string | null }[]): TurnTimeMark[] {
+  const marks: TurnTimeMark[] = [];
+  let lastDay: string | null = null;
+  for (const turn of turns) {
+    if (turn.at === null) {
+      marks.push({ dateLabel: null, clock: null });
+      continue;
+    }
+    const key = dayKey(turn.at);
+    if (key === "") {
+      marks.push({ dateLabel: null, clock: null });
+      continue;
+    }
+    const dateLabel = key !== lastDay ? dayLabel(turn.at) || null : null;
+    lastDay = key;
+    marks.push({ dateLabel, clock: clockTime(turn.at) || null });
+  }
+  return marks;
+}

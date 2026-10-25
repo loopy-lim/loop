@@ -7,6 +7,7 @@
 
 import { useMemo } from "react";
 import {
+  ActivityIndicator,
   FlatList,
   Platform,
   StyleSheet,
@@ -58,7 +59,16 @@ export function HerdScreen(props: {
           </View>
         )}
         ListEmptyComponent={
-          loading ? undefined : <HerdEmpty state={state} />
+          loading ? (
+            // First-connection loading: an honest quiet indicator instead of
+            // a bare empty body (plan 2026-10-25 AC-8).
+            <View style={styles.loadingRow}>
+              <ActivityIndicator color={colors.inkFaint} />
+              <Text style={styles.loadingText}>{copy.connecting}</Text>
+            </View>
+          ) : (
+            <HerdEmpty state={state} />
+          )
         }
         // Android/Fabric (RN 0.88, live-verified 2026-10-22): mounting a
         // RefreshControl here blanks the ENTIRE Herd subtree — the JS renders
@@ -129,6 +139,15 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: COLUMN_GUTTER,
     paddingBottom: 96,
+  },
+  loadingRow: {
+    alignItems: "center",
+    gap: space.s,
+    paddingTop: space.xxl,
+  },
+  loadingText: {
+    ...typeScale.caption,
+    color: colors.inkFaint,
   },
   row: {
     flexDirection: "row",

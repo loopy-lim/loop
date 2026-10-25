@@ -16,6 +16,7 @@ import {
   turnsEqual,
 } from "../src/herdr/conversation";
 import type { PendingPrompt } from "../src/herdr/conversation";
+import { turnTimeMarks } from "../src/features/time-format";
 import type { HerdrConversation, HerdrConversationTurn } from "../src/herdr/wire";
 
 const PANE = "w1:p1";
@@ -311,5 +312,69 @@ describe("planRefresh", () => {
       transcript: true,
       conversation: true,
     });
+  });
+});
+
+// ——— plan 2026-10-25: time marks, thinking turns ————————————————
+
+describe("turnTimeMarks (plan 2026-10-25 AC-1)", () => {
+  test("first stamped turn carries a day header, same-day turns do not", () => {
+    const marks = turnTimeMarks([
+      { at: "2026-10-25T09:00:00Z" },
+      { at: "2026-10-25T09:05:00Z" },
+      { at: "2026-10-25T11:30:00Z" },
+    ]);
+    expect(marks[0]?.dateLabel).not.toBeNull();
+    expect(marks[1]?.dateLabel).toBeNull();
+    expect(marks[2]?.dateLabel).toBeNull();
+    for (const mark of marks) expect(mark.clock).not.toBeNull();
+  });
+
+  test("a different calendar day flips the header again", () => {
+    const marks = turnTimeMarks([
+      { at: "2026-10-24T23:59:00Z" },
+      { at: "2026-10-25T00:01:00Z" },
+    ]);
+    expect(marks[0]?.dateLabel).not.toBeNull();
+    expect(marks[1]?.dateLabel).not.toBeNull();
+  });
+
+  test("unstamped turns carry null marks and never fabricate a header", () => {
+    const marks = turnTimeMarks([{ at: null }, { at: "2026-10-25T09:00:00Z" }, { at: null }]);
+    expect(marks[0]).toEqual({ dateLabel: null, clock: null });
+    expect(marks[1]?.dateLabel).not.toBeNull();
+    expect(marks[2]).toEqual({ dateLabel: null, clock: null });
+  });
+
+  test("unparseable stamps degrade to null marks", () => {
+    const marks = turnTimeMarks([{ at: "not-a-date" }]);
+    expect(marks[0]).toEqual({ dateLabel: null, clock: null });
+  });
+});
+
+describe("thinking turns (plan 2026-10-25 AC-7)", () => {
+  const thinking: HerdrConversationTurn = {
+    kind: "thinking",
+    id: "a1:k3",
+    text: "도구를 먼저 확인해야지",
+    at: "2026-10-25T09:00:00Z",
+  };
+
+  test("chatBody keeps a turns view that contains thinking turns", () => {
+    const conversation: HerdrConversation = {
+      ...turnsConversation,
+      turns: [thinking],
+    };
+    const body = chatBody(PANE, conversation);
+    expect(body.view).toBe("turns");
+  });
+
+  test("turnsEqual compares thinking turns by text", () => {
+    expect(turnsEqual(thinking, { ...thinking })).toBe(true);
+    expect(turnsEqual(thinking, { ...thinking, text: "다른 생각" })).toBe(false);
+    expect(turnsEqual(thinking, { ...thinking, id: "other" })).toBe(false);
+    expect(
+      turnsEqual(thinking, { kind: "assistant", id: thinking.id, text: thinking.text, at: null }),
+    ).toBe(false);
   });
 });

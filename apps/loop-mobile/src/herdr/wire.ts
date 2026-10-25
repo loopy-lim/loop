@@ -70,10 +70,12 @@ export type HerdrPaneReading = {
 };
 
 /** One structured conversation turn (agent-session adapters; the gateway
- * normalizes claude/codex session files into this shape). */
+ * normalizes claude/codex session files into this shape). `thinking` carries
+ * the agent's reasoning blocks — additive kind; older gateways never send it. */
 export type HerdrConversationTurn =
   | { kind: "user"; id: string; text: string; at: string | null }
   | { kind: "assistant"; id: string; text: string; at: string | null }
+  | { kind: "thinking"; id: string; text: string; at: string | null }
   | {
       kind: "tool";
       id: string;
